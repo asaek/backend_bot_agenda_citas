@@ -7,7 +7,7 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
-from main import FIXED_REPLY, app
+from main import FIXED_REPLY, app, normalize_recipient_number
 from whatsapp_client import GRAPH_API_VERSION, WhatsAppClient
 
 
@@ -21,6 +21,18 @@ class FakeWhatsAppClient:
 
 
 class WebhookTests(unittest.TestCase):
+    def test_normalizes_mexico_recipient_number_for_sending(self) -> None:
+        self.assertEqual(
+            normalize_recipient_number("5217531363338"),
+            "527531363338",
+        )
+
+    def test_keeps_other_country_formats_unchanged(self) -> None:
+        self.assertEqual(
+            normalize_recipient_number("5491100000000"),
+            "5491100000000",
+        )
+
     def test_verification_uses_whatsapp_path(self) -> None:
         with patch.dict(os.environ, {"WHATSAPP_VERIFY_TOKEN": "test-token"}):
             with TestClient(app) as client:

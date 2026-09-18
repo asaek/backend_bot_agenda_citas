@@ -26,6 +26,13 @@ class IncomingTextMessage:
     text: str
 
 
+def normalize_recipient_number(phone_number: str) -> str:
+    """Adapta el identificador mexicano de WhatsApp al formato de envio."""
+    if phone_number.startswith("521") and len(phone_number) == 13:
+        return "52" + phone_number[3:]
+    return phone_number
+
+
 def extract_text_messages(payload: Any) -> list[IncomingTextMessage]:
     """Extrae mensajes de texto del formato de eventos de WhatsApp Cloud API."""
     if not isinstance(payload, dict):
@@ -117,7 +124,10 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     for message in messages:
         print(json.dumps(asdict(message), ensure_ascii=False), flush=True)
         try:
-            await whatsapp_client.send_text(to=message.sender, body=FIXED_REPLY)
+            await whatsapp_client.send_text(
+                to=normalize_recipient_number(message.sender),
+                body=FIXED_REPLY,
+            )
         except WhatsAppConfigurationError as error:
             raise HTTPException(status_code=500, detail=str(error)) from error
         except httpx.HTTPError as error:
