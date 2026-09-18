@@ -2,7 +2,8 @@
 
 ## Estado
 
-Etapa 2 implementada localmente. La prueba con Meta queda pendiente.
+Etapa 2 verificada con Meta desde la Raspberry Pi. La respuesta fija fue aceptada
+por WhatsApp Cloud API despues de renovar el token de acceso.
 
 ## Componentes
 

@@ -1,7 +1,8 @@
 # WhatsApp Chatbot
 
-Etapa 2 del backend: recibir mensajes de texto de WhatsApp Cloud API y responder
-con un texto fijo de prueba mediante FastAPI.
+Etapa 4, incremento 2: definir el contrato de LLM, preparar el adaptador de
+Groq y construir el contexto desde el historial reciente. El webhook todavia
+conserva la respuesta fija mientras se completa el ciclo de LLM y WhatsApp.
 
 ## 1. Instalar dependencias
 
@@ -16,6 +17,23 @@ excluido de Git. Usa `.env.example` como referencia y reemplaza sus valores por
 los reales. El Verify Token debe coincidir con el configurado en Meta.
 
 Las variables exportadas en la shell tienen prioridad sobre `.env`.
+
+`DATABASE_PATH` define la ruta de la base SQLite. Si no se configura, se usa
+`data/chatbot.sqlite3`. La carpeta `data/` esta excluida de Git.
+
+El adaptador de Groq usa estas variables adicionales:
+
+- `LLM_PROVIDER=groq`
+- `LLM_API_KEY`
+- `LLM_MODEL`
+- `LLM_BASE_URL=https://api.groq.com/openai/v1`
+- `LLM_TIMEOUT_SECONDS=20`
+- `LLM_MAX_HISTORY_MESSAGES=30`
+- `LLM_MAX_OUTPUT_TOKENS=500`
+
+En este incremento el adaptador se prueba de forma aislada, el contexto se
+construye desde `ConversationService` y todavia no se invoca el LLM desde el
+webhook.
 
 ## 3. Iniciar el servidor
 
@@ -50,10 +68,16 @@ curl -X POST http://127.0.0.1:8000/webhook/whatsapp \
 ```
 
 La respuesta debe ser `{"status":"ok"}`. El backend extrae el remitente, el ID,
-el tipo y el texto, y envia esta respuesta fija:
+el tipo y el texto, identifica o crea el paciente de prueba, guarda el mensaje y
+envia esta respuesta fija:
 `Hola, recibimos tu mensaje. Esta es una respuesta de prueba.`
 
-Para probar la construccion de la solicitud de salida sin enviar un mensaje real:
+Un segundo evento con el mismo valor de `from` reutiliza el paciente y la
+conversacion activa. Si Meta reenvia el mismo `id`, el backend no duplica la
+respuesta cuando ya fue enviada.
+
+Para probar persistencia, continuidad, idempotencia y la construccion de la
+solicitud de salida sin enviar un mensaje real:
 
 ```bash
 uv run python -m unittest discover -s tests -v
@@ -63,8 +87,8 @@ uv run python -m unittest discover -s tests -v
 
 - `GET /`: comprobacion sencilla del servidor.
 - `GET /webhook/whatsapp`: verificacion solicitada por Meta.
-- `POST /webhook/whatsapp`: recepcion de eventos enviados por Meta y respuesta
-  fija para mensajes de texto.
+- `POST /webhook/whatsapp`: recepcion de eventos enviados por Meta, persistencia
+  de mensajes y respuesta fija para mensajes de texto.
 
 Los eventos que no sean mensajes de texto, como estados, imagenes o audios, se
 ignoran temporalmente. Las credenciales solo deben existir como variables de
@@ -73,3 +97,6 @@ entorno en la Raspberry Pi:
 - `WHATSAPP_VERIFY_TOKEN`
 - `WHATSAPP_ACCESS_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
+
+`DATABASE_PATH` no es una credencial, pero debe apuntar a una ruta persistente en
+la Raspberry Pi.

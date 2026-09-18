@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -9,21 +9,35 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from conversation_service import (
+    FIXED_REPLY,
+    ConversationContext,
+    ConversationService,
+    IncomingTextMessage,
+)
+from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
 from whatsapp_client import WhatsAppClient, WhatsAppConfigurationError
 
 
 load_dotenv(Path(__file__).with_name(".env"))
 
 app = FastAPI(title="WhatsApp Chatbot")
-FIXED_REPLY = "Hola, recibimos tu mensaje. Esta es una respuesta de prueba."
 
 
-@dataclass(frozen=True)
-class IncomingTextMessage:
-    sender: str
-    message_id: str
-    message_type: str
-    text: str
+def create_conversation_service() -> ConversationService:
+    database_path = os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)
+    return ConversationService(SQLiteDatabase(database_path))
+
+
+def extract_provider_message_id(result: dict[str, Any]) -> str | None:
+    messages = result.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    first_message = messages[0]
+    if not isinstance(first_message, dict):
+        return None
+    message_id = first_message.get("id")
+    return message_id if isinstance(message_id, str) else None
 
 
 def normalize_recipient_number(phone_number: str) -> str:
@@ -110,7 +124,7 @@ async def verify_webhook(
 
 @app.post("/webhook/whatsapp")
 async def receive_webhook(request: Request) -> dict[str, str]:
-    """Procesa mensajes de texto y envia una respuesta fija de prueba."""
+    """Procesa mensajes de texto, conserva la conversacion y responde."""
     try:
         payload = await request.json()
     except json.JSONDecodeError as error:
@@ -120,20 +134,34 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     if not messages:
         return {"status": "ok"}
 
+    conversation_service = create_conversation_service()
     whatsapp_client = WhatsAppClient()
     for message in messages:
+        context: ConversationContext = conversation_service.receive_message(message)
         print(json.dumps(asdict(message), ensure_ascii=False), flush=True)
+        if context.reply_status == "sent":
+            continue
+
+        reply = conversation_service.build_reply(context)
         try:
-            await whatsapp_client.send_text(
+            result = await whatsapp_client.send_text(
                 to=normalize_recipient_number(message.sender),
-                body=FIXED_REPLY,
+                body=reply,
             )
         except WhatsAppConfigurationError as error:
+            conversation_service.record_reply_failed(context, reply)
             raise HTTPException(status_code=500, detail=str(error)) from error
         except httpx.HTTPError as error:
+            conversation_service.record_reply_failed(context, reply)
             raise HTTPException(
                 status_code=502,
                 detail="No se pudo enviar la respuesta mediante WhatsApp Cloud API",
             ) from error
+
+        conversation_service.record_reply_sent(
+            context,
+            body=reply,
+            provider_message_id=extract_provider_message_id(result),
+        )
 
     return {"status": "ok"}

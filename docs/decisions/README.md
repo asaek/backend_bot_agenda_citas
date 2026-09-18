@@ -10,4 +10,5 @@ indique cual decision anterior queda obsoleta.
 ## Indice
 
 - [0001 - Backend con Python y FastAPI](./0001-backend-stack.md)
-
+- [0002 - SQLite para la persistencia del MVP](./0002-sqlite-for-persistence-mvp.md)
+- [0003 - Contrato LLM y primera implementacion con Groq](./0003-llm-provider-contract-and-groq.md)

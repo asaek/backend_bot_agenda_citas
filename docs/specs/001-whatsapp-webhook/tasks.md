@@ -22,25 +22,25 @@ fija y no usa LLM ni Conversation Service.
 - [x] Crear `WhatsAppClient` con `WHATSAPP_ACCESS_TOKEN` y
   `WHATSAPP_PHONE_NUMBER_ID`.
 - [x] Construir la solicitud de respuesta fija mediante Cloud API.
-- [ ] Verificar localmente despues de sincronizar la Raspberry Pi.
+- [x] Verificar localmente despues de sincronizar la Raspberry Pi.
 
 ## Conexion con Meta
 
-- [ ] Elegir el Verify Token de desarrollo.
-- [ ] Instalar o confirmar la disponibilidad de ngrok.
-- [ ] Iniciar Uvicorn en `localhost:8000` en la Raspberry Pi.
-- [ ] Crear el tunel HTTPS hacia el puerto 8000.
-- [ ] Registrar `https://unthread-foam-outlast.ngrok-free.dev/webhook/whatsapp` en Meta.
-- [ ] Introducir el mismo Verify Token en Meta.
-- [ ] Completar la verificacion del webhook.
-- [ ] Mantener suscrito unicamente el campo `messages`.
+- [x] Elegir el Verify Token de desarrollo.
+- [x] Instalar o confirmar la disponibilidad de ngrok.
+- [x] Iniciar Uvicorn en `localhost:8000` en la Raspberry Pi.
+- [x] Crear el tunel HTTPS hacia el puerto 8000.
+- [x] Registrar `https://unthread-foam-outlast.ngrok-free.dev/webhook/whatsapp` en Meta.
+- [x] Introducir el mismo Verify Token en Meta.
+- [x] Completar la verificacion del webhook.
+- [x] Mantener suscrito unicamente el campo `messages`.
 
 ## Verificacion real
 
-- [ ] Enviar `Hola` desde el numero personal al numero de prueba.
-- [ ] Confirmar que el backend parsea el mensaje de texto.
-- [ ] Confirmar que WhatsApp recibe la respuesta fija.
-- [ ] Guardar un ejemplo anonimizado de la estructura para la siguiente
+- [x] Enviar mensajes desde el numero personal al numero de prueba.
+- [x] Confirmar que el backend parsea los mensajes de texto.
+- [x] Confirmar que WhatsApp Cloud API acepta la respuesta fija.
+- [x] Guardar un ejemplo anonimizado de la estructura para la siguiente
   especificacion.
-- [ ] Revisar todos los criterios de aceptacion.
-- [ ] Cambiar el estado de la especificacion a `Verificado`.
+- [x] Revisar todos los criterios de aceptacion.
+- [x] Cambiar el estado de la especificacion a `Verificado`.

@@ -2,8 +2,8 @@
 
 ## Estado
 
-Etapa 2 implementada localmente. Falta verificarla con Meta y ejecutar la prueba
-real desde la Raspberry Pi.
+Etapa 2 verificada en la Raspberry Pi con eventos reales de Meta. El envio real
+fue completado despues de renovar el token de WhatsApp Cloud API.
 
 ## Problema
 

@@ -19,10 +19,15 @@ ngrok
 FastAPI + Uvicorn
     |
     v
-    FastAPI parsea mensajes de texto
+FastAPI parsea mensajes de texto
     |
     v
-    WhatsAppClient -> WhatsApp Cloud API
+Conversation Service
+    |
+    +-- Repositories -> SQLite
+    |
+    v
+WhatsAppClient -> WhatsApp Cloud API
 ```
 
 Durante el desarrollo local, ngrok proporcionara la URL publica que Meta
@@ -74,14 +79,37 @@ parte de la arquitectura de produccion.
 
 ### FastAPI
 
-Define los endpoints HTTP y transforma las solicitudes en llamadas al codigo
-del backend. En esta etapa extrae mensajes de texto y solicita una respuesta fija.
+Define los endpoints HTTP y transforma las solicitudes en llamadas al codigo del
+backend. Extrae mensajes de texto y coordina el `ConversationService`.
+
+### Conversation Service
+
+Identifica al paciente de prueba por su numero de WhatsApp, busca o crea una
+conversacion activa, conserva el historial y construye el contexto para el LLM.
+El contexto comienza con las reglas del asistente y usa los mensajes mas
+recientes persistidos. En esta etapa todavia devuelve la respuesta fija de
+prueba.
+
+### Persistence y repositories
+
+`persistence.py` administra conexiones, esquema y transacciones SQLite.
+`repositories.py` encapsula las operaciones de pacientes, conversaciones y
+mensajes. La ruta de la base se configura mediante `DATABASE_PATH`.
 
 ### WhatsAppClient
 
 Construye la solicitud autenticada de tipo texto para WhatsApp Cloud API usando
 `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID`. No contiene logica de
 conversacion.
+
+### LLMProvider
+
+Define el contrato asincrono `generate(messages)` para que la logica
+conversacional no dependa de un proveedor concreto. En el primer incremento se
+implementa `GroqLLMProvider` mediante `httpx` y variables de entorno.
+
+El adaptador esta preparado, pero todavia no participa en el flujo del webhook;
+la respuesta fija se conserva hasta completar la integracion del proveedor.
 
 ### Uvicorn
 
@@ -155,9 +183,12 @@ LLM redacta la respuesta
 
 ## Limites actuales
 
-- El backend no toma decisiones conversacionales.
-- El webhook no guarda informacion.
-- El webhook solo responde con un texto fijo de prueba.
+- El backend solo mantiene estado conversacional basico.
+- La respuesta sigue siendo un texto fijo de prueba; el adaptador LLM aun no esta
+  conectado al webhook.
+- El contexto usa una ventana acotada del historial y no incluye respuestas de
+  WhatsApp registradas como fallidas.
+- SQLite se usa para una unica instalacion del MVP y no para multiples replicas.
 - Los secretos se proporcionan mediante variables de entorno y no se guardan
   en el repositorio.
 

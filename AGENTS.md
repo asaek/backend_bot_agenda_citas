@@ -6,6 +6,12 @@
 - Application endpoints live in `main.py`.
 - Keep the implementation incremental; do not add databases, AI frameworks, queues, or external services until a task requires them.
 
+## SDD Documentation
+
+- Every change to technology, project scope, or an existing or new feature must update the SDD in the same change before the work is considered complete.
+- Record technology decisions in `docs/decisions/` and update the relevant specification, architecture, project scope, and task documents under `docs/`.
+- Keep the SDD consistent with the implemented behavior; documentation must not describe a proposed decision as accepted unless it has been adopted by the implementation.
+
 ## Commands
 
 - Install/synchronize dependencies: `uv sync`

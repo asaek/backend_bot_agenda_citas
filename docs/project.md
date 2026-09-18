@@ -42,38 +42,57 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Verificar una Callback URL con Meta.
 - Recibir un evento de WhatsApp en `POST /webhook/whatsapp`.
 - Parsear mensajes de texto y enviar una respuesta fija de prueba.
+- Identificar pacientes de prueba por su numero de WhatsApp.
+- Guardar pacientes, conversaciones y mensajes en SQLite.
+- Mantener una conversacion activa entre varias solicitudes y reinicios.
+- Construir el contexto de chat desde el historial reciente y las reglas del
+  asistente.
 
 ## Estrategia de implementacion por cortes
 
 El proyecto se construira y verificara una seccion a la vez. No se comenzara un
 corte nuevo hasta cerrar el corte activo.
 
-### Corte activo: webhook y respuesta fija de WhatsApp
+### Corte anterior: webhook y respuesta fija de WhatsApp
 
-El objetivo actual termina cuando un mensaje real enviado desde una cuenta de
-WhatsApp de prueba llega a FastAPI, se parsea y recibe una respuesta fija. Las
-tareas de este corte estan en `specs/001-whatsapp-webhook/tasks.md`.
+El corte termina cuando un mensaje enviado desde una cuenta de WhatsApp de prueba
+llega a FastAPI, se parsea y recibe una respuesta fija. La verificacion real con
+Meta y Raspberry Pi fue completada; las tareas historicas permanecen en
+`specs/001-whatsapp-webhook/tasks.md`.
+
+### Corte anterior: persistencia y Conversation Service
+
+El objetivo es conservar pacientes, conversaciones y mensajes para que un segundo
+mensaje del mismo numero reutilice el contexto basico despues de varias
+solicitudes o de un reinicio. Las tareas de este corte estan en
+`specs/002-persistence-conversation-service/tasks.md`.
+
+### Corte activo: contexto para el LLM
+
+Los dos primeros incrementos de la etapa 4 definen una frontera independiente
+del proveedor, preparan la conexion con Groq y construyen el contexto desde el
+historial reciente. El webhook conserva temporalmente la respuesta fija. Las
+tareas estan en `specs/003-llm-provider-groq/tasks.md`.
 
 ### Cortes futuros
 
 Los siguientes temas se especificaran por separado cuando corresponda:
 
-1. Persistencia y Conversation Service.
-2. Conexion con un LLM y ciclo basico del agente.
-3. Memoria conversacional.
-4. Herramientas y Google Calendar.
-5. RAG con PostgreSQL y pgvector.
-6. Automatizaciones externas y despliegue.
+1. Integracion del LLM en el ciclo basico del agente.
+2. Memoria conversacional avanzada.
+3. Herramientas y Google Calendar.
+4. RAG con PostgreSQL y pgvector.
+5. Automatizaciones externas y despliegue.
 
 Esta lista expresa una direccion general y no autoriza su implementacion durante
 el corte actual.
 
 ## Fuera del alcance actual
 
-- Base de datos y memoria de conversaciones.
-- LLM, agente, tool calling y RAG.
+- Integracion del LLM en el webhook, agente, tool calling y RAG.
 - Integraciones con n8n.
 - Redis y procesamiento mediante colas.
+- PostgreSQL y pgvector.
 - Despliegue de produccion.
 
 ## Flujo esperado del MVP tecnico
