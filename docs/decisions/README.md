@@ -11,4 +11,9 @@ indique cual decision anterior queda obsoleta.
 
 - [0001 - Backend con Python y FastAPI](./0001-backend-stack.md)
 - [0002 - SQLite para la persistencia del MVP](./0002-sqlite-for-persistence-mvp.md)
-- [0003 - Contrato LLM y primera implementacion con Groq](./0003-llm-provider-contract-and-groq.md)
+- [0003 - Contrato de proveedor LLM](./0003-llm-provider.md)
+- [0004 - Fake LLM para pruebas automatizadas](./0004-fake-llm-for-automated-tests.md)
+- [0005 - Frontera del dominio de citas y herramientas](./0005-calendar-domain-boundary.md)
+- [0006 - Contratos tipados para herramientas de calendario](./0006-calendar-tool-contracts.md)
+- [0007 - Validacion de herramientas antes del proveedor](./0007-pre-provider-tool-validation.md)
+- [0008 - Errores publicos para las herramientas de agenda](./0008-public-calendar-errors.md)

@@ -1,8 +1,8 @@
 # WhatsApp Chatbot
 
-Etapa 4, incremento 3: definir el contrato de LLM, preparar el adaptador
-compatible con OpenAI para Groq y OpenRouter, construir el contexto desde el
-historial reciente e integrar el ciclo de LLM y WhatsApp.
+Etapa 4: agente LLM basico con un contrato independiente del proveedor,
+persistencia conversacional y pruebas sin consumir API mediante un
+`FakeLLMProvider`.
 
 ## 1. Instalar dependencias
 
@@ -34,6 +34,15 @@ El adaptador compatible con OpenAI usa estas variables adicionales:
 
 Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
 `LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
+
+El agente actual solo genera texto y no incluye herramientas, RAG ni memoria
+semantica. La suite automatizada usa un proveedor falso y no requiere estas
+credenciales.
+
+El corte activo define el modelo de dominio, los contratos tipados de las cinco
+herramientas, la validacion previa al proveedor, los errores publicos y
+`CalendarProvider`. Todavia no ejecuta operaciones ni se conecta a Google
+Calendar.
 
 El webhook crea el proveedor, recupera el historial desde `ConversationService`,
 genera la respuesta, la envia por WhatsApp y registra el resultado. Un fallo de
@@ -80,11 +89,16 @@ conversacion activa. Si Meta reenvia el mismo `id`, el backend no duplica la
 respuesta cuando ya fue enviada.
 
 Para probar persistencia, continuidad, idempotencia y la construccion de la
-solicitud de salida sin enviar un mensaje real:
+solicitud de salida sin enviar un mensaje real ni consumir un LLM:
 
 ```bash
 uv run python -m unittest discover -s tests -v
 ```
+
+La suite usa un proveedor LLM falso, un cliente falso de WhatsApp y una base
+SQLite temporal. Tambien verifica la transformacion del historial, el mensaje
+actual, las respuestas `sent`, los errores del LLM, los webhooks duplicados y la
+verificacion de Meta.
 
 ## Endpoints
 

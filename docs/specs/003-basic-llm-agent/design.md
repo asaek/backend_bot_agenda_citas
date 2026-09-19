@@ -1,8 +1,9 @@
-# Diseno - Contrato LLM y proveedores compatibles con OpenAI
+# Diseno - Agente LLM basico
 
 ## Estado
 
-Implementado y verificado para los tres primeros incrementos de la etapa 4.
+Implementado y verificado para el agente LLM basico y su ciclo de pruebas sin
+API.
 
 ## Componentes
 
@@ -52,6 +53,17 @@ con OpenAI:
 El cliente HTTP puede inyectarse. Esto evita llamadas reales durante las
 pruebas y permite probar Groq y OpenRouter con el mismo codigo.
 
+## Pruebas sin API
+
+`tests/fakes.py` contiene `FakeLLMProvider`, que cumple el contrato
+`LLMProvider`, conserva cada secuencia de `ChatMessage` recibida y expone el
+numero de llamadas mediante `call_count`. Su respuesta y su error son
+configurables.
+
+Las pruebas del webhook sustituyen las fabricas de dependencias de `main.py`,
+usan `FakeWhatsAppClient` y una base SQLite temporal. Asi verifican el agente en
+su frontera HTTP sin consumir una API ni enviar mensajes reales.
+
 ## Manejo de errores
 
 Los errores de `httpx` se convierten en `LLMProviderError`. La respuesta JSON se
@@ -89,3 +101,6 @@ respuesta controlada se registra como `sent`; si tambien falla, queda como
 `failed`. Como las respuestas fallidas no forman parte del contexto, el
 siguiente webhook puede reintentar la generacion sin presentar una respuesta no
 entregada al modelo.
+
+Cuando la respuesta ya fue registrada como `sent`, `main.py` omite la
+generacion y el envio para un webhook duplicado del mismo mensaje entrante.

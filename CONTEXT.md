@@ -12,12 +12,29 @@ _Evitar_: Cliente, usuario, paciente real
 
 **Cita**:
 Reserva de un paciente de prueba para recibir atencion en una fecha y hora
-determinadas. Durante el MVP tecnico, cada cita dura 30 minutos.
+determinadas. Durante el MVP tecnico, cada cita dura 30 minutos y se expresa en
+una zona horaria explicita.
 _Evitar_: Evento, reunion
 
 **Espacio disponible**:
-Periodo de la agenda del medico que puede utilizarse para crear una cita.
+Periodo de 30 minutos de la agenda del medico que puede utilizarse para crear una
+cita porque no se superpone con ningun periodo ocupado.
 _Evitar_: Hueco, evento libre
+
+**Fuente de verdad de agenda**:
+Calendario o sistema autoritativo que determina la disponibilidad y el estado de
+una cita. La memoria conversacional no reemplaza esta fuente.
+_Evitar_: Resumen de agenda, memoria de agenda
+
+**Horario laboral**:
+Conjunto de periodos semanales en los que puede comenzar y terminar una cita,
+interpretados en la zona horaria configurada para la agenda.
+_Evitar_: Horario del paciente
+
+**Periodo ocupado**:
+Intervalo de una agenda que impide ofrecer un espacio disponible, sin importar el
+titulo o la categoria del evento.
+_Evitar_: Evento disponible
 
 **Etiqueta interna**:
 Clasificacion asociada a una cita para uso del medico y para estadisticas. Una

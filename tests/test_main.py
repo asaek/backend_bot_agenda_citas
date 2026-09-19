@@ -17,7 +17,8 @@ from conversation_service import (
     ConversationService,
     IncomingTextMessage,
 )
-from llm_provider import ChatMessage, LLMProviderError
+from fakes import GENERATED_REPLY, FakeLLMProvider
+from llm_provider import LLMProviderError
 from main import app, normalize_recipient_number
 from persistence import SQLiteDatabase
 from whatsapp_client import (
@@ -60,25 +61,6 @@ class FailOnceWhatsAppClient(FakeWhatsAppClient):
 class MissingWhatsAppConfigurationClient(FakeWhatsAppClient):
     async def send_text(self, to: str, body: str) -> dict[str, Any]:
         raise WhatsAppConfigurationError("configuracion de prueba ausente")
-
-
-GENERATED_REPLY = "Respuesta generada por el proveedor."
-
-
-class FakeLLMProvider:
-    def __init__(self, reply: str = GENERATED_REPLY) -> None:
-        self.reply = reply
-        self.received_messages: list[list[ChatMessage]] = []
-
-    async def generate(self, messages: list[ChatMessage]) -> str:
-        self.received_messages.append(messages)
-        return self.reply
-
-
-class FailingLLMProvider(FakeLLMProvider):
-    async def generate(self, messages: list[ChatMessage]) -> str:
-        self.received_messages.append(messages)
-        raise LLMProviderError("fallo de generacion de prueba")
 
 
 class WebhookTests(unittest.TestCase):
@@ -178,13 +160,16 @@ class WebhookTests(unittest.TestCase):
         payload = self.text_payload()
         fake_client = FakeWhatsAppClient()
 
-        with self.configured_runtime(fake_client):
+        with self.configured_runtime(fake_client) as provider:
             with TestClient(app) as client:
                 response = client.post("/webhook/whatsapp", json=payload)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
         self.assertEqual(fake_client.sent_messages, [("5491100000000", GENERATED_REPLY)])
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(provider.received_messages[0][-1].role, "user")
+        self.assertEqual(provider.received_messages[0][-1].content, "Hola")
 
     def test_first_message_creates_patient_conversation_and_history(self) -> None:
         fake_client = FakeWhatsAppClient()
@@ -273,7 +258,7 @@ class WebhookTests(unittest.TestCase):
         fake_client = FakeWhatsAppClient()
         payload = self.text_payload()
 
-        with self.configured_runtime(fake_client):
+        with self.configured_runtime(fake_client) as provider:
             with TestClient(app) as client:
                 responses = self.post_messages(
                     client,
@@ -283,6 +268,7 @@ class WebhookTests(unittest.TestCase):
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
         self.assertEqual(len(fake_client.sent_messages), 1)
+        self.assertEqual(provider.call_count, 1)
         with open_database(self.database_path) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 2)
 
@@ -328,7 +314,9 @@ class WebhookTests(unittest.TestCase):
 
     def test_llm_failure_sends_controlled_fallback_and_records_failure(self) -> None:
         fake_client = FakeWhatsAppClient()
-        failing_provider = FailingLLMProvider()
+        failing_provider = FakeLLMProvider(
+            error=LLMProviderError("fallo de generacion de prueba")
+        )
 
         with self.configured_runtime(fake_client, failing_provider):
             with TestClient(app) as client:
@@ -342,6 +330,7 @@ class WebhookTests(unittest.TestCase):
             fake_client.sent_messages,
             [("5491100000000", CONTROLLED_FALLBACK_REPLY)],
         )
+        self.assertEqual(failing_provider.call_count, 1)
         with open_database(self.database_path) as connection:
             messages = connection.execute(
                 "SELECT direction, status, text FROM messages ORDER BY id"

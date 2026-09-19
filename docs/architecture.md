@@ -25,10 +25,15 @@ FastAPI parsea mensajes de texto
 Conversation Service
     |
     +-- Repositories -> SQLite
+    +-- LLMProvider -> OpenAICompatibleLLMProvider
     |
     v
 WhatsAppClient -> WhatsApp Cloud API
 ```
+
+Para pruebas automatizadas, las dependencias externas se sustituyen por
+`FakeLLMProvider`, `FakeWhatsAppClient` y una base SQLite temporal. El webhook se
+ejecuta mediante `TestClient` sin consumir APIs.
 
 Durante el desarrollo local, ngrok proporcionara la URL publica que Meta
 necesita para comunicarse con FastAPI.
@@ -90,6 +95,21 @@ El contexto comienza con las reglas del asistente y usa los mensajes mas
 recientes persistidos. Tambien solicita la respuesta al proveedor LLM y conserva
 el resultado del envio.
 
+### Modelo de dominio de citas
+
+`calendar_domain.py` define `Appointment`, `AvailableSlot`, `PatientScope`,
+`ToolRequest`, `ToolResult` y el protocolo `CalendarProvider`. En este primer
+incremento valida invariantes, normaliza los cinco contratos y separa el alcance
+confiable del paciente de los argumentos conversacionales. Todavia no ejecuta
+operaciones ni conecta Google Calendar.
+
+`tool_contracts.py` define los inputs y outputs especificos de cada herramienta.
+`tool_validation.py` valida fechas, horarios, conflictos, pertenencia y estados
+antes de cualquier proveedor. `tool_results.py` convierte las excepciones de la
+frontera de agenda en `ToolResult.failure()` sin copiar detalles internos. El
+`ToolExecutor` y `FakeCalendarProvider` se implementaran en el siguiente
+incremento.
+
 ### Persistence y repositories
 
 `persistence.py` administra conexiones, esquema y transacciones SQLite.
@@ -102,10 +122,10 @@ Construye la solicitud autenticada de tipo texto para WhatsApp Cloud API usando
 `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID`. No contiene logica de
 conversacion.
 
-### LLMProvider
+### LLMProvider y agente LLM basico
 
-Define el contrato asincrono `generate(messages)` para que la logica
-conversacional no dependa de un proveedor concreto. El adaptador
+Define el contrato asincrono `generate(messages)` para que el agente basico y la
+logica conversacional no dependan de un proveedor concreto. El adaptador
 `OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq u
 OpenRouter.
 
@@ -114,6 +134,9 @@ El adaptador participa en el flujo del webhook mediante la inyeccion de
 envio y el registro, pero no decide el contenido conversacional. Los fallos del
 LLM se registran en SQLite y producen una respuesta controlada si WhatsApp esta
 disponible.
+
+La suite automatizada implementa el mismo contrato con `FakeLLMProvider`, que
+registra las solicitudes y permite simular errores sin red.
 
 ### Uvicorn
 
@@ -176,10 +199,11 @@ LLM solicita una herramienta
 Backend valida la solicitud
     |
     v
-Google Calendar
+ Google Calendar
     |
+    +-- excepcion externa -> error publico seguro
     v
-Resultado de la herramienta
+ Resultado de la herramienta
     |
     v
 LLM redacta la respuesta
@@ -188,17 +212,16 @@ LLM redacta la respuesta
 ## Limites actuales
 
 - El backend solo mantiene estado conversacional basico.
-- La respuesta sigue siendo un texto fijo de prueba; el adaptador LLM aun no esta
-  conectado al webhook.
 - El contexto usa una ventana acotada del historial y no incluye respuestas de
   WhatsApp registradas como fallidas.
 - SQLite se usa para una unica instalacion del MVP y no para multiples replicas.
 - Los secretos se proporcionan mediante variables de entorno y no se guardan
   en el repositorio.
+- Las pruebas automatizadas cubren el ciclo con dobles locales; la suite no
+  valida la calidad ni la disponibilidad de un proveedor LLM real.
 
 ## Preguntas abiertas
 
 - ¿Donde se desplegara inicialmente el backend de produccion?
 - ¿Se procesaran los eventos dentro de la solicitud o mediante una cola cuando
   aumente el volumen?
-- ¿Que proveedor de LLM se utilizara en la primera integracion?

@@ -1,10 +1,10 @@
-# 003 - Contrato LLM y proveedores compatibles con OpenAI
+# 003 - Agente LLM basico
 
 ## Estado
 
-Verificado para el adaptador compatible con OpenAI, la construccion del contexto
-y el ciclo integrado de generacion y envio. Groq es el proveedor predeterminado
-y OpenRouter usa el mismo adaptador.
+Verificado para el agente LLM basico, el adaptador compatible con OpenAI, la
+construccion del contexto y el ciclo integrado de generacion y envio. Groq es el
+proveedor predeterminado y OpenRouter usa el mismo adaptador.
 
 ## Problema
 
@@ -14,9 +14,9 @@ proveedor sin modificar la logica del servicio.
 
 ## Objetivo
 
-Definir un contrato independiente del proveedor y una implementacion inicial
-para proveedores compatibles con OpenAI que pueda probarse sin realizar
-llamadas reales a Internet.
+Definir un agente conversacional basico con un contrato independiente del
+proveedor y una implementacion inicial para proveedores compatibles con OpenAI.
+El ciclo debe poder probarse sin realizar llamadas reales a Internet.
 
 ## Alcance
 
@@ -31,6 +31,8 @@ llamadas reales a Internet.
 - Inyectar el proveedor en `ConversationService`.
 - Generar la respuesta antes de enviarla mediante WhatsApp.
 - Registrar fallos de generacion o envio para permitir reintentos.
+- Probar el ciclo con un `FakeLLMProvider`, un cliente falso de WhatsApp y SQLite
+  temporal.
 
 ## Requisitos funcionales
 
@@ -98,6 +100,22 @@ como `failed` y permitir reintentar el mensaje entrante posteriormente.
 La respuesta controlada debe ser: `En este momento no pude procesar tu mensaje.
 Intenta nuevamente en unos minutos.`
 
+### RF-311 - Pruebas sin API
+
+La suite debe poder probar el agente sin API key real, Internet ni envio de
+mensajes reales. `FakeLLMProvider` debe registrar las solicitudes y permitir
+simular una respuesta o un `LLMProviderError`.
+
+### RF-312 - Idempotencia de la respuesta
+
+Un webhook duplicado cuyo mensaje ya tenga una respuesta `sent` no debe volver a
+invocar el LLM ni enviar otra respuesta.
+
+### RF-313 - Verificacion de Meta
+
+La verificacion correcta de Meta debe responder el challenge con HTTP 200 sin
+necesitar configurar un proveedor LLM real.
+
 ## Criterios de aceptacion
 
 1. Una configuracion valida crea el adaptador para Groq.
@@ -117,9 +135,17 @@ Intenta nuevamente en unos minutos.`
     respuesta demasiado larga registran el tipo de fallo en SQLite.
 14. Un fallo del LLM envia la respuesta controlada y la registra como `sent` si
     WhatsApp esta disponible.
+15. El `FakeLLMProvider` recibe el historial convertido y el mensaje actual como
+    el ultimo mensaje `user`.
+16. Una respuesta generada por el fake se envia por WhatsApp y queda guardada
+    como `sent`.
+17. Un webhook duplicado no incrementa las llamadas al LLM despues de una
+    respuesta enviada.
+18. La suite cubre errores del LLM y la verificacion de Meta sin usar servicios
+    externos.
 
 ## Fuera de alcance
 
-- Reintentos, colas y procesamiento asincrono externo.
+- Colas y procesamiento asincrono externo.
 - Herramientas, RAG y memoria semantica.
 - Uso de datos reales de pacientes.

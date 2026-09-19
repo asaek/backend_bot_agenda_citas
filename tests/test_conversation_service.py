@@ -8,17 +8,8 @@ from conversation_service import (
     ConversationService,
     IncomingTextMessage,
 )
-from llm_provider import ChatMessage
+from fakes import FakeLLMProvider
 from persistence import SQLiteDatabase
-
-
-class FakeLLMProvider:
-    def __init__(self) -> None:
-        self.received_messages: list[list[ChatMessage]] = []
-
-    async def generate(self, messages: list[ChatMessage]) -> str:
-        self.received_messages.append(messages)
-        return "Respuesta del LLM"
 
 
 class ConversationContextTests(unittest.TestCase):
@@ -29,7 +20,7 @@ class ConversationContextTests(unittest.TestCase):
             "chatbot.sqlite3",
         )
         self.addCleanup(self.database_directory.cleanup)
-        self.llm_provider = FakeLLMProvider()
+        self.llm_provider = FakeLLMProvider(reply="Respuesta del LLM")
         self.service = ConversationService(
             SQLiteDatabase(self.database_path),
             llm_provider=self.llm_provider,

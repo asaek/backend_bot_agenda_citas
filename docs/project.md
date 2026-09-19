@@ -48,6 +48,7 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Construir el contexto de chat desde el historial reciente y las reglas del
   asistente.
 - Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
+- Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 
 ## Estrategia de implementacion por cortes
 
@@ -74,16 +75,33 @@ Los tres primeros incrementos de la etapa 4 definen una frontera independiente
 del proveedor, preparan un adaptador compatible con OpenAI para Groq y
 OpenRouter, construyen el contexto desde el historial reciente e integran el
 ciclo de generacion y envio. Las tareas estan en
-`specs/003-llm-provider-groq/tasks.md`.
+`specs/003-basic-llm-agent/tasks.md`.
+
+### Incremento de verificacion: pruebas del ciclo sin API
+
+El ciclo integrado se verifica con un `FakeLLMProvider`, un cliente falso de
+WhatsApp y SQLite temporal. La especificacion y las tareas estan en
+`specs/004-automated-webhook-tests/`.
+
+### Corte activo: contrato de herramientas de citas
+
+Los incrementos actuales definen el modelo de dominio, los inputs y outputs
+tipados, la validacion previa, los errores publicos y la frontera
+`CalendarProvider`, sin ejecutar todavia herramientas ni conectarse a Google
+Calendar. La especificacion y las tareas estan en
+`specs/005-tool-contract/`.
 
 ### Cortes futuros
 
 Los siguientes temas se especificaran por separado cuando corresponda:
 
-1. Memoria conversacional avanzada.
-2. Herramientas y Google Calendar.
-3. RAG con PostgreSQL y pgvector.
-4. Automatizaciones externas y despliegue.
+1. Ejecutar el contrato de herramientas con `ToolExecutor` y
+   `FakeCalendarProvider`.
+2. Integrar Google Calendar.
+3. Memoria conversacional avanzada.
+4. RAG con PostgreSQL y pgvector.
+5. Automatizaciones externas y despliegue.
+6. Privacidad, seguridad, consentimiento y limites para informacion medica.
 
 Esta lista expresa una direccion general y no autoriza su implementacion durante
 el corte actual.
