@@ -12,11 +12,19 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
-from conversation_service import ConversationService, IncomingTextMessage
+from conversation_service import (
+    CONTROLLED_FALLBACK_REPLY,
+    ConversationService,
+    IncomingTextMessage,
+)
 from llm_provider import ChatMessage, LLMProviderError
 from main import app, normalize_recipient_number
 from persistence import SQLiteDatabase
-from whatsapp_client import GRAPH_API_VERSION, WhatsAppClient
+from whatsapp_client import (
+    GRAPH_API_VERSION,
+    WhatsAppClient,
+    WhatsAppConfigurationError,
+)
 
 
 @contextmanager
@@ -47,6 +55,11 @@ class FailOnceWhatsAppClient(FakeWhatsAppClient):
         if self.attempts == 1:
             raise httpx.ConnectError("fallo de prueba")
         return await super().send_text(to, body)
+
+
+class MissingWhatsAppConfigurationClient(FakeWhatsAppClient):
+    async def send_text(self, to: str, body: str) -> dict[str, Any]:
+        raise WhatsAppConfigurationError("configuracion de prueba ausente")
 
 
 GENERATED_REPLY = "Respuesta generada por el proveedor."
@@ -294,7 +307,26 @@ class WebhookTests(unittest.TestCase):
                 "sent",
             )
 
-    def test_llm_failure_is_recorded_without_sending_a_message(self) -> None:
+    def test_whatsapp_configuration_failure_records_controlled_reply_as_failed(self) -> None:
+        fake_client = MissingWhatsAppConfigurationClient()
+
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(),
+                )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(fake_client.sent_messages, [])
+        with open_database(self.database_path) as connection:
+            status_and_text = connection.execute(
+                "SELECT status, text FROM messages WHERE direction = 'outgoing'"
+            ).fetchone()
+
+        self.assertEqual(status_and_text, ("failed", GENERATED_REPLY))
+
+    def test_llm_failure_sends_controlled_fallback_and_records_failure(self) -> None:
         fake_client = FakeWhatsAppClient()
         failing_provider = FailingLLMProvider()
 
@@ -305,14 +337,54 @@ class WebhookTests(unittest.TestCase):
                     json=self.text_payload(),
                 )
 
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(fake_client.sent_messages, [])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake_client.sent_messages,
+            [("5491100000000", CONTROLLED_FALLBACK_REPLY)],
+        )
         with open_database(self.database_path) as connection:
             messages = connection.execute(
                 "SELECT direction, status, text FROM messages ORDER BY id"
             ).fetchall()
+            failures = connection.execute(
+                "SELECT error_type FROM llm_failures"
+            ).fetchall()
 
-        self.assertEqual(messages, [("incoming", "received", "Hola"), ("outgoing", "failed", "")])
+        self.assertEqual(
+            messages,
+            [
+                ("incoming", "received", "Hola"),
+                ("outgoing", "sent", CONTROLLED_FALLBACK_REPLY),
+            ],
+        )
+        self.assertEqual(failures, [("LLMProviderError",)])
+
+    def test_missing_api_key_sends_controlled_fallback_and_records_failure(self) -> None:
+        fake_client = FakeWhatsAppClient()
+
+        with patch.dict(
+            os.environ,
+            {"DATABASE_PATH": self.database_path},
+            clear=True,
+        ):
+            with patch("main.WhatsAppClient", return_value=fake_client):
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/webhook/whatsapp",
+                        json=self.text_payload(),
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake_client.sent_messages,
+            [("5491100000000", CONTROLLED_FALLBACK_REPLY)],
+        )
+        with open_database(self.database_path) as connection:
+            failure_type = connection.execute(
+                "SELECT error_type FROM llm_failures"
+            ).fetchone()[0]
+
+        self.assertEqual(failure_type, "LLMConfigurationError")
 
     def test_history_survives_new_conversation_service(self) -> None:
         service = ConversationService(SQLiteDatabase(self.database_path))

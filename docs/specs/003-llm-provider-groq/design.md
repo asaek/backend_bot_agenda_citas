@@ -37,7 +37,8 @@ de crear un proveedor.
 
 La implementacion actual acepta `LLM_PROVIDER=groq` y
 `LLM_PROVIDER=openrouter`. Ambos usan el mismo adaptador; se seleccionan el
-endpoint, la API key y el modelo mediante variables de entorno.
+endpoint, la API key y el modelo mediante variables de entorno. La salida se
+limita a 4000 caracteres por defecto mediante `LLM_MAX_RESPONSE_CHARACTERS`.
 
 ## Transporte
 
@@ -82,7 +83,9 @@ inyeccion de dependencias. `build_reply(context)` construye el contexto y espera
 la respuesta con `WhatsAppClient` y registra el resultado con
 `record_reply_sent()`.
 
-Si la generacion falla, `main.py` registra una respuesta saliente vacia con
-estado `failed` y devuelve un error controlado sin llamar a WhatsApp. Como las
-respuestas `failed` no forman parte del contexto, el siguiente webhook puede
-reintentar la generacion sin presentar una respuesta no entregada al modelo.
+Si la generacion falla, `main.py` registra el tipo de error en la tabla de
+fallos del LLM y envia la respuesta controlada. Si WhatsApp esta disponible, la
+respuesta controlada se registra como `sent`; si tambien falla, queda como
+`failed`. Como las respuestas fallidas no forman parte del contexto, el
+siguiente webhook puede reintentar la generacion sin presentar una respuesta no
+entregada al modelo.

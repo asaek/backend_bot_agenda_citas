@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_by_conversation
 ON messages(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS llm_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    incoming_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    error_type TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS llm_failures_by_conversation
+ON llm_failures(conversation_id, id);
 """
 
 

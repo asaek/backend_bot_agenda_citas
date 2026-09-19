@@ -12,6 +12,7 @@ DEFAULT_LLM_PROVIDER = "groq"
 DEFAULT_LLM_TIMEOUT_SECONDS = 20.0
 DEFAULT_LLM_MAX_HISTORY_MESSAGES = 30
 DEFAULT_LLM_MAX_OUTPUT_TOKENS = 500
+DEFAULT_LLM_MAX_RESPONSE_CHARACTERS = 4000
 SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "openrouter"})
 DEFAULT_BASE_URLS = {
     "groq": DEFAULT_GROQ_BASE_URL,
@@ -34,6 +35,7 @@ class LLMSettings:
     timeout_seconds: float
     max_history_messages: int
     max_output_tokens: int
+    max_response_characters: int = DEFAULT_LLM_MAX_RESPONSE_CHARACTERS
 
 
 class LLMProviderError(RuntimeError):
@@ -42,6 +44,30 @@ class LLMProviderError(RuntimeError):
 
 class LLMConfigurationError(LLMProviderError):
     """Indica que falta o es invalida la configuracion del LLM."""
+
+
+class LLMTimeoutError(LLMProviderError):
+    """Indica que el proveedor excedio el tiempo de espera."""
+
+
+class LLMNetworkError(LLMProviderError):
+    """Indica que no se pudo conectar con el proveedor."""
+
+
+class LLMHTTPError(LLMProviderError):
+    """Indica que el proveedor devolvio un error HTTP."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"El proveedor LLM devolvio HTTP {status_code}")
+
+
+class LLMResponseError(LLMProviderError):
+    """Indica que el proveedor devolvio una respuesta invalida o vacia."""
+
+
+class LLMResponseTooLongError(LLMProviderError):
+    """Indica que la respuesta supera el limite permitido."""
 
 
 class LLMProvider(Protocol):
@@ -82,6 +108,11 @@ def load_llm_settings(environment: Mapping[str, str] | None = None) -> LLMSettin
         name="LLM_MAX_OUTPUT_TOKENS",
         default=DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     )
+    max_response_characters = _positive_int(
+        values.get("LLM_MAX_RESPONSE_CHARACTERS"),
+        name="LLM_MAX_RESPONSE_CHARACTERS",
+        default=DEFAULT_LLM_MAX_RESPONSE_CHARACTERS,
+    )
 
     return LLMSettings(
         provider=provider,
@@ -91,6 +122,7 @@ def load_llm_settings(environment: Mapping[str, str] | None = None) -> LLMSettin
         timeout_seconds=timeout_seconds,
         max_history_messages=max_history_messages,
         max_output_tokens=max_output_tokens,
+        max_response_characters=max_response_characters,
     )
 
 
@@ -149,12 +181,22 @@ class OpenAICompatibleLLMProvider:
                     )
                     response.raise_for_status()
                     data = response.json()
+        except httpx.TimeoutException as error:
+            raise LLMTimeoutError(
+                f"{self.settings.provider} excedio el tiempo de espera"
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise LLMHTTPError(error.response.status_code) from error
+        except httpx.ConnectError as error:
+            raise LLMNetworkError(
+                f"{self.settings.provider} no pudo conectarse"
+            ) from error
         except httpx.HTTPError as error:
-            raise LLMProviderError(
-                f"{self.settings.provider} no pudo generar la respuesta"
+            raise LLMNetworkError(
+                f"{self.settings.provider} no pudo comunicarse"
             ) from error
         except (TypeError, ValueError) as error:
-            raise LLMProviderError(
+            raise LLMResponseError(
                 f"{self.settings.provider} devolvio una respuesta invalida"
             ) from error
 
@@ -162,13 +204,18 @@ class OpenAICompatibleLLMProvider:
             choices = data["choices"]
             content = choices[0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
-            raise LLMProviderError(
+            raise LLMResponseError(
                 f"{self.settings.provider} devolvio una respuesta sin contenido"
             ) from error
 
         if not isinstance(content, str) or not content.strip():
-            raise LLMProviderError(f"{self.settings.provider} devolvio una respuesta vacia")
-        return content.strip()
+            raise LLMResponseError(f"{self.settings.provider} devolvio una respuesta vacia")
+        content = content.strip()
+        if len(content) > self.settings.max_response_characters:
+            raise LLMResponseTooLongError(
+                f"{self.settings.provider} devolvio una respuesta demasiado larga"
+            )
+        return content
 
 
 GroqLLMProvider = OpenAICompatibleLLMProvider

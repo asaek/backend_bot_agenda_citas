@@ -35,6 +35,15 @@ class MessageRecord:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class LLMFailureRecord:
+    id: int
+    conversation_id: int
+    incoming_message_id: int
+    error_type: str
+    created_at: str
+
+
 def _patient_from_row(row: sqlite3.Row) -> PatientRecord:
     return PatientRecord(
         id=row["id"],
@@ -292,3 +301,35 @@ class MessageRepository:
             (conversation_id,),
         ).fetchall()
         return [_message_from_row(row) for row in rows]
+
+
+class LLMFailureRepository:
+    def create(
+        self,
+        connection: sqlite3.Connection,
+        conversation_id: int,
+        incoming_message_id: int,
+        error_type: str,
+        now: str,
+    ) -> LLMFailureRecord:
+        cursor = connection.execute(
+            """
+            INSERT INTO llm_failures (
+                conversation_id, incoming_message_id, error_type, created_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, incoming_message_id, error_type, now),
+        )
+        row = connection.execute(
+            "SELECT * FROM llm_failures WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("No se pudo recuperar el fallo del LLM")
+        return LLMFailureRecord(
+            id=row["id"],
+            conversation_id=row["conversation_id"],
+            incoming_message_id=row["incoming_message_id"],
+            error_type=row["error_type"],
+            created_at=row["created_at"],
+        )

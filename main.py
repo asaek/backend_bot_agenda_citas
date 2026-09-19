@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from conversation_service import (
+    CONTROLLED_FALLBACK_REPLY,
     ConversationContext,
     ConversationService,
     IncomingTextMessage,
@@ -31,10 +32,18 @@ app = FastAPI(title="WhatsApp Chatbot")
 
 def create_conversation_service() -> ConversationService:
     database_path = os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)
-    settings = load_llm_settings()
+    database = SQLiteDatabase(database_path)
+    try:
+        settings = load_llm_settings()
+        llm_provider = create_llm_provider(settings)
+    except LLMConfigurationError as error:
+        return ConversationService(
+            database,
+            llm_configuration_error=error,
+        )
     return ConversationService(
-        SQLiteDatabase(database_path),
-        llm_provider=create_llm_provider(settings),
+        database,
+        llm_provider=llm_provider,
         max_history_messages=settings.max_history_messages,
     )
 
@@ -144,10 +153,7 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     if not messages:
         return {"status": "ok"}
 
-    try:
-        conversation_service = create_conversation_service()
-    except LLMConfigurationError as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+    conversation_service = create_conversation_service()
     whatsapp_client = WhatsAppClient()
     for message in messages:
         context: ConversationContext = conversation_service.receive_message(message)
@@ -158,11 +164,11 @@ async def receive_webhook(request: Request) -> dict[str, str]:
         try:
             reply = await conversation_service.build_reply(context)
         except LLMProviderError as error:
-            conversation_service.record_reply_failed(context, body="")
-            raise HTTPException(
-                status_code=502,
-                detail="No se pudo generar la respuesta del asistente",
-            ) from error
+            conversation_service.record_llm_failure(
+                context,
+                error_type=type(error).__name__,
+            )
+            reply = CONTROLLED_FALLBACK_REPLY
         try:
             result = await whatsapp_client.send_text(
                 to=normalize_recipient_number(message.sender),

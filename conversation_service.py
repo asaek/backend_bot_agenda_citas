@@ -5,16 +5,23 @@ from llm_provider import (
     ChatMessage,
     DEFAULT_LLM_MAX_HISTORY_MESSAGES,
     LLMProvider,
+    LLMProviderError,
 )
 from persistence import SQLiteDatabase
 from repositories import (
     ConversationRepository,
+    LLMFailureRecord,
+    LLMFailureRepository,
     MessageRecord,
     MessageRepository,
     PatientRepository,
 )
 
 
+CONTROLLED_FALLBACK_REPLY = (
+    "En este momento no pude procesar tu mensaje. "
+    "Intenta nuevamente en unos minutos."
+)
 SYSTEM_PROMPT = "\n".join(
     (
         "Responder en español.",
@@ -54,13 +61,16 @@ class ConversationService:
         database: SQLiteDatabase,
         llm_provider: LLMProvider | None = None,
         max_history_messages: int = DEFAULT_LLM_MAX_HISTORY_MESSAGES,
+        llm_configuration_error: LLMProviderError | None = None,
     ) -> None:
         self.database = database
         self.llm_provider = llm_provider
         self.max_history_messages = max_history_messages
+        self.llm_configuration_error = llm_configuration_error
         self.patients = PatientRepository()
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
+        self.llm_failures = LLMFailureRepository()
 
     def receive_message(self, message: IncomingTextMessage) -> ConversationContext:
         now = utc_now()
@@ -109,8 +119,10 @@ class ConversationService:
             )
 
     async def build_reply(self, context: ConversationContext) -> str:
+        if self.llm_configuration_error is not None:
+            raise self.llm_configuration_error
         if self.llm_provider is None:
-            raise RuntimeError("ConversationService requiere un proveedor LLM")
+            raise LLMProviderError("ConversationService requiere un proveedor LLM")
         messages = self.build_chat_messages(context)
         return await self.llm_provider.generate(messages)
 
@@ -167,6 +179,20 @@ class ConversationService:
             status="failed",
             provider_message_id=None,
         )
+
+    def record_llm_failure(
+        self,
+        context: ConversationContext,
+        error_type: str,
+    ) -> LLMFailureRecord:
+        with self.database.transaction() as connection:
+            return self.llm_failures.create(
+                connection,
+                conversation_id=context.conversation_id,
+                incoming_message_id=context.incoming_message_id,
+                error_type=error_type,
+                now=utc_now(),
+            )
 
     def _record_reply(
         self,

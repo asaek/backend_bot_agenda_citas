@@ -30,6 +30,7 @@ El adaptador compatible con OpenAI usa estas variables adicionales:
 - `LLM_TIMEOUT_SECONDS=20`
 - `LLM_MAX_HISTORY_MESSAGES=30`
 - `LLM_MAX_OUTPUT_TOKENS=500`
+- `LLM_MAX_RESPONSE_CHARACTERS=4000`
 
 Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
 `LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.

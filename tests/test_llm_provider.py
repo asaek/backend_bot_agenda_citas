@@ -7,8 +7,12 @@ import httpx
 from llm_provider import (
     ChatMessage,
     LLMConfigurationError,
+    LLMHTTPError,
     LLMProviderError,
+    LLMResponseError,
+    LLMResponseTooLongError,
     LLMSettings,
+    LLMTimeoutError,
     OpenAICompatibleLLMProvider,
     create_llm_provider,
     load_llm_settings,
@@ -26,6 +30,7 @@ class LLMSettingsTests(unittest.TestCase):
                 "LLM_TIMEOUT_SECONDS": "12.5",
                 "LLM_MAX_HISTORY_MESSAGES": "10",
                 "LLM_MAX_OUTPUT_TOKENS": "250",
+                "LLM_MAX_RESPONSE_CHARACTERS": "1000",
             }
         )
 
@@ -36,6 +41,7 @@ class LLMSettingsTests(unittest.TestCase):
         self.assertEqual(settings.timeout_seconds, 12.5)
         self.assertEqual(settings.max_history_messages, 10)
         self.assertEqual(settings.max_output_tokens, 250)
+        self.assertEqual(settings.max_response_characters, 1000)
 
     def test_uses_safe_defaults_for_optional_limits(self) -> None:
         settings = load_llm_settings(
@@ -45,6 +51,7 @@ class LLMSettingsTests(unittest.TestCase):
         self.assertEqual(settings.timeout_seconds, 20.0)
         self.assertEqual(settings.max_history_messages, 30)
         self.assertEqual(settings.max_output_tokens, 500)
+        self.assertEqual(settings.max_response_characters, 4000)
 
     def test_uses_openrouter_default_base_url(self) -> None:
         settings = load_llm_settings(
@@ -70,6 +77,14 @@ class LLMSettingsTests(unittest.TestCase):
                     "LLM_API_KEY": "test-key",
                     "LLM_MODEL": "test-model",
                     "LLM_MAX_OUTPUT_TOKENS": "0",
+                }
+            )
+        with self.assertRaises(LLMConfigurationError):
+            load_llm_settings(
+                {
+                    "LLM_API_KEY": "test-key",
+                    "LLM_MODEL": "test-model",
+                    "LLM_MAX_RESPONSE_CHARACTERS": "0",
                 }
             )
 
@@ -216,7 +231,114 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
                     ),
                     http_client=http_client,
                 )
-                with self.assertRaises(LLMProviderError):
+                with self.assertRaises(LLMHTTPError) as raised:
+                    await provider.generate([ChatMessage(role="user", content="Hola")])
+
+                self.assertEqual(raised.exception.status_code, 429)
+
+        asyncio.run(run_test())
+
+    def test_translates_http_5xx_to_provider_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503, json={"error": {"message": "unavailable"}})
+
+        async def run_test() -> None:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                with self.assertRaises(LLMHTTPError) as raised:
+                    await provider.generate([ChatMessage(role="user", content="Hola")])
+
+                self.assertEqual(raised.exception.status_code, 503)
+
+        asyncio.run(run_test())
+
+    def test_translates_timeout_to_provider_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timeout de prueba", request=request)
+
+        async def run_test() -> None:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                with self.assertRaises(LLMTimeoutError):
+                    await provider.generate([ChatMessage(role="user", content="Hola")])
+
+        asyncio.run(run_test())
+
+    def test_rejects_empty_provider_response(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "   "}}]},
+            )
+
+        async def run_test() -> None:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                with self.assertRaises(LLMResponseError):
+                    await provider.generate([ChatMessage(role="user", content="Hola")])
+
+        asyncio.run(run_test())
+
+    def test_rejects_response_that_is_too_long(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "abcd"}}]},
+            )
+
+        async def run_test() -> None:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                        max_response_characters=3,
+                    ),
+                    http_client=http_client,
+                )
+                with self.assertRaises(LLMResponseTooLongError):
                     await provider.generate([ChatMessage(role="user", content="Hola")])
 
         asyncio.run(run_test())

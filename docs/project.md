@@ -47,6 +47,7 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Mantener una conversacion activa entre varias solicitudes y reinicios.
 - Construir el contexto de chat desde el historial reciente y las reglas del
   asistente.
+- Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
 
 ## Estrategia de implementacion por cortes
 

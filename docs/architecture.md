@@ -111,7 +111,9 @@ OpenRouter.
 
 El adaptador participa en el flujo del webhook mediante la inyeccion de
 `LLMProvider` en `ConversationService`. `main.py` coordina la generacion, el
-envio y el registro, pero no decide el contenido conversacional.
+envio y el registro, pero no decide el contenido conversacional. Los fallos del
+LLM se registran en SQLite y producen una respuesta controlada si WhatsApp esta
+disponible.
 
 ### Uvicorn
 

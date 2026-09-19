@@ -43,8 +43,9 @@ clase especifica de Groq.
 
 El adaptador debe leer `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`,
 `LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES` y
-`LLM_MAX_OUTPUT_TOKENS` desde el entorno, con valores predeterminados solamente
-para limites tecnicos y las URLs de los proveedores compatibles soportados.
+`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RESPONSE_CHARACTERS` desde el entorno, con
+valores predeterminados solamente para limites tecnicos y las URLs de los
+proveedores compatibles soportados.
 
 ### RF-303 - Solicitud al proveedor
 
@@ -88,9 +89,14 @@ contener reglas de conversacion.
 
 ### RF-309 - Fallos de generacion
 
-Si el LLM no genera una respuesta, el backend no debe enviar ningun mensaje por
-WhatsApp, debe registrar la salida como `failed` y debe permitir reintentar el
-mensaje entrante posteriormente.
+Si el LLM no genera una respuesta, el backend debe registrar el fallo y enviar
+la respuesta controlada. Si WhatsApp tambien falla, debe registrar esa salida
+como `failed` y permitir reintentar el mensaje entrante posteriormente.
+
+### RF-310 - Respuesta controlada
+
+La respuesta controlada debe ser: `En este momento no pude procesar tu mensaje.
+Intenta nuevamente en unos minutos.`
 
 ## Criterios de aceptacion
 
@@ -107,8 +113,10 @@ mensaje entrante posteriormente.
 11. El contexto solo usa los mensajes mas recientes dentro del limite configurado.
 12. Un mensaje valido genera la respuesta mediante el proveedor, la envia por
     WhatsApp y la registra como `sent`.
-13. Un fallo del LLM se registra como `failed` sin enviar un mensaje y permite
-    reintentar posteriormente.
+13. Una API key ausente, un timeout, un error HTTP, una respuesta vacia o una
+    respuesta demasiado larga registran el tipo de fallo en SQLite.
+14. Un fallo del LLM envia la respuesta controlada y la registra como `sent` si
+    WhatsApp esta disponible.
 
 ## Fuera de alcance
 

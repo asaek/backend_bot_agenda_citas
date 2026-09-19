@@ -27,3 +27,9 @@
 - [x] Inyectar el proveedor en `ConversationService`.
 - [x] Reemplazar la respuesta fija y registrar los fallos de generacion.
 - [x] Coordinar generacion, envio y persistencia desde `main.py`.
+
+## Manejo de errores
+
+- [x] Clasificar timeouts, errores HTTP, respuestas vacias y respuestas demasiado largas.
+- [x] Enviar una respuesta controlada cuando falle el LLM.
+- [x] Registrar los fallos del LLM en SQLite.
