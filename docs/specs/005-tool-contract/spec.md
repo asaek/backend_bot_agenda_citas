@@ -3,8 +3,9 @@
 ## Estado
 
 En implementacion. El modelo de dominio, los contratos de entrada/salida, la
-validacion previa al proveedor y la frontera de errores publicos estan definidos
-y verificados; la ejecucion y los proveedores concretos quedan pendientes.
+validacion previa al proveedor, la frontera de errores publicos, el proveedor
+falso en memoria y el ejecutor estan definidos y verificados; Google Calendar
+queda pendiente.
 
 ## Objetivo
 
@@ -12,7 +13,7 @@ Establecer una frontera estable para que el backend valide y ejecute operaciones
 de agenda sin depender de Google Calendar ni de los argumentos controlados por
 el LLM.
 
-## Incremento actual: modelo de dominio y contratos
+## Incremento actual: proveedor falso determinista
 
 El modelo define los siguientes conceptos:
 
@@ -77,6 +78,33 @@ Los errores transitorios reconocibles se clasifican como
 `CalendarProviderUnavailable`; los demas fallos externos se reducen a
 `CalendarProviderError`.
 
+## FakeCalendarProvider
+
+`FakeCalendarProvider` implementa el mismo `CalendarProvider` asincrono sin red ni
+persistencia. Permite configurar calendarios, periodos ocupados y citas iniciales
+deterministas. Las citas nuevas reciben identificadores secuenciales y las
+operaciones usan siempre el primer calendario disponible en el orden configurado.
+
+El fake consulta slots de 30 minutos, considera ocupados los periodos registrados
+y las citas activas, y conserva las citas canceladas para poder consultarlas. Sus
+operaciones de crear y reprogramar rechazan conflictos con `SlotUnavailable`.
+Tambien permite configurar errores publicos persistentes o de una sola ejecucion
+para probar la traduccion de errores del proveedor.
+
+## ToolExecutor
+
+`ToolExecutor.execute()` recibe un `ToolRequest` directo, sin depender del
+formato de tool calling de un LLM. Parsea y normaliza sus argumentos, conserva el
+`PatientScope` creado por el backend, valida reglas locales y, cuando la regla
+depende de citas conocidas, obtiene una fotografia mediante el proveedor usando
+ese mismo alcance.
+
+Luego ejecuta exactamente una operacion de `CalendarProvider` y envuelve su salida
+en el output tipado correspondiente. Devuelve siempre `ToolResult`: los errores de
+argumentos, reglas de negocio y proveedor se convierten mediante la frontera de
+errores publicos. El request no puede elegir paciente, conversacion ni calendario;
+el calendario lo resuelve la configuracion del proveedor.
+
 ## Reglas de dominio
 
 1. Las citas y los espacios disponibles duran exactamente 30 minutos.
@@ -115,11 +143,24 @@ Los errores transitorios reconocibles se clasifican como
     sin incluir su mensaje interno.
 16. Un fallo transitorio del proveedor se marca como reintentable sin exponer la
     excepcion original.
+17. El fake implementa las cinco operaciones del `CalendarProvider` sin red ni
+    persistencia.
+18. Los periodos ocupados bloquean los slots correspondientes.
+19. Las citas creadas, reprogramadas y canceladas conservan estados e
+    identificadores deterministas.
+20. Los conflictos de crear y reprogramar producen `SlotUnavailable`.
+21. Los errores simulados pueden ser persistentes o de una sola ejecucion.
+22. `ToolExecutor` rechaza argumentos invalidos antes de ejecutar operaciones del
+    proveedor.
+23. `ToolExecutor` aplica horario laboral, fechas futuras, conflictos conocidos,
+    pertenencia y estados antes de delegar cuando dispone de la fotografia.
+24. Cada operacion del ejecutor devuelve el output tipado correspondiente dentro
+    de `ToolResult.success()`.
+25. El ejecutor conserva el `PatientScope` del request y no permite seleccionar
+    paciente, conversacion ni calendario desde los argumentos.
 
 ## Fuera de alcance de este incremento
 
-- Ejecutar las cinco herramientas mediante un `ToolExecutor` completo.
-- Implementar `FakeCalendarProvider`.
 - Conectar Google Calendar.
 - Crear tablas persistentes de citas.
 - Integrar llamadas de herramientas en el contrato actual del LLM.

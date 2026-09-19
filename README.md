@@ -40,9 +40,9 @@ semantica. La suite automatizada usa un proveedor falso y no requiere estas
 credenciales.
 
 El corte activo define el modelo de dominio, los contratos tipados de las cinco
-herramientas, la validacion previa al proveedor, los errores publicos y
-`CalendarProvider`. Todavia no ejecuta operaciones ni se conecta a Google
-Calendar.
+herramientas, la validacion previa al proveedor, los errores publicos,
+`CalendarProvider`, `FakeCalendarProvider` y `ToolExecutor`. La conexion a
+Google Calendar queda pendiente.
 
 El webhook crea el proveedor, recupera el historial desde `ConversationService`,
 genera la respuesta, la envia por WhatsApp y registra el resultado. Un fallo de

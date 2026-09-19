@@ -2,7 +2,7 @@
 
 ## Estado
 
-Implementado para el incremento de errores publicos del contrato.
+Implementado para el incremento del ejecutor del contrato.
 
 ## Frontera del dominio
 
@@ -16,10 +16,12 @@ PatientScope creado por el backend
 ToolRequest + argumentos conversacionales
     |
     v
-ToolExecutor (siguiente incremento)
+ToolExecutor
     |
     v
-CalendarProvider (FakeCalendarProvider o Google)
+CalendarProvider
+    +-- FakeCalendarProvider
+    +-- Google Calendar (futuro)
     |
     v
 ToolResult
@@ -80,7 +82,7 @@ excluye estados que ya no bloquean el horario.
 `ToolValidationError` conserva un `ToolErrorCode`, por ejemplo
 `DATE_IN_PAST`, `OUTSIDE_BUSINESS_HOURS`, `SLOT_UNAVAILABLE`,
 `APPOINTMENT_ACCESS_DENIED` o `INVALID_APPOINTMENT_STATE`. El `ToolExecutor`
-futuro reutilizara la conversion publica antes de devolverlos al agente.
+reutiliza la conversion publica antes de devolverlos al agente.
 
 `tool_results.py` contiene la frontera de conversion. `public_error_from_exception`
 reduce errores de validacion a errores propios, clasifica fallos transitorios
@@ -88,6 +90,32 @@ conocibles como `CalendarProviderUnavailable` y reduce cualquier otro fallo
 externo a `CalendarProviderError`. `execute_with_public_errors` aplica la misma
 regla a una operacion asincrona y solo devuelve `ToolResult`, por lo que el LLM
 no recibe la excepcion original ni sus detalles.
+
+`fake_calendar_provider.py` implementa `CalendarProvider` en memoria. Mantiene
+periodos ocupados y citas en colecciones privadas, ordena las respuestas por
+fecha e identificador y genera identificadores secuenciales. Para crear una cita
+elige el primer calendario configurado que no tenga un periodo ocupado ni una
+cita activa. Reprogramar conserva el calendario y el identificador; cancelar
+conserva la cita y cambia su estado a `cancelled`.
+
+Los errores se pueden configurar por `ToolName` como persistentes o de una sola
+ejecucion. Esto permite probar tanto conflictos reales del fake como fallos del
+proveedor a traves de `execute_with_public_errors`.
+
+## ToolExecutor
+
+`tool_executor.py` recibe un `CalendarProvider`, `BusinessHours`, la zona horaria
+del backend y un reloj opcional para pruebas. `execute()` valida el tipo
+`ToolRequest`, llama a `parse_tool_request()` y aplica primero las reglas que no
+requieren red. Para crear o modificar obtiene despues una fotografia de las citas
+del `PatientScope` desde `list_appointments()` y repite la validacion de conflictos,
+pertenencia y estado con esa fotografia.
+
+La ejecucion se despacha por tipo de input y construye exactamente uno de los
+cinco outputs tipados. El calendario no se copia desde los argumentos: el fake lo
+elige de su configuracion y un proveedor real hara lo mismo. Cualquier
+`Exception` se reduce con `tool_result_from_exception()`, por lo que el llamador
+recibe un `ToolResult` tanto en exito como en fallo.
 
 ## CalendarProvider
 
@@ -102,8 +130,7 @@ El protocolo asincrono declara:
 Los calendarios seleccionados se configuran al construir el proveedor. No son
 argumentos de los metodos ni del LLM. La validacion de negocio y la traduccion de
 errores pertenecen al ejecutor. La conversion publica ya esta aislada en
-`tool_results.py` para que un ejecutor futuro no tenga que conocer excepciones de
-Google.
+`tool_results.py` para que el ejecutor no tenga que conocer excepciones de Google.
 
 ## Limite con el LLM
 

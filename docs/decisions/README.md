@@ -17,3 +17,5 @@ indique cual decision anterior queda obsoleta.
 - [0006 - Contratos tipados para herramientas de calendario](./0006-calendar-tool-contracts.md)
 - [0007 - Validacion de herramientas antes del proveedor](./0007-pre-provider-tool-validation.md)
 - [0008 - Errores publicos para las herramientas de agenda](./0008-public-calendar-errors.md)
+- [0009 - Proveedor falso determinista de calendario](./0009-fake-calendar-provider.md)
+- [0010 - Frontera interna del ejecutor de herramientas](./0010-tool-executor-boundary.md)

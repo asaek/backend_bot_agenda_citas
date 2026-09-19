@@ -86,18 +86,16 @@ WhatsApp y SQLite temporal. La especificacion y las tareas estan en
 ### Corte activo: contrato de herramientas de citas
 
 Los incrementos actuales definen el modelo de dominio, los inputs y outputs
-tipados, la validacion previa, los errores publicos y la frontera
-`CalendarProvider`, sin ejecutar todavia herramientas ni conectarse a Google
-Calendar. La especificacion y las tareas estan en
+tipados, la validacion previa, los errores publicos, la frontera
+`CalendarProvider`, un proveedor falso determinista en memoria y `ToolExecutor`,
+sin conectarse a Google Calendar. La especificacion y las tareas estan en
 `specs/005-tool-contract/`.
 
 ### Cortes futuros
 
 Los siguientes temas se especificaran por separado cuando corresponda:
 
-1. Ejecutar el contrato de herramientas con `ToolExecutor` y
-   `FakeCalendarProvider`.
-2. Integrar Google Calendar.
+1. Integrar Google Calendar.
 3. Memoria conversacional avanzada.
 4. RAG con PostgreSQL y pgvector.
 5. Automatizaciones externas y despliegue.

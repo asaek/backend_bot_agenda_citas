@@ -106,9 +106,11 @@ operaciones ni conecta Google Calendar.
 `tool_contracts.py` define los inputs y outputs especificos de cada herramienta.
 `tool_validation.py` valida fechas, horarios, conflictos, pertenencia y estados
 antes de cualquier proveedor. `tool_results.py` convierte las excepciones de la
-frontera de agenda en `ToolResult.failure()` sin copiar detalles internos. El
-`ToolExecutor` y `FakeCalendarProvider` se implementaran en el siguiente
-incremento.
+frontera de agenda en `ToolResult.failure()` sin copiar detalles internos.
+`FakeCalendarProvider` implementa el contrato en memoria con datos deterministas,
+periodos ocupados, conflictos y fallos simulables. El `ToolExecutor` se
+encarga de parsear, validar, despachar cada operación y envolver su salida en el
+output tipado correspondiente.
 
 ### Persistence y repositories
 

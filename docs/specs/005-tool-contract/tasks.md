@@ -39,11 +39,27 @@
 - [x] Clasificar fallos transitorios como reintentables sin filtrar detalles.
 - [x] Probar exito, errores tipificados y excepciones desconocidas.
 
+## FakeCalendarProvider
+
+- [x] Implementar el protocolo `CalendarProvider` en memoria.
+- [x] Registrar periodos ocupados y citas iniciales deterministas.
+- [x] Crear, listar, reprogramar y cancelar citas.
+- [x] Rechazar conflictos de slots y conservar citas canceladas.
+- [x] Simular errores persistentes y de una sola ejecucion.
+- [x] Probar operaciones, conflictos y errores del proveedor.
+
+## ToolExecutor
+
+- [x] Recibir `ToolRequest` y conservar su `PatientScope` del backend.
+- [x] Normalizar argumentos y rechazar solicitudes invalidas antes del proveedor.
+- [x] Aplicar horarios, fechas, conflictos conocidos, permisos y estados.
+- [x] Despachar las cinco operaciones al `CalendarProvider`.
+- [x] Construir outputs tipados dentro de `ToolResult`.
+- [x] Convertir excepciones del proveedor en errores publicos seguros.
+- [x] Probar el ejecutor directamente sin tool calling del LLM.
+
 ## Siguiente incremento
 
-- [ ] Implementar `ToolExecutor` que ejecute solo inputs validados.
-- [ ] Implementar `FakeCalendarProvider` en memoria.
-- [ ] Probar disponibilidad, conflictos, permisos y estados invalidos.
 - [ ] Integrar las herramientas con el flujo del agente.
 
 ## Integracion futura
