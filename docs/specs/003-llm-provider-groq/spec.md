@@ -2,10 +2,9 @@
 
 ## Estado
 
-Verificado para el adaptador compatible con OpenAI y la construccion del
-contexto. Groq es el proveedor predeterminado y OpenRouter usa el mismo
-adaptador; el webhook todavia conserva la respuesta fija hasta completar la
-integracion del proveedor.
+Verificado para el adaptador compatible con OpenAI, la construccion del contexto
+y el ciclo integrado de generacion y envio. Groq es el proveedor predeterminado
+y OpenRouter usa el mismo adaptador.
 
 ## Problema
 
@@ -29,6 +28,9 @@ llamadas reales a Internet.
 - Permitir inyectar un cliente HTTP falso durante las pruebas.
 - Construir los mensajes del modelo desde el historial persistido.
 - Aplicar un prompt de sistema con las reglas conversacionales del MVP.
+- Inyectar el proveedor en `ConversationService`.
+- Generar la respuesta antes de enviarla mediante WhatsApp.
+- Registrar fallos de generacion o envio para permitir reintentos.
 
 ## Requisitos funcionales
 
@@ -77,6 +79,19 @@ y claro, no invente citas, horarios o datos, no afirme acciones externas, no
 proporcione diagnosticos medicos, pida aclaraciones cuando falte informacion y
 responda solo con texto normal.
 
+### RF-308 - Ciclo de respuesta
+
+`ConversationService` debe recuperar el historial, construir los mensajes del
+LLM y solicitar la respuesta mediante `LLMProvider.generate()`. `main.py` debe
+coordinar el servicio, `WhatsAppClient` y el registro de la respuesta, sin
+contener reglas de conversacion.
+
+### RF-309 - Fallos de generacion
+
+Si el LLM no genera una respuesta, el backend no debe enviar ningun mensaje por
+WhatsApp, debe registrar la salida como `failed` y debe permitir reintentar el
+mensaje entrante posteriormente.
+
 ## Criterios de aceptacion
 
 1. Una configuracion valida crea el adaptador para Groq.
@@ -90,12 +105,13 @@ responda solo con texto normal.
 9. El contexto recupera el historial guardado y conserva el orden de sus roles.
 10. El contexto empieza con las reglas del mensaje `system` definidas para el MVP.
 11. El contexto solo usa los mensajes mas recientes dentro del limite configurado.
-12. El webhook existente conserva su respuesta fija hasta la integracion del
-    proveedor.
+12. Un mensaje valido genera la respuesta mediante el proveedor, la envia por
+    WhatsApp y la registra como `sent`.
+13. Un fallo del LLM se registra como `failed` sin enviar un mensaje y permite
+    reintentar posteriormente.
 
 ## Fuera de alcance
 
-- Integracion del proveedor en `POST /webhook/whatsapp`.
 - Reintentos, colas y procesamiento asincrono externo.
 - Herramientas, RAG y memoria semantica.
 - Uso de datos reales de pacientes.

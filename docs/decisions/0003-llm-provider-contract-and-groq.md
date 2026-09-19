@@ -40,3 +40,8 @@ El adaptador implementado se generalizo como `OpenAICompatibleLLMProvider`.
 Groq continua siendo el proveedor predeterminado y OpenRouter puede utilizar el
 mismo adaptador cambiando `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY` y
 `LLM_MODEL`. La decision de no agregar un framework de agentes se mantiene.
+
+El tercer incremento inyecto el proveedor en `ConversationService`. El servicio
+construye el contexto y solicita la respuesta; `main.py` coordina el envio por
+WhatsApp y el registro de estados, manteniendo fuera de `main.py` la logica de
+conversacion.

@@ -13,7 +13,8 @@ import httpx
 from fastapi.testclient import TestClient
 
 from conversation_service import ConversationService, IncomingTextMessage
-from main import FIXED_REPLY, app, normalize_recipient_number
+from llm_provider import ChatMessage, LLMProviderError
+from main import app, normalize_recipient_number
 from persistence import SQLiteDatabase
 from whatsapp_client import GRAPH_API_VERSION, WhatsAppClient
 
@@ -48,6 +49,25 @@ class FailOnceWhatsAppClient(FakeWhatsAppClient):
         return await super().send_text(to, body)
 
 
+GENERATED_REPLY = "Respuesta generada por el proveedor."
+
+
+class FakeLLMProvider:
+    def __init__(self, reply: str = GENERATED_REPLY) -> None:
+        self.reply = reply
+        self.received_messages: list[list[ChatMessage]] = []
+
+    async def generate(self, messages: list[ChatMessage]) -> str:
+        self.received_messages.append(messages)
+        return self.reply
+
+
+class FailingLLMProvider(FakeLLMProvider):
+    async def generate(self, messages: list[ChatMessage]) -> str:
+        self.received_messages.append(messages)
+        raise LLMProviderError("fallo de generacion de prueba")
+
+
 class WebhookTests(unittest.TestCase):
     def setUp(self) -> None:
         self.database_directory = tempfile.TemporaryDirectory()
@@ -56,6 +76,25 @@ class WebhookTests(unittest.TestCase):
             "chatbot.sqlite3",
         )
         self.addCleanup(self.database_directory.cleanup)
+
+    @contextmanager
+    def configured_runtime(
+        self,
+        whatsapp_client: FakeWhatsAppClient,
+        llm_provider: FakeLLMProvider | None = None,
+    ) -> Iterator[FakeLLMProvider]:
+        provider = llm_provider or FakeLLMProvider()
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_PATH": self.database_path,
+                "LLM_API_KEY": "test-key",
+                "LLM_MODEL": "test-model",
+            },
+        ):
+            with patch("main.WhatsAppClient", return_value=whatsapp_client):
+                with patch("main.create_llm_provider", return_value=provider):
+                    yield provider
 
     def text_payload(
         self,
@@ -126,25 +165,23 @@ class WebhookTests(unittest.TestCase):
         payload = self.text_payload()
         fake_client = FakeWhatsAppClient()
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    response = client.post("/webhook/whatsapp", json=payload)
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                response = client.post("/webhook/whatsapp", json=payload)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
-        self.assertEqual(fake_client.sent_messages, [("5491100000000", FIXED_REPLY)])
+        self.assertEqual(fake_client.sent_messages, [("5491100000000", GENERATED_REPLY)])
 
     def test_first_message_creates_patient_conversation_and_history(self) -> None:
         fake_client = FakeWhatsAppClient()
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    response = client.post(
-                        "/webhook/whatsapp",
-                        json=self.text_payload(),
-                    )
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(),
+                )
 
         self.assertEqual(response.status_code, 200)
         with open_database(self.database_path) as connection:
@@ -164,7 +201,7 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(statuses, [("incoming", "received"), ("outgoing", "sent")])
         service = ConversationService(SQLiteDatabase(self.database_path))
         history = service.get_history(conversation_id)
-        self.assertEqual([message.text for message in history], ["Hola", FIXED_REPLY])
+        self.assertEqual([message.text for message in history], ["Hola", GENERATED_REPLY])
 
     def test_second_message_reuses_patient_and_conversation(self) -> None:
         fake_client = FakeWhatsAppClient()
@@ -174,14 +211,13 @@ class WebhookTests(unittest.TestCase):
             text="Quiero continuar",
         )
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    responses = self.post_messages(
-                        client,
-                        first_payload,
-                        second_payload,
-                    )
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    first_payload,
+                    second_payload,
+                )
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
         with open_database(self.database_path) as connection:
@@ -201,17 +237,16 @@ class WebhookTests(unittest.TestCase):
     def test_different_numbers_create_independent_patients(self) -> None:
         fake_client = FakeWhatsAppClient()
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    responses = self.post_messages(
-                        client,
-                        self.text_payload(),
-                        self.text_payload(
-                            sender="5491100000001",
-                            message_id="wamid.test.2",
-                        ),
-                    )
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(),
+                    self.text_payload(
+                        sender="5491100000001",
+                        message_id="wamid.test.2",
+                    ),
+                )
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
         with open_database(self.database_path) as connection:
@@ -225,14 +260,13 @@ class WebhookTests(unittest.TestCase):
         fake_client = FakeWhatsAppClient()
         payload = self.text_payload()
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    responses = self.post_messages(
-                        client,
-                        payload,
-                        payload,
-                    )
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    payload,
+                    payload,
+                )
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
         self.assertEqual(len(fake_client.sent_messages), 1)
@@ -243,11 +277,10 @@ class WebhookTests(unittest.TestCase):
         fake_client = FailOnceWhatsAppClient()
         payload = self.text_payload()
 
-        with patch.dict(os.environ, {"DATABASE_PATH": self.database_path}):
-            with patch("main.WhatsAppClient", return_value=fake_client):
-                with TestClient(app) as client:
-                    first_response = client.post("/webhook/whatsapp", json=payload)
-                    second_response = client.post("/webhook/whatsapp", json=payload)
+        with self.configured_runtime(fake_client):
+            with TestClient(app) as client:
+                first_response = client.post("/webhook/whatsapp", json=payload)
+                second_response = client.post("/webhook/whatsapp", json=payload)
 
         self.assertEqual(first_response.status_code, 502)
         self.assertEqual(second_response.status_code, 200)
@@ -261,6 +294,26 @@ class WebhookTests(unittest.TestCase):
                 "sent",
             )
 
+    def test_llm_failure_is_recorded_without_sending_a_message(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        failing_provider = FailingLLMProvider()
+
+        with self.configured_runtime(fake_client, failing_provider):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(),
+                )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(fake_client.sent_messages, [])
+        with open_database(self.database_path) as connection:
+            messages = connection.execute(
+                "SELECT direction, status, text FROM messages ORDER BY id"
+            ).fetchall()
+
+        self.assertEqual(messages, [("incoming", "received", "Hola"), ("outgoing", "failed", "")])
+
     def test_history_survives_new_conversation_service(self) -> None:
         service = ConversationService(SQLiteDatabase(self.database_path))
         context = service.receive_message(
@@ -271,14 +324,14 @@ class WebhookTests(unittest.TestCase):
                 text="Hola",
             )
         )
-        service.record_reply_sent(context, FIXED_REPLY, "wamid.reply.restart")
+        service.record_reply_sent(context, GENERATED_REPLY, "wamid.reply.restart")
 
         restarted_service = ConversationService(SQLiteDatabase(self.database_path))
         history = restarted_service.get_history(context.conversation_id)
 
         self.assertEqual(len(history), 2)
         self.assertEqual(history[0].text, "Hola")
-        self.assertEqual(history[1].text, FIXED_REPLY)
+        self.assertEqual(history[1].text, GENERATED_REPLY)
 
     def test_non_text_event_is_ignored_without_cloud_api_credentials(self) -> None:
         payload = {
@@ -310,7 +363,7 @@ class WhatsAppClientTests(unittest.TestCase):
                     phone_number_id="phone-id",
                     http_client=http_client,
                 )
-                result = await client.send_text("5491100000000", FIXED_REPLY)
+                result = await client.send_text("5491100000000", GENERATED_REPLY)
 
             self.assertEqual(result, {"messages": [{"id": "wamid.reply"}]})
 
@@ -327,6 +380,6 @@ class WhatsAppClientTests(unittest.TestCase):
                 "messaging_product": "whatsapp",
                 "to": "5491100000000",
                 "type": "text",
-                "text": {"body": FIXED_REPLY},
+                "text": {"body": GENERATED_REPLY},
             },
         )

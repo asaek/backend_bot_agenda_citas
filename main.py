@@ -10,10 +10,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from conversation_service import (
-    FIXED_REPLY,
     ConversationContext,
     ConversationService,
     IncomingTextMessage,
+)
+from llm_provider import (
+    LLMConfigurationError,
+    LLMProviderError,
+    create_llm_provider,
+    load_llm_settings,
 )
 from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
 from whatsapp_client import WhatsAppClient, WhatsAppConfigurationError
@@ -26,7 +31,12 @@ app = FastAPI(title="WhatsApp Chatbot")
 
 def create_conversation_service() -> ConversationService:
     database_path = os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)
-    return ConversationService(SQLiteDatabase(database_path))
+    settings = load_llm_settings()
+    return ConversationService(
+        SQLiteDatabase(database_path),
+        llm_provider=create_llm_provider(settings),
+        max_history_messages=settings.max_history_messages,
+    )
 
 
 def extract_provider_message_id(result: dict[str, Any]) -> str | None:
@@ -134,7 +144,10 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     if not messages:
         return {"status": "ok"}
 
-    conversation_service = create_conversation_service()
+    try:
+        conversation_service = create_conversation_service()
+    except LLMConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
     whatsapp_client = WhatsAppClient()
     for message in messages:
         context: ConversationContext = conversation_service.receive_message(message)
@@ -142,7 +155,14 @@ async def receive_webhook(request: Request) -> dict[str, str]:
         if context.reply_status == "sent":
             continue
 
-        reply = conversation_service.build_reply(context)
+        try:
+            reply = await conversation_service.build_reply(context)
+        except LLMProviderError as error:
+            conversation_service.record_reply_failed(context, body="")
+            raise HTTPException(
+                status_code=502,
+                detail="No se pudo generar la respuesta del asistente",
+            ) from error
         try:
             result = await whatsapp_client.send_text(
                 to=normalize_recipient_number(message.sender),

@@ -87,8 +87,8 @@ backend. Extrae mensajes de texto y coordina el `ConversationService`.
 Identifica al paciente de prueba por su numero de WhatsApp, busca o crea una
 conversacion activa, conserva el historial y construye el contexto para el LLM.
 El contexto comienza con las reglas del asistente y usa los mensajes mas
-recientes persistidos. En esta etapa todavia devuelve la respuesta fija de
-prueba.
+recientes persistidos. Tambien solicita la respuesta al proveedor LLM y conserva
+el resultado del envio.
 
 ### Persistence y repositories
 
@@ -109,8 +109,9 @@ conversacional no dependa de un proveedor concreto. El adaptador
 `OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq u
 OpenRouter.
 
-El adaptador esta preparado, pero todavia no participa en el flujo del webhook;
-la respuesta fija se conserva hasta completar la integracion del proveedor.
+El adaptador participa en el flujo del webhook mediante la inyeccion de
+`LLMProvider` en `ConversationService`. `main.py` coordina la generacion, el
+envio y el registro, pero no decide el contenido conversacional.
 
 ### Uvicorn
 

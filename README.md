@@ -1,9 +1,8 @@
 # WhatsApp Chatbot
 
-Etapa 4, incremento 2: definir el contrato de LLM, preparar el adaptador
-compatible con OpenAI para Groq y OpenRouter, y construir el contexto desde el
-historial reciente. El webhook todavia conserva la respuesta fija mientras se
-completa el ciclo de LLM y WhatsApp.
+Etapa 4, incremento 3: definir el contrato de LLM, preparar el adaptador
+compatible con OpenAI para Groq y OpenRouter, construir el contexto desde el
+historial reciente e integrar el ciclo de LLM y WhatsApp.
 
 ## 1. Instalar dependencias
 
@@ -35,9 +34,9 @@ El adaptador compatible con OpenAI usa estas variables adicionales:
 Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
 `LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
 
-En este incremento el adaptador se prueba de forma aislada, el contexto se
-construye desde `ConversationService` y todavia no se invoca el LLM desde el
-webhook.
+El webhook crea el proveedor, recupera el historial desde `ConversationService`,
+genera la respuesta, la envia por WhatsApp y registra el resultado. Un fallo de
+generacion o envio queda marcado como `failed` para permitir un reintento.
 
 ## 3. Iniciar el servidor
 
@@ -72,9 +71,8 @@ curl -X POST http://127.0.0.1:8000/webhook/whatsapp \
 ```
 
 La respuesta debe ser `{"status":"ok"}`. El backend extrae el remitente, el ID,
-el tipo y el texto, identifica o crea el paciente de prueba, guarda el mensaje y
-envia esta respuesta fija:
-`Hola, recibimos tu mensaje. Esta es una respuesta de prueba.`
+el tipo y el texto, identifica o crea el paciente de prueba, construye el
+contexto, genera la respuesta, la envia y la guarda como `sent`.
 
 Un segundo evento con el mismo valor de `from` reutiliza el paciente y la
 conversacion activa. Si Meta reenvia el mismo `id`, el backend no duplica la
@@ -92,7 +90,7 @@ uv run python -m unittest discover -s tests -v
 - `GET /`: comprobacion sencilla del servidor.
 - `GET /webhook/whatsapp`: verificacion solicitada por Meta.
 - `POST /webhook/whatsapp`: recepcion de eventos enviados por Meta, persistencia
-  de mensajes y respuesta fija para mensajes de texto.
+  de mensajes y respuesta generada por el LLM para mensajes de texto.
 
 Los eventos que no sean mensajes de texto, como estados, imagenes o audios, se
 ignoran temporalmente. Las credenciales solo deben existir como variables de

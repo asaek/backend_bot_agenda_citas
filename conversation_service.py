@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from llm_provider import ChatMessage, DEFAULT_LLM_MAX_HISTORY_MESSAGES
+from llm_provider import (
+    ChatMessage,
+    DEFAULT_LLM_MAX_HISTORY_MESSAGES,
+    LLMProvider,
+)
 from persistence import SQLiteDatabase
 from repositories import (
     ConversationRepository,
@@ -11,7 +15,6 @@ from repositories import (
 )
 
 
-FIXED_REPLY = "Hola, recibimos tu mensaje. Esta es una respuesta de prueba."
 SYSTEM_PROMPT = "\n".join(
     (
         "Responder en español.",
@@ -46,8 +49,15 @@ def utc_now() -> str:
 
 
 class ConversationService:
-    def __init__(self, database: SQLiteDatabase) -> None:
+    def __init__(
+        self,
+        database: SQLiteDatabase,
+        llm_provider: LLMProvider | None = None,
+        max_history_messages: int = DEFAULT_LLM_MAX_HISTORY_MESSAGES,
+    ) -> None:
         self.database = database
+        self.llm_provider = llm_provider
+        self.max_history_messages = max_history_messages
         self.patients = PatientRepository()
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
@@ -98,21 +108,28 @@ class ConversationService:
                 reply_status=None,
             )
 
-    def build_reply(self, context: ConversationContext) -> str:
-        del context
-        return FIXED_REPLY
+    async def build_reply(self, context: ConversationContext) -> str:
+        if self.llm_provider is None:
+            raise RuntimeError("ConversationService requiere un proveedor LLM")
+        messages = self.build_chat_messages(context)
+        return await self.llm_provider.generate(messages)
 
     def build_chat_messages(
         self,
         context: ConversationContext,
-        max_history_messages: int = DEFAULT_LLM_MAX_HISTORY_MESSAGES,
+        max_history_messages: int | None = None,
     ) -> list[ChatMessage]:
         """Construye el contexto del LLM con el historial más reciente."""
-        if max_history_messages <= 0:
+        history_limit = (
+            self.max_history_messages
+            if max_history_messages is None
+            else max_history_messages
+        )
+        if history_limit <= 0:
             raise ValueError("max_history_messages debe ser positivo")
 
         history = self.get_history(context.conversation_id)
-        recent_history = history[-max_history_messages:]
+        recent_history = history[-history_limit:]
         messages = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
 
         for message in recent_history:

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import unittest
@@ -7,7 +8,17 @@ from conversation_service import (
     ConversationService,
     IncomingTextMessage,
 )
+from llm_provider import ChatMessage
 from persistence import SQLiteDatabase
+
+
+class FakeLLMProvider:
+    def __init__(self) -> None:
+        self.received_messages: list[list[ChatMessage]] = []
+
+    async def generate(self, messages: list[ChatMessage]) -> str:
+        self.received_messages.append(messages)
+        return "Respuesta del LLM"
 
 
 class ConversationContextTests(unittest.TestCase):
@@ -18,7 +29,50 @@ class ConversationContextTests(unittest.TestCase):
             "chatbot.sqlite3",
         )
         self.addCleanup(self.database_directory.cleanup)
-        self.service = ConversationService(SQLiteDatabase(self.database_path))
+        self.llm_provider = FakeLLMProvider()
+        self.service = ConversationService(
+            SQLiteDatabase(self.database_path),
+            llm_provider=self.llm_provider,
+        )
+
+    def test_build_reply_generates_from_the_conversation_context(self) -> None:
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.first",
+                message_type="text",
+                text="Necesito una cita",
+            )
+        )
+        self.service.record_reply_sent(
+            first_context,
+            body="¿Qué día prefieres?",
+            provider_message_id="wamid.reply.first",
+        )
+        current_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.second",
+                message_type="text",
+                text="El viernes",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(current_context))
+
+        self.assertEqual(reply, "Respuesta del LLM")
+        self.assertEqual(
+            [
+                (message.role, message.content)
+                for message in self.llm_provider.received_messages[0]
+            ],
+            [
+                ("system", SYSTEM_PROMPT),
+                ("user", "Necesito una cita"),
+                ("assistant", "¿Qué día prefieres?"),
+                ("user", "El viernes"),
+            ],
+        )
 
     def test_builds_system_prompt_and_chat_history_in_order(self) -> None:
         first_context = self.service.receive_message(

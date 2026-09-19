@@ -2,7 +2,7 @@
 
 ## Estado
 
-Implementado y verificado para los dos primeros incrementos de la etapa 4.
+Implementado y verificado para los tres primeros incrementos de la etapa 4.
 
 ## Componentes
 
@@ -20,6 +20,9 @@ OpenAICompatibleLLMProvider
     |
     v
 Proveedor API /chat/completions
+    |
+    v
+Conversation Service -> WhatsAppClient -> WhatsApp
 ```
 
 `LLMProvider` es un protocolo asincrono. Recibe una secuencia de `ChatMessage`
@@ -71,8 +74,15 @@ El prompt de sistema exige respuestas en español, breves y claras, sin inventar
 datos, afirmar acciones externas, proporcionar diagnosticos medicos ni usar un
 formato distinto de texto normal.
 
-## Decision de alcance
+## Ciclo integrado
 
-El proveedor todavia no se inyecta en `ConversationService` y el webhook no se
-modifica en este incremento. La respuesta fija se conserva hasta completar el
-ciclo de generacion, registro de fallos y envio por WhatsApp.
+`ConversationService` recibe un `LLMProvider` y el limite de historial mediante
+inyeccion de dependencias. `build_reply(context)` construye el contexto y espera
+`generate(messages)`. `main.py` crea las dependencias, llama al servicio, envia
+la respuesta con `WhatsAppClient` y registra el resultado con
+`record_reply_sent()`.
+
+Si la generacion falla, `main.py` registra una respuesta saliente vacia con
+estado `failed` y devuelve un error controlado sin llamar a WhatsApp. Como las
+respuestas `failed` no forman parte del contexto, el siguiente webhook puede
+reintentar la generacion sin presentar una respuesta no entregada al modelo.

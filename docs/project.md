@@ -41,7 +41,7 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Ejecutar un backend local con Python y FastAPI.
 - Verificar una Callback URL con Meta.
 - Recibir un evento de WhatsApp en `POST /webhook/whatsapp`.
-- Parsear mensajes de texto y enviar una respuesta fija de prueba.
+- Parsear mensajes de texto y enviar una respuesta generada por el LLM.
 - Identificar pacientes de prueba por su numero de WhatsApp.
 - Guardar pacientes, conversaciones y mensajes en SQLite.
 - Mantener una conversacion activa entre varias solicitudes y reinicios.
@@ -67,30 +67,29 @@ mensaje del mismo numero reutilice el contexto basico despues de varias
 solicitudes o de un reinicio. Las tareas de este corte estan en
 `specs/002-persistence-conversation-service/tasks.md`.
 
-### Corte activo: contexto para el LLM
+### Corte activo: ciclo integrado de LLM y WhatsApp
 
-Los dos primeros incrementos de la etapa 4 definen una frontera independiente
+Los tres primeros incrementos de la etapa 4 definen una frontera independiente
 del proveedor, preparan un adaptador compatible con OpenAI para Groq y
-OpenRouter, y construyen el contexto desde el historial reciente. El webhook
-conserva temporalmente la respuesta fija. Las tareas estan en
+OpenRouter, construyen el contexto desde el historial reciente e integran el
+ciclo de generacion y envio. Las tareas estan en
 `specs/003-llm-provider-groq/tasks.md`.
 
 ### Cortes futuros
 
 Los siguientes temas se especificaran por separado cuando corresponda:
 
-1. Integracion del LLM en el ciclo basico del agente.
-2. Memoria conversacional avanzada.
-3. Herramientas y Google Calendar.
-4. RAG con PostgreSQL y pgvector.
-5. Automatizaciones externas y despliegue.
+1. Memoria conversacional avanzada.
+2. Herramientas y Google Calendar.
+3. RAG con PostgreSQL y pgvector.
+4. Automatizaciones externas y despliegue.
 
 Esta lista expresa una direccion general y no autoriza su implementacion durante
 el corte actual.
 
 ## Fuera del alcance actual
 
-- Integracion del LLM en el webhook, agente, tool calling y RAG.
+- Agente con tool calling y RAG.
 - Integraciones con n8n.
 - Redis y procesamiento mediante colas.
 - PostgreSQL y pgvector.

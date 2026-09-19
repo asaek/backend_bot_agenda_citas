@@ -15,14 +15,15 @@
 - [x] Probar configuracion incompleta e invalida.
 - [x] Probar respuestas HTTP fallidas y sin contenido.
 - [x] Ejecutar la suite existente para confirmar que el webhook sigue usando la
-  respuesta fija.
+  el ciclo integrado con el proveedor simulado.
 
 ## Siguiente incremento
 
 - [x] Construir los mensajes del LLM desde el historial de SQLite.
 - [x] Definir el prompt de sistema y el limite del historial.
 
-## Integracion pendiente
+## Integracion del ciclo
 
-- [ ] Inyectar el proveedor en `ConversationService`.
-- [ ] Reemplazar la respuesta fija y registrar los fallos de generacion.
+- [x] Inyectar el proveedor en `ConversationService`.
+- [x] Reemplazar la respuesta fija y registrar los fallos de generacion.
+- [x] Coordinar generacion, envio y persistencia desde `main.py`.
