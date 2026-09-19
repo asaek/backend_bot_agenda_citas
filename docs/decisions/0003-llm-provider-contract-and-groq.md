@@ -13,8 +13,8 @@ conversacional. El MVP utiliza Groq para las primeras pruebas.
 ## Decision
 
 Se define un protocolo asincrono `LLMProvider` cuyo metodo
-`generate(messages)` devuelve texto. La primera implementacion es
-`GroqLLMProvider`, que usa `httpx` contra la API compatible con OpenAI.
+`generate(messages)` devuelve texto. La primera implementacion es un adaptador
+compatible con OpenAI, que usa `httpx` contra la API de Groq.
 
 La configuracion se obtiene exclusivamente de variables de entorno. El cliente
 HTTP se puede inyectar en pruebas para no depender de un servicio externo.
@@ -33,3 +33,10 @@ HTTP se puede inyectar en pruebas para no depender de un servicio externo.
 - Agregar LangChain u otro framework antes de implementar herramientas.
 - Activar llamadas al LLM desde el webhook antes de contar con pruebas del
   adaptador.
+
+## Actualizacion
+
+El adaptador implementado se generalizo como `OpenAICompatibleLLMProvider`.
+Groq continua siendo el proveedor predeterminado y OpenRouter puede utilizar el
+mismo adaptador cambiando `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY` y
+`LLM_MODEL`. La decision de no agregar un framework de agentes se mantiene.

@@ -1,8 +1,9 @@
 # WhatsApp Chatbot
 
-Etapa 4, incremento 2: definir el contrato de LLM, preparar el adaptador de
-Groq y construir el contexto desde el historial reciente. El webhook todavia
-conserva la respuesta fija mientras se completa el ciclo de LLM y WhatsApp.
+Etapa 4, incremento 2: definir el contrato de LLM, preparar el adaptador
+compatible con OpenAI para Groq y OpenRouter, y construir el contexto desde el
+historial reciente. El webhook todavia conserva la respuesta fija mientras se
+completa el ciclo de LLM y WhatsApp.
 
 ## 1. Instalar dependencias
 
@@ -21,7 +22,7 @@ Las variables exportadas en la shell tienen prioridad sobre `.env`.
 `DATABASE_PATH` define la ruta de la base SQLite. Si no se configura, se usa
 `data/chatbot.sqlite3`. La carpeta `data/` esta excluida de Git.
 
-El adaptador de Groq usa estas variables adicionales:
+El adaptador compatible con OpenAI usa estas variables adicionales:
 
 - `LLM_PROVIDER=groq`
 - `LLM_API_KEY`
@@ -30,6 +31,9 @@ El adaptador de Groq usa estas variables adicionales:
 - `LLM_TIMEOUT_SECONDS=20`
 - `LLM_MAX_HISTORY_MESSAGES=30`
 - `LLM_MAX_OUTPUT_TOKENS=500`
+
+Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
+`LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
 
 En este incremento el adaptador se prueba de forma aislada, el contexto se
 construye desde `ConversationService` y todavia no se invoca el LLM desde el

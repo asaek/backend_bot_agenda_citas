@@ -28,4 +28,4 @@ NNN-nombre-de-la-funcionalidad/
 
 - [001 - Webhook de WhatsApp](./001-whatsapp-webhook/spec.md)
 - [002 - Persistencia y Conversation Service](./002-persistence-conversation-service/spec.md)
-- [003 - Contrato LLM y proveedor Groq](./003-llm-provider-groq/spec.md)
+- [003 - Contrato LLM y proveedores compatibles con OpenAI](./003-llm-provider-groq/spec.md)

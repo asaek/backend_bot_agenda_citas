@@ -6,10 +6,10 @@ import httpx
 
 from llm_provider import (
     ChatMessage,
-    GroqLLMProvider,
     LLMConfigurationError,
     LLMProviderError,
     LLMSettings,
+    OpenAICompatibleLLMProvider,
     create_llm_provider,
     load_llm_settings,
 )
@@ -46,6 +46,17 @@ class LLMSettingsTests(unittest.TestCase):
         self.assertEqual(settings.max_history_messages, 30)
         self.assertEqual(settings.max_output_tokens, 500)
 
+    def test_uses_openrouter_default_base_url(self) -> None:
+        settings = load_llm_settings(
+            {
+                "LLM_PROVIDER": "openrouter",
+                "LLM_API_KEY": "test-key",
+                "LLM_MODEL": "test-model",
+            }
+        )
+
+        self.assertEqual(settings.base_url, "https://openrouter.ai/api/v1")
+
     def test_requires_api_key_and_model(self) -> None:
         with self.assertRaises(LLMConfigurationError):
             load_llm_settings({"LLM_MODEL": "test-model"})
@@ -62,7 +73,24 @@ class LLMSettingsTests(unittest.TestCase):
                 }
             )
 
-    def test_factory_only_accepts_supported_provider(self) -> None:
+    def test_factory_creates_the_same_adapter_for_supported_providers(self) -> None:
+        for provider in ("groq", "openrouter"):
+            settings = LLMSettings(
+                provider=provider,
+                api_key="test-key",
+                model="test-model",
+                base_url="https://example.test",
+                timeout_seconds=20.0,
+                max_history_messages=20,
+                max_output_tokens=500,
+            )
+
+            self.assertIsInstance(
+                create_llm_provider(settings),
+                OpenAICompatibleLLMProvider,
+            )
+
+    def test_factory_rejects_unsupported_provider(self) -> None:
         settings = LLMSettings(
             provider="other",
             api_key="test-key",
@@ -77,7 +105,7 @@ class LLMSettingsTests(unittest.TestCase):
             create_llm_provider(settings)
 
 
-class GroqLLMProviderTests(unittest.TestCase):
+class OpenAICompatibleLLMProviderTests(unittest.TestCase):
     def test_builds_chat_completion_request_and_returns_text(self) -> None:
         requests: list[httpx.Request] = []
 
@@ -95,7 +123,7 @@ class GroqLLMProviderTests(unittest.TestCase):
         async def run_test() -> str:
             transport = httpx.MockTransport(handler)
             async with httpx.AsyncClient(transport=transport) as http_client:
-                provider = GroqLLMProvider(
+                provider = OpenAICompatibleLLMProvider(
                     LLMSettings(
                         provider="groq",
                         api_key="test-key",
@@ -134,6 +162,41 @@ class GroqLLMProviderTests(unittest.TestCase):
             },
         )
 
+    def test_reuses_adapter_with_openrouter_configuration(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "Respuesta"}}]},
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="openrouter",
+                        api_key="test-key",
+                        model="openai/test-model",
+                        base_url="https://openrouter.test/api/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                return await provider.generate(
+                    [ChatMessage(role="user", content="Hola")]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Respuesta")
+        self.assertEqual(
+            str(requests[0].url),
+            "https://openrouter.test/api/v1/chat/completions",
+        )
+
     def test_translates_http_errors_to_provider_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(429, json={"error": {"message": "rate limit"}})
@@ -141,7 +204,7 @@ class GroqLLMProviderTests(unittest.TestCase):
         async def run_test() -> None:
             transport = httpx.MockTransport(handler)
             async with httpx.AsyncClient(transport=transport) as http_client:
-                provider = GroqLLMProvider(
+                provider = OpenAICompatibleLLMProvider(
                     LLMSettings(
                         provider="groq",
                         api_key="test-key",
@@ -159,7 +222,7 @@ class GroqLLMProviderTests(unittest.TestCase):
         asyncio.run(run_test())
 
     def test_rejects_empty_message_list(self) -> None:
-        provider = GroqLLMProvider(
+        provider = OpenAICompatibleLLMProvider(
             LLMSettings(
                 provider="groq",
                 api_key="test-key",

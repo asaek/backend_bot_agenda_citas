@@ -70,9 +70,10 @@ solicitudes o de un reinicio. Las tareas de este corte estan en
 ### Corte activo: contexto para el LLM
 
 Los dos primeros incrementos de la etapa 4 definen una frontera independiente
-del proveedor, preparan la conexion con Groq y construyen el contexto desde el
-historial reciente. El webhook conserva temporalmente la respuesta fija. Las
-tareas estan en `specs/003-llm-provider-groq/tasks.md`.
+del proveedor, preparan un adaptador compatible con OpenAI para Groq y
+OpenRouter, y construyen el contexto desde el historial reciente. El webhook
+conserva temporalmente la respuesta fija. Las tareas estan en
+`specs/003-llm-provider-groq/tasks.md`.
 
 ### Cortes futuros
 

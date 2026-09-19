@@ -1,10 +1,11 @@
-# 003 - Contrato LLM y proveedor Groq
+# 003 - Contrato LLM y proveedores compatibles con OpenAI
 
 ## Estado
 
-Verificado para los dos primeros incrementos de la etapa 4. El contrato, el
-adaptador de Groq y la construccion del contexto existen, pero el webhook
-todavia conserva la respuesta fija hasta completar la integracion del proveedor.
+Verificado para el adaptador compatible con OpenAI y la construccion del
+contexto. Groq es el proveedor predeterminado y OpenRouter usa el mismo
+adaptador; el webhook todavia conserva la respuesta fija hasta completar la
+integracion del proveedor.
 
 ## Problema
 
@@ -15,14 +16,15 @@ proveedor sin modificar la logica del servicio.
 ## Objetivo
 
 Definir un contrato independiente del proveedor y una implementacion inicial
-para Groq que pueda probarse sin realizar llamadas reales a Internet.
+para proveedores compatibles con OpenAI que pueda probarse sin realizar
+llamadas reales a Internet.
 
 ## Alcance
 
 - Definir `LLMProvider.generate(messages) -> str`.
 - Representar los mensajes mediante `ChatMessage`.
 - Cargar la configuracion del LLM desde variables de entorno.
-- Implementar el adaptador de Groq mediante su API compatible con OpenAI.
+- Implementar un adaptador mediante el formato de API compatible con OpenAI.
 - Traducir fallos de red, HTTP y respuestas invalidas a errores propios.
 - Permitir inyectar un cliente HTTP falso durante las pruebas.
 - Construir los mensajes del modelo desde el historial persistido.
@@ -40,12 +42,13 @@ clase especifica de Groq.
 El adaptador debe leer `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`,
 `LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES` y
 `LLM_MAX_OUTPUT_TOKENS` desde el entorno, con valores predeterminados solamente
-para limites tecnicos y la URL de Groq.
+para limites tecnicos y las URLs de los proveedores compatibles soportados.
 
-### RF-303 - Solicitud a Groq
+### RF-303 - Solicitud al proveedor
 
-El adaptador debe enviar los mensajes al endpoint `/chat/completions` con
-autenticacion Bearer, el modelo configurado y el limite de salida configurado.
+El adaptador debe enviar los mensajes al endpoint `/chat/completions` del
+proveedor configurado, con autenticacion Bearer, el modelo configurado y el
+limite de salida configurado.
 
 ### RF-304 - Respuesta de texto
 
@@ -76,17 +79,18 @@ responda solo con texto normal.
 
 ## Criterios de aceptacion
 
-1. Una configuracion valida crea un proveedor Groq.
+1. Una configuracion valida crea el adaptador para Groq.
 2. Una configuracion sin API key o modelo es rechazada.
 3. Los limites opcionales usan los valores definidos para esta etapa.
 4. El request contiene el modelo, los mensajes y `max_tokens`.
 5. La respuesta del proveedor se devuelve como texto limpio.
 6. Un error HTTP se expone como `LLMProviderError`.
 7. Las pruebas usan un transporte HTTP simulado y no requieren API key real.
-8. El contexto recupera el historial guardado y conserva el orden de sus roles.
-9. El contexto empieza con las reglas del mensaje `system` definidas para el MVP.
-10. El contexto solo usa los mensajes mas recientes dentro del limite configurado.
-11. El webhook existente conserva su respuesta fija hasta la integracion del
+8. Una configuracion valida para OpenRouter usa el mismo adaptador y endpoint.
+9. El contexto recupera el historial guardado y conserva el orden de sus roles.
+10. El contexto empieza con las reglas del mensaje `system` definidas para el MVP.
+11. El contexto solo usa los mensajes mas recientes dentro del limite configurado.
+12. El webhook existente conserva su respuesta fija hasta la integracion del
     proveedor.
 
 ## Fuera de alcance

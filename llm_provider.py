@@ -7,10 +7,16 @@ import httpx
 
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_LLM_PROVIDER = "groq"
 DEFAULT_LLM_TIMEOUT_SECONDS = 20.0
 DEFAULT_LLM_MAX_HISTORY_MESSAGES = 30
 DEFAULT_LLM_MAX_OUTPUT_TOKENS = 500
+SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "openrouter"})
+DEFAULT_BASE_URLS = {
+    "groq": DEFAULT_GROQ_BASE_URL,
+    "openrouter": DEFAULT_OPENROUTER_BASE_URL,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +55,10 @@ def load_llm_settings(environment: Mapping[str, str] | None = None) -> LLMSettin
     provider = values.get("LLM_PROVIDER", DEFAULT_LLM_PROVIDER).strip().lower()
     api_key = values.get("LLM_API_KEY", "").strip()
     model = values.get("LLM_MODEL", "").strip()
-    base_url = values.get("LLM_BASE_URL", DEFAULT_GROQ_BASE_URL).strip()
+    base_url = values.get(
+        "LLM_BASE_URL",
+        DEFAULT_BASE_URLS.get(provider, DEFAULT_GROQ_BASE_URL),
+    ).strip()
 
     if not api_key:
         raise LLMConfigurationError("LLM_API_KEY no esta configurado")
@@ -87,14 +96,14 @@ def load_llm_settings(environment: Mapping[str, str] | None = None) -> LLMSettin
 
 def create_llm_provider(settings: LLMSettings | None = None) -> LLMProvider:
     resolved_settings = settings or load_llm_settings()
-    if resolved_settings.provider != "groq":
+    if resolved_settings.provider not in SUPPORTED_LLM_PROVIDERS:
         raise LLMConfigurationError(
             f"LLM_PROVIDER no soportado: {resolved_settings.provider}"
         )
-    return GroqLLMProvider(resolved_settings)
+    return OpenAICompatibleLLMProvider(resolved_settings)
 
 
-class GroqLLMProvider:
+class OpenAICompatibleLLMProvider:
     def __init__(
         self,
         settings: LLMSettings,
@@ -141,19 +150,28 @@ class GroqLLMProvider:
                     response.raise_for_status()
                     data = response.json()
         except httpx.HTTPError as error:
-            raise LLMProviderError("Groq no pudo generar la respuesta") from error
+            raise LLMProviderError(
+                f"{self.settings.provider} no pudo generar la respuesta"
+            ) from error
         except (TypeError, ValueError) as error:
-            raise LLMProviderError("Groq devolvio una respuesta invalida") from error
+            raise LLMProviderError(
+                f"{self.settings.provider} devolvio una respuesta invalida"
+            ) from error
 
         try:
             choices = data["choices"]
             content = choices[0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
-            raise LLMProviderError("Groq devolvio una respuesta sin contenido") from error
+            raise LLMProviderError(
+                f"{self.settings.provider} devolvio una respuesta sin contenido"
+            ) from error
 
         if not isinstance(content, str) or not content.strip():
-            raise LLMProviderError("Groq devolvio una respuesta vacia")
+            raise LLMProviderError(f"{self.settings.provider} devolvio una respuesta vacia")
         return content.strip()
+
+
+GroqLLMProvider = OpenAICompatibleLLMProvider
 
 
 def _positive_float(value: str | None, name: str, default: float) -> float:

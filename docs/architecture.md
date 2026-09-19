@@ -105,8 +105,9 @@ conversacion.
 ### LLMProvider
 
 Define el contrato asincrono `generate(messages)` para que la logica
-conversacional no dependa de un proveedor concreto. En el primer incremento se
-implementa `GroqLLMProvider` mediante `httpx` y variables de entorno.
+conversacional no dependa de un proveedor concreto. El adaptador
+`OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq u
+OpenRouter.
 
 El adaptador esta preparado, pero todavia no participa en el flujo del webhook;
 la respuesta fija se conserva hasta completar la integracion del proveedor.

@@ -1,4 +1,4 @@
-# Diseno - Contrato LLM y proveedor Groq
+# Diseno - Contrato LLM y proveedores compatibles con OpenAI
 
 ## Estado
 
@@ -16,10 +16,10 @@ Construccion del contexto
 LLMProvider.generate(messages)
     |
     v
-GroqLLMProvider
+OpenAICompatibleLLMProvider
     |
     v
-Groq API /chat/completions
+Proveedor API /chat/completions
 ```
 
 `LLMProvider` es un protocolo asincrono. Recibe una secuencia de `ChatMessage`
@@ -32,20 +32,21 @@ conoce la URL, los headers ni el formato JSON del proveedor.
 `LLMSettings`. La funcion valida credenciales, modelo y limites positivos antes
 de crear un proveedor.
 
-La implementacion actual acepta unicamente `LLM_PROVIDER=groq`. El resto del
-sistema puede incorporar otro proveedor implementando el mismo protocolo sin
-cambiar el contrato.
+La implementacion actual acepta `LLM_PROVIDER=groq` y
+`LLM_PROVIDER=openrouter`. Ambos usan el mismo adaptador; se seleccionan el
+endpoint, la API key y el modelo mediante variables de entorno.
 
 ## Transporte
 
-`GroqLLMProvider` usa `httpx.AsyncClient` y el endpoint compatible con OpenAI:
+`OpenAICompatibleLLMProvider` usa `httpx.AsyncClient` y el endpoint compatible
+con OpenAI:
 
 ```text
 {LLM_BASE_URL}/chat/completions
 ```
 
 El cliente HTTP puede inyectarse. Esto evita llamadas reales durante las
-pruebas y mantiene el mismo codigo de produccion para el siguiente incremento.
+pruebas y permite probar Groq y OpenRouter con el mismo codigo.
 
 ## Manejo de errores
 
