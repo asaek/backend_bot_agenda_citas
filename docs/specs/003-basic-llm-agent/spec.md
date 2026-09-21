@@ -20,7 +20,9 @@ El ciclo debe poder probarse sin realizar llamadas reales a Internet.
 
 ## Alcance
 
-- Definir `LLMProvider.generate(messages) -> str`.
+- Definir `LLMProvider.generate(messages) -> LLMResponse`, con respuestas de texto
+  o solicitudes de herramienta.
+- Configurar un limite positivo de iteraciones de herramientas.
 - Representar los mensajes mediante `ChatMessage`.
 - Cargar la configuracion del LLM desde variables de entorno.
 - Implementar un adaptador mediante el formato de API compatible con OpenAI.
@@ -44,8 +46,9 @@ clase especifica de Groq.
 ### RF-302 - Configuracion externa
 
 El adaptador debe leer `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`,
-`LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES` y
-`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RESPONSE_CHARACTERS` desde el entorno, con
+`LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES`,
+`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RESPONSE_CHARACTERS` y
+`LLM_MAX_TOOL_ITERATIONS` desde el entorno, con
 valores predeterminados solamente para limites tecnicos y las URLs de los
 proveedores compatibles soportados.
 
@@ -116,6 +119,12 @@ invocar el LLM ni enviar otra respuesta.
 La verificacion correcta de Meta debe responder el challenge con HTTP 200 sin
 necesitar configurar un proveedor LLM real.
 
+### RF-314 - Respuesta de herramienta
+
+El contrato del proveedor debe poder representar una solicitud de herramienta con
+un nombre y un objeto de argumentos sin convertirla en texto conversacional. La
+normalizacion y el limite de este contrato se detallan en la especificacion 006.
+
 ## Criterios de aceptacion
 
 1. Una configuracion valida crea el adaptador para Groq.
@@ -147,5 +156,5 @@ necesitar configurar un proveedor LLM real.
 ## Fuera de alcance
 
 - Colas y procesamiento asincrono externo.
-- Herramientas, RAG y memoria semantica.
+- Ejecucion de herramientas, RAG y memoria semantica.
 - Uso de datos reales de pacientes.

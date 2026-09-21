@@ -21,6 +21,8 @@ En implementacion local.
 - [x] Integrar el servicio con `POST /webhook/whatsapp`.
 - [x] Guardar respuestas `sent` y `failed`.
 - [x] Añadir deduplicacion por `provider_message_id`.
+- [x] Construir `PatientScope` desde el mensaje de WhatsApp.
+- [x] Exponer el alcance en `ConversationContext` sin entregarlo al LLM.
 
 ## Pruebas
 

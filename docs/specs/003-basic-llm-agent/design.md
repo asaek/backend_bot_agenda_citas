@@ -27,8 +27,9 @@ Conversation Service -> WhatsAppClient -> WhatsApp
 ```
 
 `LLMProvider` es un protocolo asincrono. Recibe una secuencia de `ChatMessage`
-con `role` y `content`, y devuelve solamente el texto generado. El consumidor no
-conoce la URL, los headers ni el formato JSON del proveedor.
+con `role` y `content`, y devuelve un `LLMResponse`: texto generado o un
+`ToolCall` con nombre y argumentos. El consumidor no conoce la URL, los headers
+ni el formato JSON del proveedor.
 
 ## Configuracion
 
@@ -67,8 +68,9 @@ su frontera HTTP sin consumir una API ni enviar mensajes reales.
 ## Manejo de errores
 
 Los errores de `httpx` se convierten en `LLMProviderError`. La respuesta JSON se
-valida antes de acceder a `choices[0].message.content`, y una respuesta vacia o
-con una estructura inesperada tambien se rechaza.
+valida antes de acceder al contenido o a `tool_calls`, y una respuesta vacia,
+con mas de una herramienta o con argumentos que no sean un objeto tambien se
+rechaza.
 
 ## Construccion del contexto
 
@@ -91,9 +93,10 @@ formato distinto de texto normal.
 
 `ConversationService` recibe un `LLMProvider` y el limite de historial mediante
 inyeccion de dependencias. `build_reply(context)` construye el contexto y espera
-`generate(messages)`. `main.py` crea las dependencias, llama al servicio, envia
-la respuesta con `WhatsAppClient` y registra el resultado con
-`record_reply_sent()`.
+`generate(messages)`. `main.py` crea las dependencias, llama al servicio y envia
+respuestas de texto con `WhatsAppClient`. Si recibe un `ToolCall` antes de
+integrar el ejecutor, registra el tipo `UnsupportedToolCall` y envia la respuesta
+controlada; nunca serializa la llamada como texto para el paciente.
 
 Si la generacion falla, `main.py` registra el tipo de error en la tabla de
 fallos del LLM y envia la respuesta controlada. Si WhatsApp esta disponible, la

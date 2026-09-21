@@ -1,5 +1,11 @@
 # Tareas - Contrato de herramientas de citas
 
+## Estado
+
+Verificado. Las tareas del contrato, el proveedor falso, el ejecutor y las
+pruebas minimas estan completas. La integracion con el agente y Google Calendar
+pertenece a incrementos posteriores.
+
 ## Modelo de dominio
 
 - [x] Definir `Appointment` y la duracion fija de 30 minutos.
@@ -58,12 +64,29 @@
 - [x] Convertir excepciones del proveedor en errores publicos seguros.
 - [x] Probar el ejecutor directamente sin tool calling del LLM.
 
+## Pruebas minimas del incremento
+
+- [x] Consultar horarios libres y excluir periodos ocupados.
+- [x] Rechazar horarios fuera de la jornada laboral.
+- [x] Crear una cita valida y rechazar una cita solapada.
+- [x] Listar unicamente las citas del paciente actual.
+- [x] Listar por rango opcional usando superposicion y permitir historial.
+- [x] Reprogramar una cita y rechazar una reprogramacion invalida.
+- [x] Cancelar una cita y rechazar una cita inexistente.
+- [x] Impedir el acceso de un paciente a la cita de otro paciente.
+- [x] Traducir errores del proveedor a errores publicos.
+- [x] Ejecutar la suite con `FakeCalendarProvider`, sin llamadas a Google.
+
 ## Siguiente incremento
 
+- [x] Construir `PatientScope` desde el mensaje de WhatsApp en
+  `ConversationService`.
+- [x] Exponer el alcance en `ConversationContext` sin enviarlo como datos del
+  LLM.
+- [x] Definir el formato de tool calling del proveedor LLM.
 - [ ] Integrar las herramientas con el flujo del agente.
 
 ## Integracion futura
 
 - [ ] Implementar el adaptador de Google Calendar.
 - [ ] Verificar horario laboral, festivos, ausencias y bloqueos.
-- [ ] Definir el formato de tool calling para los proveedores LLM.

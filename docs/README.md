@@ -31,3 +31,4 @@ esten aprobados.
 - [Convenciones](./conventions.md)
 - [Especificaciones](./specs/README.md)
 - [Decisiones](./decisions/README.md)
+- [Verificaciones](./verification/2026-09-21-whatsapp-check-availability.md)

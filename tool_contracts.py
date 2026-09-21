@@ -40,7 +40,10 @@ TOOL_DEFINITIONS: Mapping[ToolName, ToolDefinition] = MappingProxyType(
         ),
         ToolName.LIST_APPOINTMENTS: ToolDefinition(
             name=ToolName.LIST_APPOINTMENTS,
-            description="Consulta las citas del paciente dentro de un rango opcional.",
+            description=(
+                "Lista las citas del paciente; acepta un rango completo opcional "
+                "con start_at y end_at."
+            ),
             required_arguments=(),
             optional_arguments=("start_at", "end_at"),
         ),
@@ -56,6 +59,111 @@ TOOL_DEFINITIONS: Mapping[ToolName, ToolDefinition] = MappingProxyType(
         ),
     }
 )
+
+
+def llm_tool_definitions() -> list[dict[str, object]]:
+    """Devuelve los esquemas de herramientas para proveedores OpenAI-compatible."""
+    date_time = {
+        "type": "string",
+        "format": "date-time",
+        "description": "Fecha y hora ISO 8601; si no incluye zona se usa la del backend.",
+    }
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": ToolName.CHECK_AVAILABILITY.value,
+                "description": (
+                    "Consulta espacios disponibles de 30 minutos para un rango. "
+                    "Usala cuando el paciente pida horarios y proporcione una fecha."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start_at": date_time,
+                        "end_at": date_time,
+                    },
+                    "required": ["start_at", "end_at"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": ToolName.CREATE_APPOINTMENT.value,
+                "description": "Crea una cita de 30 minutos en un horario disponible.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start_at": date_time,
+                        "reason": {
+                            "type": "string",
+                            "description": "Motivo expresado por el paciente.",
+                        },
+                    },
+                    "required": ["start_at", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": ToolName.LIST_APPOINTMENTS.value,
+                "description": (
+                    "Lista las citas del paciente. Usala cuando pregunte por sus "
+                    "citas; sin fechas lista todas y con fechas requiere start_at "
+                    "y end_at."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start_at": date_time,
+                        "end_at": date_time,
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": ToolName.RESCHEDULE_APPOINTMENT.value,
+                "description": "Mueve una cita del paciente a un nuevo horario.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "appointment_id": {
+                            "type": "string",
+                            "description": "ID interno de la cita devuelto por el backend.",
+                        },
+                        "new_start_at": date_time,
+                    },
+                    "required": ["appointment_id", "new_start_at"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": ToolName.CANCEL_APPOINTMENT.value,
+                "description": "Cancela una cita del paciente.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "appointment_id": {
+                            "type": "string",
+                            "description": "ID interno de la cita devuelto por el backend.",
+                        },
+                    },
+                    "required": ["appointment_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
 
 
 @dataclass(frozen=True, slots=True)

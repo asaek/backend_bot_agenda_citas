@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, time, timezone
 from typing import Any
 from unittest.mock import patch
 
@@ -17,10 +18,21 @@ from conversation_service import (
     ConversationService,
     IncomingTextMessage,
 )
+from fake_calendar_provider import FakeCalendarProvider
 from fakes import GENERATED_REPLY, FakeLLMProvider
-from llm_provider import LLMProviderError
-from main import app, normalize_recipient_number
+from llm_provider import LLMProviderError, ToolCall
+from main import (
+    app,
+    create_availability_provider,
+    create_business_hours,
+    create_calendar_provider,
+    create_tool_executor,
+    normalize_recipient_number,
+)
 from persistence import SQLiteDatabase
+from persistent_calendar_provider import PersistentCalendarProvider
+from tool_executor import ToolExecutor
+from tool_validation import BusinessHours, TimeWindow
 from whatsapp_client import (
     GRAPH_API_VERSION,
     WhatsAppClient,
@@ -71,6 +83,72 @@ class WebhookTests(unittest.TestCase):
             "chatbot.sqlite3",
         )
         self.addCleanup(self.database_directory.cleanup)
+        self.reset_calendar_runtime()
+        self.addCleanup(self.reset_calendar_runtime)
+
+    def reset_calendar_runtime(self) -> None:
+        environment = {
+            "CALENDAR_PROVIDER": "fake",
+            "CALENDAR_AVAILABILITY_PROVIDER": "fake",
+            "GOOGLE_CALENDAR_TIMEZONE": "UTC",
+        }
+        provider = create_calendar_provider(environment)
+        app.state.calendar_provider = provider
+        app.state.availability_provider = provider
+        app.state.tool_executor = create_tool_executor(provider, environment)
+
+    def test_google_calendar_provider_requires_explicit_runtime_selection(self) -> None:
+        expected_provider = object()
+        environment = {
+            "CALENDAR_PROVIDER": "google",
+            "DATABASE_PATH": self.database_path,
+        }
+        with patch(
+            "main.create_google_calendar_provider_from_environment",
+            return_value=expected_provider,
+        ) as factory:
+            provider = create_calendar_provider(environment)
+
+        self.assertIsInstance(provider, PersistentCalendarProvider)
+        self.assertIs(provider.provider, expected_provider)
+        factory.assert_called_once_with(environment)
+
+    def test_availability_provider_can_use_google_independently(self) -> None:
+        primary_provider = FakeCalendarProvider()
+        expected_provider = object()
+        environment = {"CALENDAR_AVAILABILITY_PROVIDER": "google"}
+
+        with patch(
+            "main.create_google_calendar_provider_from_environment",
+            return_value=expected_provider,
+        ) as factory:
+            availability_provider = create_availability_provider(
+                primary_provider,
+                environment,
+            )
+
+        self.assertIs(availability_provider, expected_provider)
+        self.assertIsNot(availability_provider, primary_provider)
+        factory.assert_called_once_with(environment)
+
+    def test_business_hours_are_configurable_from_environment(self) -> None:
+        business_hours = create_business_hours(
+            {
+                "GOOGLE_CALENDAR_TIMEZONE": "UTC",
+                "BUSINESS_WORKDAYS": "1,3,5",
+                "BUSINESS_HOURS_START": "08:30",
+                "BUSINESS_HOURS_END": "16:15",
+            }
+        )
+
+        self.assertEqual(
+            set(business_hours.windows_by_weekday),
+            {1, 3, 5},
+        )
+        self.assertEqual(
+            business_hours.windows_by_weekday[1][0],
+            TimeWindow(time(8, 30), time(16, 15)),
+        )
 
     @contextmanager
     def configured_runtime(
@@ -347,6 +425,86 @@ class WebhookTests(unittest.TestCase):
             ],
         )
         self.assertEqual(failures, [("LLMProviderError",)])
+
+    def test_default_fake_calendar_provider_executes_tool_cycle(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="list_appointments",
+                    arguments={},
+                ),
+                GENERATED_REPLY,
+            )
+        )
+
+        with self.configured_runtime(fake_client, tool_provider):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake_client.sent_messages, [("5491100000000", GENERATED_REPLY)])
+        self.assertEqual(tool_provider.call_count, 2)
+        self.assertIsInstance(app.state.calendar_provider, FakeCalendarProvider)
+        self.assertIs(app.state.tool_executor.provider, app.state.calendar_provider)
+        self.assertEqual(
+            app.state.tool_executor.business_hours.timezone_name,
+            "UTC",
+        )
+        self.assertEqual(
+            app.state.tool_executor.business_hours.windows_by_weekday[0],
+            (TimeWindow(time(9), time(17)),),
+        )
+
+    def test_configured_tool_executor_completes_the_whatsapp_tool_cycle(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="check_availability",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "end_at": "2026-09-21T17:00:00",
+                    },
+                ),
+                GENERATED_REPLY,
+            )
+        )
+        calendar_provider = FakeCalendarProvider()
+        executor = ToolExecutor(
+            provider=calendar_provider,
+            business_hours=BusinessHours(
+                timezone_name="UTC",
+                windows_by_weekday={
+                    weekday: (TimeWindow(time(9), time(17)),)
+                    for weekday in range(5)
+                },
+            ),
+            default_timezone="UTC",
+            now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
+        )
+        app.state.tool_executor = executor
+        app.state.calendar_provider = calendar_provider
+        try:
+            with self.configured_runtime(fake_client, tool_provider):
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/webhook/whatsapp",
+                        json=self.text_payload(),
+                    )
+        finally:
+            self.reset_calendar_runtime()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake_client.sent_messages, [("5491100000000", GENERATED_REPLY)])
+        self.assertEqual(tool_provider.call_count, 2)
+        self.assertEqual(
+            [message.role for message in tool_provider.received_messages[1]],
+            ["system", "user", "assistant", "tool"],
+        )
 
     def test_missing_api_key_sends_controlled_fallback_and_records_failure(self) -> None:
         fake_client = FakeWhatsAppClient()

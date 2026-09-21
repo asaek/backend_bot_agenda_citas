@@ -29,6 +29,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_active_conversation_per_patient
 ON conversations(patient_id)
 WHERE status = 'active';
 
+CREATE TABLE IF NOT EXISTS appointments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    calendar_id TEXT NOT NULL,
+    google_event_id TEXT NOT NULL,
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (
+        status IN ('scheduled', 'confirmed', 'cancelled', 'completed', 'no_show')
+    ),
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    last_synced_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(calendar_id, google_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS appointments_by_patient_start
+ON appointments(patient_id, start_at, id);
+
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

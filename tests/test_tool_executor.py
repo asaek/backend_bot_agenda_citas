@@ -11,7 +11,7 @@ from calendar_domain import (
     ToolName,
     ToolRequest,
 )
-from fake_calendar_provider import FakeCalendarProvider
+from fake_calendar_provider import BusyPeriod, FakeCalendarProvider
 from tool_contracts import (
     CancelAppointmentOutput,
     CheckAvailabilityOutput,
@@ -46,12 +46,17 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    def executor(self, provider: FakeCalendarProvider) -> ToolExecutor:
+    def executor(
+        self,
+        provider: FakeCalendarProvider,
+        availability_provider: FakeCalendarProvider | None = None,
+    ) -> ToolExecutor:
         return ToolExecutor(
             provider=provider,
             business_hours=self.business_hours,
             default_timezone="UTC",
             now=self.now,
+            availability_provider=availability_provider,
         )
 
     def request(self, tool_name: ToolName, arguments: dict[str, object]) -> ToolRequest:
@@ -66,14 +71,16 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
         *,
         appointment_id: str = "appointment-1",
         patient_scope: PatientScope | None = None,
+        start_at: datetime | None = None,
         status: AppointmentStatus = AppointmentStatus.SCHEDULED,
     ) -> Appointment:
+        appointment_start = start_at or self.start
         return Appointment(
             id=appointment_id,
             patient_scope=patient_scope or self.patient,
             calendar_id="calendar-1",
-            start_at=self.start,
-            end_at=self.start + timedelta(minutes=30),
+            start_at=appointment_start,
+            end_at=appointment_start + timedelta(minutes=30),
             reason="Revision",
             status=status,
         )
@@ -124,6 +131,67 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error.code, ToolErrorCode.OUTSIDE_BUSINESS_HOURS)
         self.assertEqual(provider.appointments, ())
 
+    async def test_filters_availability_to_business_hours(self) -> None:
+        provider = FakeCalendarProvider()
+
+        result = await self.executor(provider).execute(
+            self.request(
+                ToolName.CHECK_AVAILABILITY,
+                {
+                    "start_at": "2026-09-21T08:00:00",
+                    "end_at": "2026-09-21T18:00:00",
+                },
+            )
+        )
+
+        self.assertTrue(result.ok)
+        self.assertIsInstance(result.data, CheckAvailabilityOutput)
+        self.assertEqual(len(result.data.slots), 16)
+        self.assertEqual(result.data.slots[0].start_at.hour, 9)
+        self.assertEqual(result.data.slots[-1].end_at.hour, 17)
+        self.assertTrue(
+            all(
+                self.business_hours.contains(slot.start_at, slot.end_at)
+                for slot in result.data.slots
+            )
+        )
+
+    async def test_routes_only_availability_to_the_dedicated_provider(self) -> None:
+        primary_provider = FakeCalendarProvider()
+        availability_provider = FakeCalendarProvider(
+            busy_periods=(
+                BusyPeriod(
+                    calendar_id="calendar-1",
+                    start_at=self.start,
+                    end_at=self.start + timedelta(minutes=30),
+                ),
+            )
+        )
+        executor = self.executor(primary_provider, availability_provider)
+
+        available = await executor.execute(
+            self.request(
+                ToolName.CHECK_AVAILABILITY,
+                {
+                    "start_at": self.start.isoformat(),
+                    "end_at": (self.start + timedelta(hours=1)).isoformat(),
+                },
+            )
+        )
+        created = await executor.execute(
+            self.request(
+                ToolName.CREATE_APPOINTMENT,
+                {"start_at": self.start.isoformat(), "reason": "Revision"},
+            )
+        )
+
+        self.assertTrue(available.ok)
+        self.assertEqual(len(available.data.slots), 1)
+        self.assertEqual(available.data.slots[0].start_at, self.start + timedelta(minutes=30))
+        self.assertTrue(created.ok)
+        self.assertEqual(len(primary_provider.appointments), 1)
+        self.assertEqual(availability_provider.appointments, ())
+
     async def test_executes_all_read_and_write_operations_with_patient_scope(self) -> None:
         provider = FakeCalendarProvider()
         executor = self.executor(provider)
@@ -171,6 +239,86 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(moved.data.appointment.patient_scope, self.patient)
         self.assertIsInstance(cancelled.data, CancelAppointmentOutput)
         self.assertEqual(cancelled.data.appointment.status, AppointmentStatus.CANCELLED)
+
+    async def test_lists_only_appointments_for_the_current_patient(self) -> None:
+        provider = FakeCalendarProvider(
+            appointments=(
+                self.appointment(appointment_id="current-patient-1"),
+                self.appointment(
+                    appointment_id="other-patient-1",
+                    patient_scope=self.other_patient,
+                ),
+            )
+        )
+
+        result = await self.executor(provider).execute(
+            self.request(ToolName.LIST_APPOINTMENTS, {})
+        )
+
+        self.assertTrue(result.ok)
+        self.assertIsInstance(result.data, ListAppointmentsOutput)
+        self.assertEqual(
+            [appointment.id for appointment in result.data.appointments],
+            ["current-patient-1"],
+        )
+
+    async def test_lists_appointments_overlapping_the_optional_range(self) -> None:
+        provider = FakeCalendarProvider(
+            appointments=(
+                self.appointment(appointment_id="inside", start_at=self.start),
+                self.appointment(
+                    appointment_id="outside",
+                    start_at=self.start + timedelta(hours=2),
+                ),
+            )
+        )
+
+        result = await self.executor(provider).execute(
+            self.request(
+                ToolName.LIST_APPOINTMENTS,
+                {
+                    "start_at": (self.start + timedelta(minutes=15)).isoformat(),
+                    "end_at": (self.start + timedelta(minutes=45)).isoformat(),
+                },
+            )
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(
+            [appointment.id for appointment in result.data.appointments],
+            ["inside"],
+        )
+
+    async def test_rejects_an_invalid_reschedule_before_provider_execution(self) -> None:
+        appointment = self.appointment()
+        provider = FakeCalendarProvider(appointments=(appointment,))
+
+        result = await self.executor(provider).execute(
+            self.request(
+                ToolName.RESCHEDULE_APPOINTMENT,
+                {
+                    "appointment_id": appointment.id,
+                    "new_start_at": "2026-09-21T16:45:00",
+                },
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, ToolErrorCode.OUTSIDE_BUSINESS_HOURS)
+        self.assertEqual(provider.appointments, (appointment,))
+
+    async def test_rejects_cancelling_an_unknown_appointment(self) -> None:
+        provider = FakeCalendarProvider()
+
+        result = await self.executor(provider).execute(
+            self.request(
+                ToolName.CANCEL_APPOINTMENT,
+                {"appointment_id": "missing-appointment"},
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, ToolErrorCode.APPOINTMENT_NOT_FOUND)
 
     async def test_provider_conflicts_are_returned_as_safe_results(self) -> None:
         provider = FakeCalendarProvider(

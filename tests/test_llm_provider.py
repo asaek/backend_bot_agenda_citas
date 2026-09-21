@@ -14,6 +14,7 @@ from llm_provider import (
     LLMSettings,
     LLMTimeoutError,
     OpenAICompatibleLLMProvider,
+    ToolCall,
     create_llm_provider,
     load_llm_settings,
 )
@@ -52,6 +53,7 @@ class LLMSettingsTests(unittest.TestCase):
         self.assertEqual(settings.max_history_messages, 30)
         self.assertEqual(settings.max_output_tokens, 500)
         self.assertEqual(settings.max_response_characters, 4000)
+        self.assertEqual(settings.max_tool_iterations, 3)
 
     def test_uses_openrouter_default_base_url(self) -> None:
         settings = load_llm_settings(
@@ -165,17 +167,38 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
             "https://api.groq.test/openai/v1/chat/completions",
         )
         self.assertEqual(requests[0].headers["Authorization"], "Bearer test-key")
+        payload = json.loads(requests[0].content)
+        self.assertEqual(payload["model"], "test-model")
         self.assertEqual(
-            json.loads(requests[0].content),
-            {
-                "model": "test-model",
-                "messages": [
-                    {"role": "system", "content": "Responde en espanol."},
-                    {"role": "user", "content": "Hola"},
-                ],
-                "max_tokens": 500,
-            },
+            payload["messages"],
+            [
+                {"role": "system", "content": "Responde en espanol."},
+                {"role": "user", "content": "Hola"},
+            ],
         )
+        self.assertEqual(payload["max_tokens"], 500)
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertEqual(
+            [tool["function"]["name"] for tool in payload["tools"]],
+            [
+                "check_availability",
+                "create_appointment",
+                "list_appointments",
+                "reschedule_appointment",
+                "cancel_appointment",
+            ],
+        )
+        check_availability = payload["tools"][0]["function"]
+        self.assertEqual(
+            check_availability["parameters"]["additionalProperties"],
+            False,
+        )
+        list_appointments = payload["tools"][2]["function"]
+        self.assertEqual(
+            set(list_appointments["parameters"]["properties"]),
+            {"start_at", "end_at"},
+        )
+        self.assertNotIn("required", list_appointments["parameters"])
 
     def test_reuses_adapter_with_openrouter_configuration(self) -> None:
         requests: list[httpx.Request] = []
@@ -211,6 +234,228 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
             str(requests[0].url),
             "https://openrouter.test/api/v1/chat/completions",
         )
+
+    def test_parses_native_openai_tool_call_response(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "check_availability",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "start_at": "2026-09-21T10:00:00",
+                                                    "end_at": "2026-09-21T17:00:00",
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> ToolCall:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                response = await provider.generate(
+                    [ChatMessage(role="user", content="Que horarios hay?")]
+                )
+
+            self.assertIsInstance(response, ToolCall)
+            return response
+
+        response = asyncio.run(run_test())
+
+        self.assertEqual(response.name, "check_availability")
+        self.assertEqual(
+            response.arguments,
+            {
+                "start_at": "2026-09-21T10:00:00",
+                "end_at": "2026-09-21T17:00:00",
+            },
+        )
+
+    def test_parses_normalized_tool_call_response(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_call": {
+                                    "name": "list_appointments",
+                                    "arguments": {},
+                                }
+                            }
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> ToolCall:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                response = await provider.generate(
+                    [ChatMessage(role="user", content="Que citas tengo?")]
+                )
+
+            self.assertIsInstance(response, ToolCall)
+            return response
+
+        response = asyncio.run(run_test())
+
+        self.assertEqual(response, ToolCall(name="list_appointments", arguments={}))
+
+    def test_serializes_tool_call_and_tool_result_messages(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "Respuesta final"}}]},
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                return await provider.generate(
+                    [
+                        ChatMessage(
+                            role="assistant",
+                            content=None,
+                            tool_calls=(
+                                ToolCall(
+                                    name="list_appointments",
+                                    arguments={},
+                                    call_id="call-1",
+                                ),
+                            ),
+                        ),
+                        ChatMessage(
+                            role="tool",
+                            content='{"ok": true}',
+                            tool_call_id="call-1",
+                        ),
+                    ]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Respuesta final")
+        self.assertEqual(
+            json.loads(requests[0].content)["messages"],
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "list_appointments",
+                                "arguments": "{}",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "content": '{"ok": true}',
+                    "tool_call_id": "call-1",
+                },
+            ],
+        )
+
+    def test_rejects_invalid_tool_call_arguments(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_calls": [
+                                    {
+                                        "type": "function",
+                                        "function": {
+                                            "name": "check_availability",
+                                            "arguments": "[]",
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> None:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                with self.assertRaises(LLMResponseError):
+                    await provider.generate([ChatMessage(role="user", content="Hola")])
+
+        asyncio.run(run_test())
 
     def test_translates_http_errors_to_provider_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

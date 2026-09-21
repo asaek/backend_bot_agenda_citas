@@ -14,7 +14,7 @@ POST /webhook/whatsapp
     |
     +-- ConversationService -> SQLite temporal
     |
-    +-- FakeLLMProvider -> registra ChatMessage y devuelve texto local
+    +-- FakeLLMProvider -> registra ChatMessage y devuelve texto o ToolCall
     |
     +-- FakeWhatsAppClient -> registra destinatario y cuerpo
 ```
@@ -31,8 +31,8 @@ guarda en `received_messages`, por lo que las pruebas pueden inspeccionar el
 prompt, el historial, el mensaje actual y el numero de llamadas mediante
 `call_count`.
 
-Su respuesta es configurable. Tambien acepta un `LLMProviderError` para cubrir
-el camino de fallo sin lanzar excepciones de red.
+Su respuesta es configurable como texto o `ToolCall`. Tambien acepta un
+`LLMProviderError` para cubrir el camino de fallo sin lanzar excepciones de red.
 
 ## Casos cubiertos
 

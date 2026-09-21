@@ -131,8 +131,7 @@ def validate_tool_input(
         return
 
     if isinstance(tool_input, ListAppointmentsInput):
-        if tool_input.start_at is not None:
-            _validate_not_past(tool_input.start_at, now)
+        # Consultar el historial no modifica la agenda y puede incluir fechas pasadas.
         return
 
     appointment = _find_appointment(

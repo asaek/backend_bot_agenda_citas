@@ -44,6 +44,21 @@ class LLMFailureRecord:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class AppointmentRecord:
+    id: int
+    calendar_id: str
+    google_event_id: str
+    patient_id: int
+    status: str
+    start_at: str
+    end_at: str
+    reason: str
+    last_synced_at: str
+    created_at: str
+    updated_at: str
+
+
 def _patient_from_row(row: sqlite3.Row) -> PatientRecord:
     return PatientRecord(
         id=row["id"],
@@ -77,6 +92,22 @@ def _message_from_row(row: sqlite3.Row) -> MessageRecord:
         status=row["status"],
         reply_to_message_id=row["reply_to_message_id"],
         created_at=row["created_at"],
+    )
+
+
+def _appointment_from_row(row: sqlite3.Row) -> AppointmentRecord:
+    return AppointmentRecord(
+        id=row["id"],
+        calendar_id=row["calendar_id"],
+        google_event_id=row["google_event_id"],
+        patient_id=row["patient_id"],
+        status=row["status"],
+        start_at=row["start_at"],
+        end_at=row["end_at"],
+        reason=row["reason"],
+        last_synced_at=row["last_synced_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -333,3 +364,109 @@ class LLMFailureRepository:
             error_type=row["error_type"],
             created_at=row["created_at"],
         )
+
+
+class AppointmentRepository:
+    def get_by_id(
+        self,
+        connection: sqlite3.Connection,
+        appointment_id: int,
+    ) -> AppointmentRecord | None:
+        row = connection.execute(
+            "SELECT * FROM appointments WHERE id = ?",
+            (appointment_id,),
+        ).fetchone()
+        return _appointment_from_row(row) if row else None
+
+    def get_by_google_event(
+        self,
+        connection: sqlite3.Connection,
+        calendar_id: str,
+        google_event_id: str,
+    ) -> AppointmentRecord | None:
+        row = connection.execute(
+            """
+            SELECT * FROM appointments
+            WHERE calendar_id = ? AND google_event_id = ?
+            """,
+            (calendar_id, google_event_id),
+        ).fetchone()
+        return _appointment_from_row(row) if row else None
+
+    def list_for_patient(
+        self,
+        connection: sqlite3.Connection,
+        patient_id: int,
+    ) -> list[AppointmentRecord]:
+        rows = connection.execute(
+            """
+            SELECT * FROM appointments
+            WHERE patient_id = ?
+            ORDER BY start_at, id
+            """,
+            (patient_id,),
+        ).fetchall()
+        return [_appointment_from_row(row) for row in rows]
+
+    def upsert_synced(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        calendar_id: str,
+        google_event_id: str,
+        patient_id: int,
+        status: str,
+        start_at: str,
+        end_at: str,
+        reason: str,
+        synced_at: str,
+    ) -> AppointmentRecord:
+        existing = self.get_by_google_event(connection, calendar_id, google_event_id)
+        if existing is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO appointments (
+                    calendar_id, google_event_id, patient_id, status,
+                    start_at, end_at, reason, last_synced_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    calendar_id,
+                    google_event_id,
+                    patient_id,
+                    status,
+                    start_at,
+                    end_at,
+                    reason,
+                    synced_at,
+                    synced_at,
+                    synced_at,
+                ),
+            )
+            appointment_id = cursor.lastrowid
+        else:
+            if existing.patient_id != patient_id:
+                raise RuntimeError("El evento de Google pertenece a otro paciente")
+            connection.execute(
+                """
+                UPDATE appointments
+                SET status = ?, start_at = ?, end_at = ?, reason = ?,
+                    last_synced_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    start_at,
+                    end_at,
+                    reason,
+                    synced_at,
+                    synced_at,
+                    existing.id,
+                ),
+            )
+            appointment_id = existing.id
+
+        row = self.get_by_id(connection, appointment_id)
+        if row is None:
+            raise RuntimeError("No se pudo recuperar la cita persistida")
+        return row

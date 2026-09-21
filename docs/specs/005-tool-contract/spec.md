@@ -2,10 +2,10 @@
 
 ## Estado
 
-En implementacion. El modelo de dominio, los contratos de entrada/salida, la
-validacion previa al proveedor, la frontera de errores publicos, el proveedor
-falso en memoria y el ejecutor estan definidos y verificados; Google Calendar
-queda pendiente.
+Verificado. El modelo de dominio, los contratos de entrada/salida, la validacion
+previa al proveedor, la frontera de errores publicos, el proveedor falso en
+memoria y el ejecutor estan implementados y probados; Google Calendar queda
+pendiente.
 
 ## Objetivo
 
@@ -39,20 +39,29 @@ Las cinco herramientas tienen estos contratos:
 | `cancel_appointment` | `appointment_id` | `CancelAppointmentOutput` |
 
 Las fechas se reciben como valores ISO y se normalizan usando la zona horaria
-predeterminada del backend. Los inputs tipados incluyen `PatientScope`, pero no
-incluyen duracion, calendario, zona horaria, usuario ni identificadores de
-conversacion.
+predeterminada del backend. Los inputs tipados incluyen `PatientScope`, que
+transporta el paciente y la conversacion resueltos por el backend. Los
+argumentos controlados por el LLM no incluyen duracion, calendario, zona horaria,
+usuario ni identificadores de paciente o conversacion.
+
+`list_appointments` acepta la ausencia total del rango o un par completo de
+`start_at` y `end_at`. Sin rango devuelve las citas visibles del paciente actual;
+con rango devuelve las citas que se superponen con el intervalo solicitado,
+incluidas las canceladas. La consulta no exige horario laboral ni fecha futura,
+porque tambien puede consultar historial. La pertenencia al paciente sigue
+siendo responsabilidad del proveedor configurado.
 
 ## Validacion previa al proveedor
 
 `validate_tool_input()` recibe el input tipado, el horario laboral, el instante
 actual y las citas existentes conocidas. Antes de delegar en un proveedor:
 
-- Rechaza fechas pasadas.
+- Rechaza fechas pasadas al crear o reprogramar citas.
 - Comprueba que una cita de 30 minutos cabe dentro del horario laboral.
 - Rechaza solapamientos con citas `scheduled` o `confirmed`.
 - Ignora citas canceladas, completadas o marcadas como `no_show` al calcular
   bloqueos.
+- Permite consultar citas pasadas mediante `list_appointments`.
 - Verifica que una cita pertenece al paciente del `PatientScope`.
 - Verifica que las transiciones de reprogramacion y cancelacion sean validas.
 - Devuelve errores tipificados mediante `ToolValidationError`.
@@ -158,9 +167,26 @@ el calendario lo resuelve la configuracion del proveedor.
     de `ToolResult.success()`.
 25. El ejecutor conserva el `PatientScope` del request y no permite seleccionar
     paciente, conversacion ni calendario desde los argumentos.
+26. `list_appointments` devuelve solo citas del paciente actual y aplica el rango
+    opcional por superposicion, incluso cuando el rango pertenece al historial.
+
+## Cierre del incremento
+
+- [x] Las cinco herramientas tienen contratos documentados.
+- [x] Las entradas y salidas estan tipadas.
+- [x] Las validaciones ocurren antes del proveedor.
+- [x] `FakeCalendarProvider` implementa las cinco operaciones.
+- [x] El backend de agenda ejecuta solicitudes mediante `ToolExecutor`.
+- [x] Los errores tienen una clasificacion y mensajes estables.
+- [x] Las pruebas cubren exito, conflicto, permisos y errores.
+- [x] No existe dependencia de Google Calendar.
+
+El cierre se refiere a la frontera interna del backend y a su proveedor falso.
+La ejecucion de tool calls desde `ConversationService` y un proveedor real de
+Google Calendar no forman parte de este incremento.
 
 ## Fuera de alcance de este incremento
 
 - Conectar Google Calendar.
 - Crear tablas persistentes de citas.
-- Integrar llamadas de herramientas en el contrato actual del LLM.
+- Ejecutar tool calls dentro del ciclo conversacional.

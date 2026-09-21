@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from agent_orchestrator import AgentOrchestrator
+from calendar_domain import PatientScope
 from llm_provider import (
     ChatMessage,
     DEFAULT_LLM_MAX_HISTORY_MESSAGES,
+    DEFAULT_LLM_MAX_TOOL_ITERATIONS,
     LLMProvider,
     LLMProviderError,
+    LLMResponse,
 )
 from persistence import SQLiteDatabase
 from repositories import (
@@ -16,6 +20,7 @@ from repositories import (
     MessageRepository,
     PatientRepository,
 )
+from tool_executor import ToolExecutor
 
 
 CONTROLLED_FALLBACK_REPLY = (
@@ -30,6 +35,11 @@ SYSTEM_PROMPT = "\n".join(
         "No afirmar que realizó acciones externas.",
         "No proporcionar diagnósticos médicos.",
         "Pedir aclaración cuando falte información.",
+        "Cuando el paciente pida horarios y dé una fecha o rango, usar check_availability.",
+        "Cuando el paciente pregunte por sus citas, usar list_appointments.",
+        "Para listar todas las citas no enviar argumentos; para un rango enviar start_at y end_at.",
+        "Usar el id devuelto por list_appointments si luego debe reprogramar o cancelar.",
+        "No pedir clínica, consultorio, calendario, duración ni preferencia de turno.",
         "Responder únicamente con texto normal.",
     )
 )
@@ -45,10 +55,17 @@ class IncomingTextMessage:
 
 @dataclass(frozen=True, slots=True)
 class ConversationContext:
-    patient_id: int
-    conversation_id: int
+    patient_scope: PatientScope
     incoming_message_id: int
     reply_status: str | None
+
+    @property
+    def patient_id(self) -> int:
+        return self.patient_scope.patient_id
+
+    @property
+    def conversation_id(self) -> int:
+        return self.patient_scope.conversation_id
 
 
 def utc_now() -> str:
@@ -62,11 +79,23 @@ class ConversationService:
         llm_provider: LLMProvider | None = None,
         max_history_messages: int = DEFAULT_LLM_MAX_HISTORY_MESSAGES,
         llm_configuration_error: LLMProviderError | None = None,
+        max_tool_iterations: int = DEFAULT_LLM_MAX_TOOL_ITERATIONS,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         self.database = database
         self.llm_provider = llm_provider
         self.max_history_messages = max_history_messages
         self.llm_configuration_error = llm_configuration_error
+        self.tool_executor = tool_executor
+        self.agent_orchestrator = (
+            AgentOrchestrator(
+                llm_provider=llm_provider,
+                tool_executor=tool_executor,
+                max_iterations=max_tool_iterations,
+            )
+            if llm_provider is not None and tool_executor is not None
+            else None
+        )
         self.patients = PatientRepository()
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
@@ -87,10 +116,16 @@ class ConversationService:
                 )
                 if conversation is None:
                     raise RuntimeError("El mensaje existente no tiene conversacion")
+                patient = self.patients.get_by_id(connection, conversation.patient_id)
+                if patient is None:
+                    raise RuntimeError("La conversacion existente no tiene paciente")
                 reply = self.messages.get_reply(connection, existing.id)
                 return ConversationContext(
-                    patient_id=conversation.patient_id,
-                    conversation_id=conversation.id,
+                    patient_scope=PatientScope(
+                        patient_id=patient.id,
+                        conversation_id=conversation.id,
+                        whatsapp_number=patient.whatsapp_number,
+                    ),
                     incoming_message_id=existing.id,
                     reply_status=reply.status if reply else None,
                 )
@@ -112,18 +147,26 @@ class ConversationService:
             self.conversations.mark_active(connection, conversation.id, now)
 
             return ConversationContext(
-                patient_id=patient.id,
-                conversation_id=conversation.id,
+                patient_scope=PatientScope(
+                    patient_id=patient.id,
+                    conversation_id=conversation.id,
+                    whatsapp_number=patient.whatsapp_number,
+                ),
                 incoming_message_id=incoming.id,
                 reply_status=None,
             )
 
-    async def build_reply(self, context: ConversationContext) -> str:
+    async def build_reply(self, context: ConversationContext) -> LLMResponse:
         if self.llm_configuration_error is not None:
             raise self.llm_configuration_error
         if self.llm_provider is None:
             raise LLMProviderError("ConversationService requiere un proveedor LLM")
         messages = self.build_chat_messages(context)
+        if self.agent_orchestrator is not None:
+            return await self.agent_orchestrator.run(
+                messages=messages,
+                patient_scope=context.patient_scope,
+            )
         return await self.llm_provider.generate(messages)
 
     def build_chat_messages(

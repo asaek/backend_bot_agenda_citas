@@ -23,6 +23,7 @@ from tool_contracts import (
     RescheduleAppointmentInput,
     RescheduleAppointmentOutput,
     parse_tool_request,
+    llm_tool_definitions,
 )
 
 
@@ -118,6 +119,18 @@ class ToolContractTests(unittest.TestCase):
         self.assertIsNone(all_appointments.start_at)
         self.assertIsInstance(ranged, ListAppointmentsInput)
         self.assertIsNotNone(ranged.end_at)
+
+    def test_list_appointments_schema_keeps_the_range_optional(self) -> None:
+        definition = next(
+            tool["function"]
+            for tool in llm_tool_definitions()
+            if tool["function"]["name"] == ToolName.LIST_APPOINTMENTS.value
+        )
+
+        parameters = definition["parameters"]
+        self.assertEqual(set(parameters["properties"]), {"start_at", "end_at"})
+        self.assertNotIn("required", parameters)
+        self.assertFalse(parameters["additionalProperties"])
 
     def test_parses_reschedule_and_cancel_with_backend_scope(self) -> None:
         reschedule = parse_tool_request(

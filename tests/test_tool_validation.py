@@ -11,6 +11,7 @@ from calendar_domain import (
 from tool_contracts import (
     CancelAppointmentInput,
     CreateAppointmentInput,
+    ListAppointmentsInput,
     RescheduleAppointmentInput,
 )
 from tool_validation import (
@@ -117,6 +118,19 @@ class ToolValidationTests(unittest.TestCase):
                     else (),
                 )
             self.assertEqual(raised.exception.code, ToolErrorCode.DATE_IN_PAST)
+
+    def test_allows_historical_list_ranges(self) -> None:
+        request = ListAppointmentsInput(
+            patient_scope=self.patient_scope,
+            start_at=datetime(2026, 9, 19, 10, 0, tzinfo=self.timezone),
+            end_at=datetime(2026, 9, 20, 10, 0, tzinfo=self.timezone),
+        )
+
+        validate_tool_input(
+            request,
+            business_hours=self.business_hours,
+            now=self.now,
+        )
 
     def test_rejects_an_overlapping_active_appointment(self) -> None:
         start_at = datetime(2026, 9, 21, 10, 0, tzinfo=self.timezone)

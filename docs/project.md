@@ -45,6 +45,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Identificar pacientes de prueba por su numero de WhatsApp.
 - Guardar pacientes, conversaciones y mensajes en SQLite.
 - Mantener una conversacion activa entre varias solicitudes y reinicios.
+- Construir el `PatientScope` del backend con paciente, conversacion y numero de
+  WhatsApp antes de cualquier operacion de agenda.
 - Construir el contexto de chat desde el historial reciente y las reglas del
   asistente.
 - Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
@@ -69,7 +71,7 @@ mensaje del mismo numero reutilice el contexto basico despues de varias
 solicitudes o de un reinicio. Las tareas de este corte estan en
 `specs/002-persistence-conversation-service/tasks.md`.
 
-### Corte activo: ciclo integrado de LLM y WhatsApp
+### Corte verificado: ciclo integrado de LLM y WhatsApp
 
 Los tres primeros incrementos de la etapa 4 definen una frontera independiente
 del proveedor, preparan un adaptador compatible con OpenAI para Groq y
@@ -83,30 +85,84 @@ El ciclo integrado se verifica con un `FakeLLMProvider`, un cliente falso de
 WhatsApp y SQLite temporal. La especificacion y las tareas estan en
 `specs/004-automated-webhook-tests/`.
 
-### Corte activo: contrato de herramientas de citas
+### Corte verificado: contrato de herramientas de citas
 
-Los incrementos actuales definen el modelo de dominio, los inputs y outputs
-tipados, la validacion previa, los errores publicos, la frontera
-`CalendarProvider`, un proveedor falso determinista en memoria y `ToolExecutor`,
-sin conectarse a Google Calendar. La especificacion y las tareas estan en
-`specs/005-tool-contract/`.
+El corte define y verifica el modelo de dominio, los inputs y outputs tipados, la
+validacion previa, los errores publicos, la frontera `CalendarProvider`, un
+proveedor falso determinista en memoria y `ToolExecutor`, sin conectarse a Google
+Calendar. La especificacion y las tareas estan en `specs/005-tool-contract/`.
+
+El backend de agenda ejecuta solicitudes estructuradas mediante `ToolExecutor`.
+La integracion de esas solicitudes con `ConversationService` y la ejecucion del
+ciclo de tool calls estan verificadas en el corte 007. Google Calendar pertenece
+a un corte posterior.
+
+### Corte verificado: contrato de tool calling del LLM
+
+`LLMProvider` puede devolver texto o un `ToolCall` normalizado con nombre y
+argumentos. Este incremento reconoce y valida la respuesta, pero todavia no
+ejecuta herramientas ni permite que sus identificadores de paciente provengan
+del LLM. La especificacion esta en `specs/006-llm-tool-calling/`.
+
+### Corte verificado: orquestador del agente
+
+El agente ejecuta el ciclo entre `LLMProvider`, `ToolExecutor` y la redaccion
+final con un limite de iteraciones. El `PatientScope` se inyecta desde WhatsApp y
+los resultados no exponen campos internos de paciente o calendario al LLM. El
+orquestador esta en `specs/007-agent-orchestrator/`.
+
+### Corte verificado: integracion del ToolExecutor
+
+`main.py` crea `FakeCalendarProvider`, `BusinessHours` y `ToolExecutor` para el
+runtime del MVP tecnico. `ConversationService` recibe el ejecutor y construye el
+orquestador, por lo que el webhook puede ejecutar herramientas y solicitar una
+redaccion final sin servicios externos. La especificacion esta en
+`specs/008-tool-executor-integration/`.
+
+### Corte verificado: adaptador de Google Calendar
+
+El backend puede seleccionar un `GoogleCalendarProvider` sin cambiar el contrato
+de herramientas. El adaptador admite OAuth o cuenta de servicio, consulta
+disponibilidad mediante `freeBusy`, lista eventos paginados y administra citas de
+30 minutos identificadas por propiedades privadas. Las operaciones conservan el
+`PatientScope` del backend y convierten fallos externos en errores publicos. El
+fake sigue siendo el valor por defecto para pruebas y desarrollo sin credenciales.
+La implementacion y las pruebas del mirror estan verificadas. La especificacion
+esta en `specs/009-google-calendar-adapter/`.
+
+### Corte verificado: persistencia de citas
+
+La agenda conserva una identidad local separada del ID de Google. `appointments`
+relaciona el ID interno, el calendario y evento externo, el paciente, el estado,
+las fechas, el motivo y `last_synced_at`. `PersistentCalendarProvider` usa ese
+mapa para que las herramientas reciban IDs internos y Google siga siendo la fuente
+de verdad. La implementacion y la suite de Raspberry Pi estan verificadas. La
+especificacion esta en `specs/010-appointment-persistence/`.
+
+### Fase incremental: disponibilidad real
+
+La migracion hacia Google Calendar se realiza herramienta por herramienta. Durante
+la primera fase, `CALENDAR_AVAILABILITY_PROVIDER=google` permite que
+`check_availability` consulte `freeBusy` real, mientras `CALENDAR_PROVIDER=fake`
+mantiene las operaciones de escritura y consulta en el proveedor determinista.
+Esta configuracion es temporal para validar disponibilidad sin crear ni modificar
+eventos reales.
 
 ### Cortes futuros
 
 Los siguientes temas se especificaran por separado cuando corresponda:
 
-1. Integrar Google Calendar.
-3. Memoria conversacional avanzada.
-4. RAG con PostgreSQL y pgvector.
-5. Automatizaciones externas y despliegue.
-6. Privacidad, seguridad, consentimiento y limites para informacion medica.
+1. Memoria conversacional avanzada.
+2. RAG con PostgreSQL y pgvector.
+3. Automatizaciones externas y despliegue.
+4. Privacidad, seguridad, consentimiento y limites para informacion medica.
 
 Esta lista expresa una direccion general y no autoriza su implementacion durante
 el corte actual.
 
 ## Fuera del alcance actual
 
-- Agente con tool calling y RAG.
+- RAG y memoria semantica.
 - Integraciones con n8n.
 - Redis y procesamiento mediante colas.
 - PostgreSQL y pgvector.
@@ -146,7 +202,7 @@ El agente debera poder solicitar al backend las siguientes acciones:
 
 - Consultar la disponibilidad de horarios.
 - Crear una cita.
-- Consultar las citas asociadas al paciente de prueba.
+- Consultar las citas asociadas al paciente de prueba, con un rango opcional.
 - Reprogramar una cita.
 - Cancelar una cita.
 

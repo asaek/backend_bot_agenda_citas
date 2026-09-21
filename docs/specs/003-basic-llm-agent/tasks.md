@@ -3,10 +3,12 @@
 ## Implementacion
 
 - [x] Definir `ChatMessage` y el protocolo `LLMProvider`.
+- [x] Definir `LLMResponse` para respuestas de texto y `ToolCall`.
 - [x] Definir `LLMSettings` y cargar la configuracion desde el entorno.
 - [x] Validar credenciales, modelo y limites numericos.
 - [x] Implementar `OpenAICompatibleLLMProvider` con `httpx`.
 - [x] Normalizar respuestas y errores del proveedor.
+- [x] Normalizar tool calls nativos y argumentos JSON de objeto.
 - [x] Permitir inyeccion de transporte HTTP para pruebas.
 - [x] Definir el agente basico mediante `ConversationService` y `LLMProvider`.
 

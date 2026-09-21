@@ -20,7 +20,7 @@ registre las solicitudes y permita simular errores.
 
 - Agregar `FakeLLMProvider` como soporte exclusivo de pruebas.
 - Registrar los mensajes recibidos por el fake y su cantidad de invocaciones.
-- Permitir que el fake devuelva una respuesta conocida o lance un error LLM.
+- Permitir que el fake devuelva texto, un `ToolCall` o lance un error LLM.
 - Probar el ciclo HTTP con `TestClient`, WhatsApp falso y SQLite temporal.
 - Mantener la verificacion de Meta cubierta por la suite.
 

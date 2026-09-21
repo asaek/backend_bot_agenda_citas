@@ -13,7 +13,8 @@ comprobados despues de renovar el token de Cloud API.
   transacciones.
 - `repositories.py`: accede a pacientes, conversaciones y mensajes.
 - `conversation_service.py`: identifica al paciente, recupera la conversacion,
-  registra mensajes y decide la respuesta automatica.
+  construye el `PatientScope`, registra mensajes y decide la respuesta
+  automatica.
 - `whatsapp_client.py`: envia mensajes mediante WhatsApp Cloud API y no conoce
   la persistencia.
 
@@ -49,6 +50,9 @@ Buscar o crear paciente por `from`
 Buscar o crear conversacion activa
   |
   v
+Construir `PatientScope` desde paciente, conversacion y `from`
+  |
+  v
 Guardar mensaje entrante
   |
   v
@@ -79,6 +83,19 @@ El ID de la respuesta devuelto por WhatsApp se guarda cuando esta disponible.
 El estado inicial sera `new` y pasara a `active` despues del primer mensaje.
 El contexto se almacenara como JSON preparado para datos del flujo de citas,
 pero no se extraeran datos semanticos ni se generaran resumenes en esta etapa.
+
+## Alcance del paciente
+
+`ConversationService.receive_message()` resuelve el paciente mediante el
+`sender` extraido de `IncomingTextMessage`, obtiene o crea la conversacion activa
+y construye un `PatientScope` inmutable con `patient_id`, `conversation_id` y
+`whatsapp_number`. Para un webhook duplicado, reconstruye el alcance desde los
+registros persistidos asociados al mensaje original.
+
+`ConversationContext` transporta ese alcance para las capas posteriores. El
+LLM solo recibe `ChatMessage` con el prompt y el historial conversacional; los
+identificadores del paciente, la conversacion y WhatsApp no forman parte de sus
+argumentos.
 
 ## Configuracion
 

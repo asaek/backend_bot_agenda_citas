@@ -31,21 +31,57 @@ El adaptador compatible con OpenAI usa estas variables adicionales:
 - `LLM_MAX_HISTORY_MESSAGES=30`
 - `LLM_MAX_OUTPUT_TOKENS=500`
 - `LLM_MAX_RESPONSE_CHARACTERS=4000`
+- `LLM_MAX_TOOL_ITERATIONS=3`
 
 Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
 `LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
 
-El agente actual solo genera texto y no incluye herramientas, RAG ni memoria
-semantica. La suite automatizada usa un proveedor falso y no requiere estas
-credenciales.
+El agente actual genera texto y puede ejecutar `ToolCall` mediante un
+`AgentOrchestrator` y un `ToolExecutor` configurado por `main.py`. El runtime usa
+`FakeCalendarProvider` y horario laboral de lunes a viernes, 09:00-17:00 UTC,
+para probar la agenda sin servicios externos cuando `CALENDAR_PROVIDER=fake`. El
+limite de llamadas se configura con `LLM_MAX_TOOL_ITERATIONS`. RAG y memoria
+semantica siguen fuera del alcance. La suite automatizada usa proveedores falsos y
+no requiere credenciales externas.
 
-El corte activo define el modelo de dominio, los contratos tipados de las cinco
-herramientas, la validacion previa al proveedor, los errores publicos,
-`CalendarProvider`, `FakeCalendarProvider` y `ToolExecutor`. La conexion a
-Google Calendar queda pendiente.
+Para activar Google Calendar para todas las operaciones, cambia
+`CALENDAR_PROVIDER=google` y configura:
+
+Durante la migracion incremental, conserva `CALENDAR_PROVIDER=fake` y usa
+`CALENDAR_AVAILABILITY_PROVIDER=google` para conectar solamente
+`check_availability`. Si no se configura este selector, disponibilidad usa el
+proveedor principal.
+
+- `GOOGLE_CALENDAR_IDS`: uno o varios IDs separados por comas, hasta 50.
+- `GOOGLE_CALENDAR_AUTH=service_account` y `GOOGLE_SERVICE_ACCOUNT_FILE`, o
+  `GOOGLE_CALENDAR_AUTH=oauth` con client ID, client secret y refresh/access token.
+- `GOOGLE_SERVICE_ACCOUNT_SUBJECT` solo cuando se use delegacion de dominio.
+- `GOOGLE_CALENDAR_TIMEZONE`, `GOOGLE_CALENDAR_BASE_URL` y
+  `GOOGLE_CALENDAR_TIMEOUT_SECONDS`.
+- `BUSINESS_WORKDAYS`, `BUSINESS_HOURS_START` y `BUSINESS_HOURS_END` para definir
+  los dias y el horario laboral sin modificar codigo.
+
+El adaptador consulta `freeBusy`, lista eventos paginados y administra solo los
+eventos con propiedades privadas `managed_by=whatsapp_chatbot` y `patient_id`.
+Cada cita ocupa 30 minutos y conserva el `PatientScope` resuelto por el backend.
+Los secretos deben vivir fuera del repositorio, por ejemplo en variables de
+entorno y archivos montados como secretos.
+
+Cuando se usa Google, SQLite conserva la identidad local de cada cita en la tabla
+`appointments`. El ID que reciben las herramientas es el `id` interno; el
+`google_event_id` queda separado junto con `calendar_id`, paciente, estado, fechas,
+motivo y `last_synced_at`. Google Calendar sigue siendo la fuente de verdad del
+estado de la agenda.
+
+El incremento verificado define el modelo de dominio, los contratos tipados de
+las cinco herramientas, la validacion previa al proveedor, los errores publicos,
+`CalendarProvider`, `FakeCalendarProvider` y `ToolExecutor`. El adaptador
+`GoogleCalendarProvider` y su seleccion explicita estan implementados y verificados
+con HTTP simulado en el mirror de Raspberry Pi.
 
 El webhook crea el proveedor, recupera el historial desde `ConversationService`,
-genera la respuesta, la envia por WhatsApp y registra el resultado. Un fallo de
+genera la respuesta, ejecuta herramientas mediante el `ToolExecutor` configurado,
+la envia por WhatsApp y registra el resultado. Un fallo de
 generacion o envio queda marcado como `failed` para permitir un reintento.
 
 ## 3. Iniciar el servidor

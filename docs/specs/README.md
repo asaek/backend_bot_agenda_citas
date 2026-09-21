@@ -31,3 +31,8 @@ NNN-nombre-de-la-funcionalidad/
 - [003 - Agente LLM basico](./003-basic-llm-agent/spec.md)
 - [004 - Pruebas automatizadas del ciclo sin API](./004-automated-webhook-tests/spec.md)
 - [005 - Contrato de herramientas de citas](./005-tool-contract/spec.md)
+- [006 - Contrato de tool calling del LLM](./006-llm-tool-calling/spec.md)
+- [007 - Orquestador del agente](./007-agent-orchestrator/spec.md)
+- [008 - Integracion del ToolExecutor](./008-tool-executor-integration/spec.md)
+- [009 - Adaptador de Google Calendar](./009-google-calendar-adapter/spec.md)
+- [010 - Persistencia de citas](./010-appointment-persistence/spec.md)

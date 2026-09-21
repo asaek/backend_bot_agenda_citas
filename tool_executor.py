@@ -41,11 +41,15 @@ class ToolExecutor:
         business_hours: BusinessHours,
         default_timezone: str = "UTC",
         now: datetime | NowSource | None = None,
+        availability_provider: CalendarProvider | None = None,
     ) -> None:
         self.provider = provider
         self.business_hours = business_hours
         self.default_timezone = default_timezone
         self._now = now
+        self.availability_provider = (
+            provider if availability_provider is None else availability_provider
+        )
 
     async def execute(self, request: ToolRequest) -> ToolResult:
         """Devuelve siempre un `ToolResult`, incluso si falla el proveedor."""
@@ -102,11 +106,17 @@ class ToolExecutor:
 
     async def _execute_provider(self, tool_input: ToolInput) -> object:
         if isinstance(tool_input, CheckAvailabilityInput):
-            slots = await self.provider.check_availability(
+            slots = await self.availability_provider.check_availability(
                 start_at=tool_input.start_at,
                 end_at=tool_input.end_at,
             )
-            return CheckAvailabilityOutput(slots=slots)
+            return CheckAvailabilityOutput(
+                slots=tuple(
+                    slot
+                    for slot in slots
+                    if self.business_hours.contains(slot.start_at, slot.end_at)
+                )
+            )
 
         if isinstance(tool_input, CreateAppointmentInput):
             appointment = await self.provider.create_appointment(

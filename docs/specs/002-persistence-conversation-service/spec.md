@@ -78,6 +78,13 @@ posterior.
 Los eventos de estado y los mensajes que no sean de tipo `text` deben seguir
 respondiendo exitosamente sin crear pacientes, conversaciones ni mensajes.
 
+### RF-210 - Alcance de paciente del backend
+
+Para cada mensaje valido, el backend debe construir un `PatientScope` con el
+`patient_id` del paciente persistido, el `conversation_id` de la conversacion
+activa y el `whatsapp_number` recibido. Estos valores no deben solicitarse ni
+aceptarse desde el LLM.
+
 ## Criterios de aceptacion
 
 1. El primer mensaje de texto de un numero crea un paciente de prueba.
@@ -91,6 +98,8 @@ respondiendo exitosamente sin crear pacientes, conversaciones ni mensajes.
 9. Un fallo de WhatsApp queda guardado como `failed` y permite reintentar.
 10. Un reinicio del servicio conserva el paciente, la conversacion y el historial.
 11. Los eventos de estado y los mensajes no textuales siguen sin crear datos.
+12. El contexto de cada mensaje expone un `PatientScope` con los tres valores
+    resueltos por el backend y no los incluye como argumentos del LLM.
 
 ## Fuera de alcance
 

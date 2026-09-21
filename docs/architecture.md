@@ -2,7 +2,9 @@
 
 ## Estado
 
-Borrador evolutivo.
+Arquitectura evolutiva. El contrato de herramientas de citas, el orquestador del
+agente y el adaptador de Google Calendar estan verificados con dobles HTTP; una
+cuenta real requiere credenciales fuera del repositorio.
 
 ## Arquitectura actual
 
@@ -26,6 +28,7 @@ Conversation Service
     |
     +-- Repositories -> SQLite
     +-- LLMProvider -> OpenAICompatibleLLMProvider
+    +-- AgentOrchestrator -> ToolExecutor -> CalendarProvider (fake o Google)
     |
     v
 WhatsAppClient -> WhatsApp Cloud API
@@ -90,33 +93,46 @@ backend. Extrae mensajes de texto y coordina el `ConversationService`.
 ### Conversation Service
 
 Identifica al paciente de prueba por su numero de WhatsApp, busca o crea una
-conversacion activa, conserva el historial y construye el contexto para el LLM.
+conversacion activa y construye un `PatientScope` con el paciente, la
+conversacion y el numero de WhatsApp resueltos por el backend. Conserva el
+historial y construye el contexto para el LLM. El `PatientScope` no se obtiene
+de los argumentos del LLM.
 El contexto comienza con las reglas del asistente y usa los mensajes mas
 recientes persistidos. Tambien solicita la respuesta al proveedor LLM y conserva
-el resultado del envio.
+el resultado del envio. Recibe un `ToolExecutor` compuesto por `main.py` y crea
+el `AgentOrchestrator` para ejecutar llamadas de herramientas.
 
 ### Modelo de dominio de citas
 
 `calendar_domain.py` define `Appointment`, `AvailableSlot`, `PatientScope`,
-`ToolRequest`, `ToolResult` y el protocolo `CalendarProvider`. En este primer
-incremento valida invariantes, normaliza los cinco contratos y separa el alcance
-confiable del paciente de los argumentos conversacionales. Todavia no ejecuta
-operaciones ni conecta Google Calendar.
+`ToolRequest`, `ToolResult` y el protocolo `CalendarProvider`. El dominio valida
+invariantes, normaliza los cinco contratos y separa el alcance confiable del
+paciente de los argumentos conversacionales. `ToolExecutor` ejecuta las
+solicitudes del backend contra el proveedor configurado, sin realizar llamadas
+de red por si mismo.
 
 `tool_contracts.py` define los inputs y outputs especificos de cada herramienta.
 `tool_validation.py` valida fechas, horarios, conflictos, pertenencia y estados
 antes de cualquier proveedor. `tool_results.py` convierte las excepciones de la
 frontera de agenda en `ToolResult.failure()` sin copiar detalles internos.
 `FakeCalendarProvider` implementa el contrato en memoria con datos deterministas,
-periodos ocupados, conflictos y fallos simulables. El `ToolExecutor` se
-encarga de parsear, validar, despachar cada operación y envolver su salida en el
-output tipado correspondiente.
+periodos ocupados, conflictos y fallos simulables. El `ToolExecutor` se encarga
+de parsear, validar, despachar cada operacion y envolver su salida en el output
+tipado correspondiente. `list_appointments` conserva el alcance del paciente,
+acepta un rango opcional por superposicion y no restringe consultas historicas.
+La suite verifica esta frontera sin Google Calendar.
 
 ### Persistence y repositories
 
 `persistence.py` administra conexiones, esquema y transacciones SQLite.
 `repositories.py` encapsula las operaciones de pacientes, conversaciones y
-mensajes. La ruta de la base se configura mediante `DATABASE_PATH`.
+mensajes y citas. La ruta de la base se configura mediante `DATABASE_PATH`.
+La tabla `appointments` conserva el ID interno de la cita, el calendario y evento
+de Google, el paciente, el estado, el intervalo, el motivo y las fechas de
+sincronizacion. `PersistentCalendarProvider` traduce el ID interno expuesto a las
+herramientas al `google_event_id` que necesita el proveedor externo. Google
+Calendar sigue siendo la fuente de verdad; SQLite conserva la identidad local y
+el ultimo estado sincronizado.
 
 ### WhatsAppClient
 
@@ -129,16 +145,39 @@ conversacion.
 Define el contrato asincrono `generate(messages)` para que el agente basico y la
 logica conversacional no dependan de un proveedor concreto. El adaptador
 `OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq u
-OpenRouter.
+OpenRouter. Cada solicitud incluye los cinco esquemas OpenAI-compatible de las
+herramientas; el proveedor puede devolver texto o un `ToolCall` estructurado.
 
 El adaptador participa en el flujo del webhook mediante la inyeccion de
-`LLMProvider` en `ConversationService`. `main.py` coordina la generacion, el
-envio y el registro, pero no decide el contenido conversacional. Los fallos del
-LLM se registran en SQLite y producen una respuesta controlada si WhatsApp esta
-disponible.
+`LLMProvider` en `ConversationService`. `generate()` devuelve texto o un
+`ToolCall` normalizado. `main.py` crea `BusinessHours` y `ToolExecutor`;
+`create_calendar_provider()` usa `FakeCalendarProvider` por defecto o
+`GoogleCalendarProvider` cuando `CALENDAR_PROVIDER=google`.
+`create_availability_provider()` puede seleccionar Google solamente para
+`check_availability` cuando `CALENDAR_AVAILABILITY_PROVIDER=google`; las otras
+operaciones siguen usando el proveedor principal. `ConversationService` entrega
+el ejecutor al `AgentOrchestrator`, que coordina las llamadas, limita las
+iteraciones y devuelve la redaccion final. `main.py` coordina el envio y el
+registro, pero no decide el contenido conversacional.
+
+`create_business_hours()` carga `BUSINESS_WORKDAYS`, `BUSINESS_HOURS_START` y
+`BUSINESS_HOURS_END` desde el entorno. La zona horaria se comparte con
+`GOOGLE_CALENDAR_TIMEZONE`; los valores predeterminados solo mantienen el horario
+tecnico inicial de lunes a viernes, 09:00-17:00.
 
 La suite automatizada implementa el mismo contrato con `FakeLLMProvider`, que
-registra las solicitudes y permite simular errores sin red.
+registra las solicitudes y permite simular texto, tool calls y errores sin red.
+
+### AgentOrchestrator
+
+`agent_orchestrator.py` ejecuta el ciclo `LLM -> ToolRequest + PatientScope ->
+ToolExecutor -> ToolResult -> LLM`. El alcance se recibe desde
+`ConversationContext`; el LLM solo entrega el nombre y los argumentos
+conversacionales. Los resultados enviados al siguiente turno se sanea para
+excluir identificadores internos de paciente y calendario. El limite de
+iteraciones se configura mediante `LLM_MAX_TOOL_ITERATIONS`. La composicion de
+runtime se define en `main.py`; `create_calendar_provider()` es el punto de
+seleccion del proveedor.
 
 ### Uvicorn
 
@@ -146,19 +185,18 @@ Ejecuta la aplicacion ASGI y gestiona las conexiones HTTP.
 
 ### Google Calendar
 
-Sera la fuente de verdad de la agenda del medico durante el MVP tecnico. Alli se
-administraran las citas, los dias no laborables y los espacios bloqueados
-manualmente. El backend lo consultara y modificara mediante herramientas
-controladas; el LLM no recibira credenciales ni acceso directo al calendario.
+Es la fuente de verdad opcional de la agenda del medico durante el MVP tecnico.
+Alli se administran las citas, los dias no laborables y los espacios bloqueados
+manualmente. El backend lo consulta y modifica mediante herramientas controladas;
+el LLM no recibe credenciales ni acceso directo al calendario.
 
 Cada cita creada por el chatbot ocupara 30 minutos. Antes de ofrecer o reservar
 un horario, el backend debera comprobar tanto que el espacio no este ocupado
 como que pertenezca al horario de atencion configurado.
 
-La integracion se realizara sobre calendarios que ya estan en uso y contienen
-eventos anteriores. El backend debera conservar esos eventos y no podra
-eliminarlos, reemplazarlos ni reinterpretarlos sin una regla explicita. Para
-calcular disponibilidad debera combinar:
+La integracion opera sobre calendarios que ya estan en uso y contienen eventos
+anteriores. El backend conserva esos eventos y no puede eliminarlos, reemplazarlos
+ni reinterpretarlos sin una regla explicita. Para calcular disponibilidad combina:
 
 - Horario laboral del medico.
 - Citas existentes.
@@ -166,8 +204,9 @@ calcular disponibilidad debera combinar:
 - Ausencias del medico.
 - Espacios bloqueados manualmente.
 
-Antes de implementar la integracion se documentara como identificar cada clase
-de evento en los calendarios actuales.
+Los eventos existentes sin metadatos del sistema no se consideran citas
+administradas por el chatbot; el adaptador solo puede listarlos de forma indirecta
+como periodos ocupados para disponibilidad.
 
 La API de Google Calendar puede consultar los periodos ocupados de uno o varios
 calendarios. Tambien expone algunos tipos especiales, como eventos de fuera de
@@ -177,19 +216,35 @@ tratara todos los periodos ocupados de los calendarios seleccionados como no
 disponibles, sin importar su titulo o categoria y sin necesitar interpretar su
 contenido.
 
-Los eventos nuevos creados por el chatbot podran llevar propiedades extendidas
-privadas para identificarlos como citas administradas por el sistema. Los
-eventos existentes no tendran esos metadatos salvo que se hayan añadido
-previamente, por lo que primero se inspeccionara su estructura en modo de solo
-lectura.
+`GoogleCalendarProvider` usa `freeBusy` para consultar hasta 50 calendarios
+configurados y `events.list` con paginacion para localizar las citas del paciente.
+Los eventos creados por el chatbot llevan propiedades extendidas privadas para
+identificarlos como citas administradas por el sistema. Las operaciones de lectura
+y modificacion exigen `managed_by=whatsapp_chatbot` y el `patient_id` del alcance
+actual; los eventos existentes sin esos metadatos no se reinterpretan ni se
+modifican.
+
+La herramienta `list_appointments` entrega a la capa conversacional las citas
+administradas del paciente, incluyendo su ID interno para futuras operaciones de
+reprogramacion o cancelacion. El serializador del agente omite el calendario y el
+`PatientScope` antes de devolver el resultado al LLM.
+
+La autenticacion admite OAuth con refresh/access token y cuentas de servicio,
+incluida delegacion de dominio opcional. `google-auth` refresca los tokens y
+`httpx` transporta las llamadas REST. Los errores de red y de Google se reducen a
+los errores publicos del dominio.
 
 Referencias oficiales:
 
 - [Consulta de disponibilidad](https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query)
 - [Tipos de evento](https://developers.google.com/workspace/calendar/api/v3/reference/events)
+- [Lista de eventos](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+- [Insercion de eventos](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)
+- [Actualizacion parcial](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch)
 - [Propiedades extendidas](https://developers.google.com/workspace/calendar/api/guides/extended-properties)
+- [Paginacion](https://developers.google.com/workspace/calendar/api/guides/pagination)
 
-## Flujo futuro de una herramienta de agenda
+## Flujo de una herramienta de agenda
 
 ```text
 Mensaje del paciente de prueba
@@ -219,8 +274,11 @@ LLM redacta la respuesta
 - SQLite se usa para una unica instalacion del MVP y no para multiples replicas.
 - Los secretos se proporcionan mediante variables de entorno y no se guardan
   en el repositorio.
-- Las pruebas automatizadas cubren el ciclo con dobles locales; la suite no
-  valida la calidad ni la disponibilidad de un proveedor LLM real.
+- Las pruebas automatizadas cubren el ciclo con dobles locales y el limite HTTP de
+  Google Calendar; la suite no valida la disponibilidad de un proveedor LLM o una
+  cuenta de Google reales.
+- La migracion incremental puede consultar disponibilidad real mientras las
+  operaciones de escritura permanecen en el proveedor fake.
 
 ## Preguntas abiertas
 
