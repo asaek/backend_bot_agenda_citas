@@ -10,6 +10,11 @@ Identidad simulada utilizada durante el MVP tecnico. Cada paciente de prueba
 esta asociado a un unico numero de WhatsApp controlado por el desarrollador.
 _Evitar_: Cliente, usuario, paciente real
 
+**Doctor**:
+Profesional responsable de recibir la informacion operativa de las citas y el
+resumen de la conversacion del paciente de prueba.
+_Evitar_: Administrador, operador, paciente
+
 **Cita**:
 Reserva de un paciente de prueba para recibir atencion en una fecha y hora
 determinadas. Durante el MVP tecnico, cada cita dura 30 minutos y se expresa en
@@ -49,6 +54,12 @@ _Evitar_: Etiqueta interna
 Situacion vigente de una cita dentro de su ciclo de vida.
 _Evitar_: Estado del calendario
 
+**Notificacion al doctor**:
+Mensaje interno enviado al doctor despues de que una cita sea agendada,
+modificada o cancelada correctamente. Incluye los datos de la cita y un resumen
+de la conversacion relacionado con ese evento.
+_Evitar_: Respuesta al paciente, alerta de diagnostico
+
 **Señal de prioridad**:
 Indicador interno derivado del mensaje que advierte que una solicitud podria
 requerir atencion prioritaria. No representa un diagnostico medico.
@@ -56,5 +67,6 @@ _Evitar_: Diagnostico, estado de la cita
 
 **Resumen conversacional**:
 Sintesis interna de la conversacion que conserva la informacion relevante para
-continuar la atencion, incluidas las señales de prioridad detectadas.
-_Evitar_: Historial completo, nota clinica
+continuar la atencion, incluidas las señales de prioridad detectadas. Cuando se
+notifica al doctor, acompaña al evento de la cita y no sustituye una nota clinica.
+_Evitar_: Historial completo, nota clinica, diagnostico

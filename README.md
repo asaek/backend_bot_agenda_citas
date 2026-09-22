@@ -67,6 +67,13 @@ Cada cita ocupa 30 minutos y conserva el `PatientScope` resuelto por el backend.
 Los secretos deben vivir fuera del repositorio, por ejemplo en variables de
 entorno y archivos montados como secretos.
 
+La siguiente funcionalidad planificada es `011-doctor-notifications`. Cuando se
+implemente, una cita agendada, modificada o cancelada correctamente generara un
+unico mensaje para el doctor. El mensaje incluira el evento, los datos de la cita,
+el paciente, el telefono, el resumen conversacional y las señales de prioridad
+disponibles. El resumen sera contenido obligatorio de esos tres mensajes y no se
+enviara de forma independiente.
+
 Cuando se usa Google, SQLite conserva la identidad local de cada cita en la tabla
 `appointments`. El ID que reciben las herramientas es el `id` interno; el
 `google_event_id` queda separado junto con `calendar_id`, paciente, estado, fechas,
@@ -83,6 +90,9 @@ El webhook crea el proveedor, recupera el historial desde `ConversationService`,
 genera la respuesta, ejecuta herramientas mediante el `ToolExecutor` configurado,
 la envia por WhatsApp y registra el resultado. Un fallo de
 generacion o envio queda marcado como `failed` para permitir un reintento.
+
+Las notificaciones al doctor todavia no forman parte de este runtime. Su alcance,
+diseno y cortes estan documentados en `docs/specs/011-doctor-notifications/`.
 
 ## 3. Iniciar el servidor
 

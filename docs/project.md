@@ -139,6 +139,20 @@ mapa para que las herramientas reciban IDs internos y Google siga siendo la fuen
 de verdad. La implementacion y la suite de Raspberry Pi estan verificadas. La
 especificacion esta en `specs/010-appointment-persistence/`.
 
+### Corte planificado: notificaciones al doctor
+
+La siguiente funcionalidad definida en `specs/011-doctor-notifications/` enviara
+un unico mensaje al doctor cuando una cita sea agendada, modificada o cancelada
+correctamente. El mensaje incluira el tipo de evento, los datos de la cita, el
+paciente, el telefono, el resumen conversacional y las señales de prioridad
+disponibles. El resumen sera contenido obligatorio de esos tres mensajes y no
+tendra un disparador independiente.
+
+La entrega propuesta reutiliza WhatsApp Cloud API y conserva una bandeja local de
+notificaciones para registrar idempotencia, estados y errores sin bloquear la
+respuesta al paciente. Esta arquitectura permanece en propuesta hasta que los
+cortes de implementacion sean ejecutados y verificados.
+
 ### Fase incremental: disponibilidad real
 
 La migracion hacia Google Calendar se realiza herramienta por herramienta. Durante
@@ -195,6 +209,19 @@ Respuesta en WhatsApp
 El MVP tecnico se considerara terminado cuando este flujo completo funcione de
 extremo a extremo con las diferentes cuentas de WhatsApp utilizadas como
 clientes simulados.
+
+Cuando se confirme una operacion de agenda, el flujo podra tener una salida
+adicional para el doctor:
+
+```text
+Operacion de cita confirmada
+    |
+    v
+Notificacion al doctor
+    |
+    v
+WhatsApp Cloud API
+```
 
 ## Herramientas del MVP tecnico
 

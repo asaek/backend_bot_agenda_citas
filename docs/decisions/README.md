@@ -27,3 +27,4 @@ indique cual decision anterior queda obsoleta.
 - [0016 - Identidad local y sincronizacion de citas](./0016-appointment-identity-persistence.md)
 - [0017 - Esquemas de herramientas en solicitudes LLM](./0017-llm-tool-schemas.md)
 - [0018 - Migracion incremental del proveedor de disponibilidad](./0018-incremental-availability-provider.md)
+- [0019 - Entrega de notificaciones al doctor](./0019-doctor-notification-delivery.md)

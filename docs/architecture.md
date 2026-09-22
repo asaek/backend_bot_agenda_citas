@@ -140,6 +140,38 @@ Construye la solicitud autenticada de tipo texto para WhatsApp Cloud API usando
 `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID`. No contiene logica de
 conversacion.
 
+### Notificaciones al doctor
+
+Esta capacidad esta planificada en `specs/011-doctor-notifications/` y aun no forma
+parte del runtime implementado. Despues de una operacion exitosa de
+`create_appointment`, `reschedule_appointment` o `cancel_appointment`, el flujo
+propuesto emitira un evento para `DoctorNotificationService`.
+
+`DoctorNotificationService` construira un unico mensaje con el tipo de evento, los
+datos de la cita, el paciente, el telefono, el resumen conversacional y las señales
+de prioridad disponibles. El resumen sera contenido de cada notificacion y no un
+disparador independiente.
+
+La entrega propuesta reutilizara `WhatsAppClient` y persistira una bandeja local de
+notificaciones con una clave de idempotencia, estado, error e identificador del
+proveedor. El servicio de agenda no enviara mensajes directamente. Un fallo al
+doctor no debera afectar la respuesta del paciente.
+
+```text
+ToolExecutor
+    |
+    +-- CalendarProvider
+    |
+    +-- AppointmentNotificationEvent
+            |
+            v
+    DoctorNotificationService -> SQLite -> WhatsAppClient -> Doctor
+```
+
+El mecanismo de eventos, la persistencia y la politica de reintentos se
+implementaran por cortes. Hasta entonces son un diseno propuesto y no deben
+interpretarse como comportamiento disponible.
+
 ### LLMProvider y agente LLM basico
 
 Define el contrato asincrono `generate(messages)` para que el agente basico y la

@@ -32,3 +32,8 @@ esten aprobados.
 - [Especificaciones](./specs/README.md)
 - [Decisiones](./decisions/README.md)
 - [Verificaciones](./verification/2026-09-21-whatsapp-check-availability.md)
+
+## Siguiente funcionalidad planificada
+
+- [011 - Notificaciones al doctor](./specs/011-doctor-notifications/spec.md)
+- [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)

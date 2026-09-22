@@ -36,3 +36,4 @@ NNN-nombre-de-la-funcionalidad/
 - [008 - Integracion del ToolExecutor](./008-tool-executor-integration/spec.md)
 - [009 - Adaptador de Google Calendar](./009-google-calendar-adapter/spec.md)
 - [010 - Persistencia de citas](./010-appointment-persistence/spec.md)
+- [011 - Notificaciones al doctor](./011-doctor-notifications/spec.md)
