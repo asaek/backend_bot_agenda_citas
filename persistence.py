@@ -75,6 +75,39 @@ CREATE TABLE IF NOT EXISTS llm_failures (
 
 CREATE INDEX IF NOT EXISTS llm_failures_by_conversation
 ON llm_failures(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS doctor_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key TEXT NOT NULL CHECK (length(trim(event_key)) > 0),
+    recipient_number TEXT NOT NULL CHECK (length(trim(recipient_number)) > 0),
+    notification_type TEXT NOT NULL CHECK (
+        notification_type IN (
+            'appointment_scheduled',
+            'appointment_modified',
+            'appointment_cancelled'
+        )
+    ),
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    appointment_id TEXT NOT NULL CHECK (length(trim(appointment_id)) > 0),
+    body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'sending', 'sent', 'failed')
+    ),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    last_error TEXT,
+    provider_message_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sent_at TEXT,
+    UNIQUE(event_key, recipient_number)
+);
+
+CREATE INDEX IF NOT EXISTS doctor_notifications_by_status
+ON doctor_notifications(status, updated_at, id);
+
+CREATE INDEX IF NOT EXISTS doctor_notifications_by_event
+ON doctor_notifications(event_key, id);
 """
 
 

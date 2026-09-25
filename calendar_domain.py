@@ -261,7 +261,7 @@ class CalendarProvider(Protocol):
         start_at: datetime | None = None,
         end_at: datetime | None = None,
     ) -> Sequence[Appointment]:
-        """Devuelve las citas del paciente dentro del rango opcional."""
+        """Devuelve las citas vigentes del paciente dentro del rango opcional."""
 
     async def reschedule_appointment(
         self,

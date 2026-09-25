@@ -9,52 +9,61 @@
 
 ## Corte 1 - Eventos de agenda
 
-- [ ] Definir los tipos de evento de notificacion.
-- [ ] Exponer los resultados exitosos de create, reschedule y cancel al flujo de
+- [x] Definir los tipos de evento de notificacion.
+- [x] Exponer los resultados exitosos de create, reschedule y cancel al flujo de
   notificacion.
-- [ ] Relacionar cada evento con el mensaje entrante y la llamada de herramienta.
-- [ ] Probar que los errores de agenda no generan eventos exitosos.
+- [x] Relacionar cada evento con el mensaje entrante y la llamada de herramienta.
+- [x] Probar que los errores de agenda no generan eventos exitosos.
 
 ## Corte 2 - Persistencia e idempotencia
 
-- [ ] Crear la tabla `doctor_notifications` y sus restricciones.
-- [ ] Implementar el repositorio de estados, errores e IDs del proveedor.
-- [ ] Implementar la clave unica del evento para evitar duplicados.
-- [ ] Probar reintentos del webhook y recuperacion de estados pendientes o fallidos.
+- [x] Crear la tabla `doctor_notifications` y sus restricciones.
+- [x] Implementar el repositorio de estados, errores e IDs del proveedor.
+- [x] Implementar la clave unica `(event_key, recipient_number)` para evitar
+  duplicados por destinatario.
+- [x] Probar reintentos de encolado y recuperacion de estados pendientes o fallidos.
+- [x] Probar entregas independientes para varios numeros configurados.
 
 ## Corte 3 - Composicion del mensaje y resumen
 
-- [ ] Implementar el formato unico para agendamiento, modificacion y cancelacion.
-- [ ] Implementar el resumen con el historial persistido y el contexto de la cita.
-- [ ] Incluir paciente, telefono y senales de prioridad disponibles.
-- [ ] Evitar diagnosticos, transcripciones completas e identificadores internos.
-- [ ] Probar la composicion con un proveedor LLM falso y con nombre de paciente
+- [x] Implementar el formato unico para agendamiento, modificacion y cancelacion.
+- [x] Implementar el resumen con el historial persistido y el contexto de la cita.
+- [x] Incluir paciente, sus ultimos 10 digitos de telefono y senales de prioridad
+  disponibles.
+- [x] Evitar diagnosticos, transcripciones completas e identificadores internos.
+- [x] Probar la composicion con un proveedor LLM falso y con nombre de paciente
   ausente.
 
 ## Corte 4 - Entrega por WhatsApp
 
-- [ ] Agregar la configuracion del doctor y la bandera de habilitacion.
-- [ ] Reutilizar `WhatsAppClient` para el destinatario del doctor.
-- [ ] Persistir correctamente estados `pending`, `sending`, `sent` y `failed`.
-- [ ] Normalizar errores de configuracion y de la API externa.
-- [ ] Probar envio exitoso, fallo y reintento con un cliente WhatsApp falso.
+- [x] Agregar la configuracion de varios doctores y la bandera de habilitacion.
+- [x] Reutilizar `WhatsAppClient` para cada destinatario configurado.
+- [x] Persistir correctamente estados `pending`, `sending`, `sent` y `failed` por
+  destinatario.
+- [x] Normalizar errores de configuracion y de la API externa.
+- [x] Probar envios multiples, fallo aislado y reintento con un cliente WhatsApp
+  falso.
 
 ## Corte 5 - Integracion del webhook
 
-- [ ] Componer `DoctorNotificationService` desde `main.py`.
-- [ ] Integrar la notificacion despues de cada operacion de cita confirmada.
-- [ ] Garantizar que un fallo al doctor no impida la respuesta al paciente.
-- [ ] Probar los tres eventos desde el ciclo completo del webhook.
-- [ ] Probar que un webhook duplicado no envia dos mensajes al doctor.
+- [x] Componer `DoctorNotificationService` desde `main.py`.
+- [x] Integrar la notificacion despues de cada operacion de cita confirmada.
+- [x] Garantizar que un fallo al doctor no impida la respuesta al paciente.
+- [x] Probar los tres eventos desde el ciclo completo del webhook.
+- [x] Probar que un webhook duplicado no envia dos mensajes al mismo doctor.
 
 ## Corte 6 - Verificacion y cierre documental
 
-- [ ] Actualizar README y `.env.example` con la configuracion implementada.
-- [ ] Cambiar la especificacion y el ADR a estado implementado cuando corresponda.
-- [ ] Ejecutar la suite completa en la Raspberry Pi.
-- [ ] Verificar health check y ambos metodos del webhook con los comandos del
+- [x] Actualizar README y `.env.example` con la configuracion implementada.
+- [x] Cambiar la especificacion y el ADR a estado implementado cuando corresponda.
+- [x] Ejecutar la suite completa en la Raspberry Pi.
+- [x] Verificar health check y ambos metodos del webhook con los comandos del
   README.
-- [ ] Registrar la evidencia en `docs/verification/`.
+- [x] Registrar la evidencia en `docs/verification/`.
+
+La evidencia de cierre esta en
+`docs/verification/2026-09-22-doctor-notifications-webhook.md` e incluye la suite
+local, la suite del mirror de Raspberry Pi y la verificacion HTTP operativa.
 
 ## Fuera de este corte
 

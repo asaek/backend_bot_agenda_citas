@@ -26,6 +26,7 @@ from main import (
     create_availability_provider,
     create_business_hours,
     create_calendar_provider,
+    create_conversation_service,
     create_tool_executor,
     normalize_recipient_number,
 )
@@ -75,6 +76,17 @@ class MissingWhatsAppConfigurationClient(FakeWhatsAppClient):
         raise WhatsAppConfigurationError("configuracion de prueba ausente")
 
 
+class FailingRecipientWhatsAppClient(FakeWhatsAppClient):
+    def __init__(self, failing_recipients: set[str]) -> None:
+        super().__init__()
+        self.failing_recipients = failing_recipients
+
+    async def send_text(self, to: str, body: str) -> dict[str, Any]:
+        if to in self.failing_recipients:
+            raise httpx.ConnectError("fallo de doctor de prueba")
+        return await super().send_text(to, body)
+
+
 class WebhookTests(unittest.TestCase):
     def setUp(self) -> None:
         self.database_directory = tempfile.TemporaryDirectory()
@@ -96,6 +108,24 @@ class WebhookTests(unittest.TestCase):
         app.state.calendar_provider = provider
         app.state.availability_provider = provider
         app.state.tool_executor = create_tool_executor(provider, environment)
+
+    def set_fixed_calendar_runtime(self) -> None:
+        provider = FakeCalendarProvider()
+        business_hours = BusinessHours(
+            timezone_name="UTC",
+            windows_by_weekday={
+                weekday: (TimeWindow(time(9), time(17)),)
+                for weekday in range(5)
+            },
+        )
+        app.state.calendar_provider = provider
+        app.state.availability_provider = provider
+        app.state.tool_executor = ToolExecutor(
+            provider=provider,
+            business_hours=business_hours,
+            default_timezone="UTC",
+            now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
+        )
 
     def test_google_calendar_provider_requires_explicit_runtime_selection(self) -> None:
         expected_provider = object()
@@ -150,13 +180,21 @@ class WebhookTests(unittest.TestCase):
             TimeWindow(time(8, 30), time(16, 15)),
         )
 
-    @contextmanager
-    def configured_runtime(
-        self,
-        whatsapp_client: FakeWhatsAppClient,
-        llm_provider: FakeLLMProvider | None = None,
-    ) -> Iterator[FakeLLMProvider]:
-        provider = llm_provider or FakeLLMProvider()
+    def test_conversation_service_uses_calendar_timezone_for_relative_dates(self) -> None:
+        business_hours = BusinessHours(
+            timezone_name="America/Mexico_City",
+            windows_by_weekday={
+                weekday: (TimeWindow(time(9), time(17)),)
+                for weekday in range(5)
+            },
+        )
+        executor = ToolExecutor(
+            provider=FakeCalendarProvider(),
+            business_hours=business_hours,
+            default_timezone="America/Mexico_City",
+            now=datetime(2026, 9, 24, 5, 30, tzinfo=timezone.utc),
+        )
+
         with patch.dict(
             os.environ,
             {
@@ -164,6 +202,45 @@ class WebhookTests(unittest.TestCase):
                 "LLM_API_KEY": "test-key",
                 "LLM_MODEL": "test-model",
             },
+        ):
+            with patch("main.create_llm_provider", return_value=FakeLLMProvider()):
+                service = create_conversation_service(executor)
+
+        context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.relative-date",
+                message_type="text",
+                text="Que citas tengo hoy?",
+            )
+        )
+        prompt = service.build_chat_messages(context)[0].content
+
+        self.assertIn("Zona horaria de la agenda: America/Mexico_City", prompt)
+        self.assertIn(
+            '"hoy" corresponde a [2026-09-23T00:00:00-06:00, '
+            '2026-09-24T00:00:00-06:00).',
+            prompt,
+        )
+
+    @contextmanager
+    def configured_runtime(
+        self,
+        whatsapp_client: FakeWhatsAppClient,
+        llm_provider: FakeLLMProvider | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> Iterator[FakeLLMProvider]:
+        provider = llm_provider or FakeLLMProvider()
+        runtime_environment = {
+            "DATABASE_PATH": self.database_path,
+            "LLM_API_KEY": "test-key",
+            "LLM_MODEL": "test-model",
+        }
+        if environment is not None:
+            runtime_environment.update(environment)
+        with patch.dict(
+            os.environ,
+            runtime_environment,
         ):
             with patch("main.WhatsAppClient", return_value=whatsapp_client):
                 with patch("main.create_llm_provider", return_value=provider):
@@ -505,6 +582,282 @@ class WebhookTests(unittest.TestCase):
             [message.role for message in tool_provider.received_messages[1]],
             ["system", "user", "assistant", "tool"],
         )
+
+    def test_webhook_completes_the_three_doctor_notification_flows(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                    call_id="call-create",
+                ),
+                '{"summary":"El paciente solicito una cita.","priority_signals":[]}',
+                ToolCall(
+                    name="reschedule_appointment",
+                    arguments={
+                        "appointment_id": "appointment-1",
+                        "new_start_at": "2026-09-21T11:00:00",
+                    },
+                    call_id="call-reschedule",
+                ),
+                '{"summary":"El paciente confirmo un nuevo horario.","priority_signals":[]}',
+                ToolCall(
+                    name="cancel_appointment",
+                    arguments={"appointment_id": "appointment-1"},
+                    call_id="call-cancel",
+                ),
+                '{"summary":"El paciente solicito cancelar la cita.","priority_signals":[]}',
+            )
+        )
+        environment = {
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+            "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+        }
+
+        with self.configured_runtime(fake_client, tool_provider, environment):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.create", text="Agendar"),
+                    self.text_payload(
+                        message_id="wamid.create-reason",
+                        text="Revision",
+                    ),
+                    self.text_payload(message_id="wamid.reschedule", text="Cambiar"),
+                    self.text_payload(
+                        message_id="wamid.reschedule-confirm",
+                        text="Si",
+                    ),
+                    self.text_payload(message_id="wamid.cancel", text="Cancelar"),
+                    self.text_payload(
+                        message_id="wamid.cancel-confirm",
+                        text="Si",
+                    ),
+                )
+
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [200, 200, 200, 200, 200, 200],
+        )
+        self.assertEqual(
+            [recipient for recipient, _ in fake_client.sent_messages],
+            [
+                "5491100000000",
+                "5491100000000",
+                "5491100000001",
+                "5491100000000",
+                "5491100000000",
+                "5491100000001",
+                "5491100000000",
+                "5491100000000",
+                "5491100000001",
+            ],
+        )
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertIn("Tipo de evento: Cita agendada", doctor_bodies[0])
+        self.assertIn("Tipo de evento: Cita modificada", doctor_bodies[1])
+        self.assertIn("Hora: 11:00-11:30", doctor_bodies[1])
+        self.assertIn("Tipo de evento: Cita cancelada", doctor_bodies[2])
+        self.assertIn("confirmas", fake_client.sent_messages[3][1].lower())
+        self.assertIn("confirmas", fake_client.sent_messages[6][1].lower())
+        self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[6][1])
+        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[6][1])
+        self.assertIn("Motivo: Revision", fake_client.sent_messages[6][1])
+        self.assertNotIn("appointment-1", fake_client.sent_messages[6][1])
+        with open_database(self.database_path) as connection:
+            notification_rows = connection.execute(
+                """
+                SELECT notification_type, status, attempt_count
+                FROM doctor_notifications
+                ORDER BY id
+                """
+            ).fetchall()
+
+        self.assertEqual(
+            notification_rows,
+            [
+                ("appointment_scheduled", "sent", 1),
+                ("appointment_modified", "sent", 1),
+                ("appointment_cancelled", "sent", 1),
+            ],
+        )
+
+    def test_doctor_failure_does_not_change_successful_patient_reply(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FailingRecipientWhatsAppClient({"5491100000001"})
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                    call_id="call-create",
+                ),
+                '{"summary":"Solicitud de cita.","priority_signals":[]}',
+            )
+        )
+
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {
+                "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                "DOCTOR_WHATSAPP_NUMBERS": "5491100000001,5491100000002",
+            },
+        ):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(message_id="wamid.doctor-failure"),
+                )
+                reason_response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(
+                        message_id="wamid.doctor-failure-reason",
+                        text="Revision",
+                    ),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reason_response.status_code, 200)
+        self.assertEqual(
+            [recipient for recipient, _ in fake_client.sent_messages],
+            ["5491100000000", "5491100000000", "5491100000002"],
+        )
+        with open_database(self.database_path) as connection:
+            patient_reply = connection.execute(
+                """
+                SELECT status, text
+                FROM messages
+                WHERE direction = 'outgoing'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            notification_rows = connection.execute(
+                """
+                SELECT recipient_number, status, last_error
+                FROM doctor_notifications
+                ORDER BY id
+                """
+            ).fetchall()
+
+        self.assertEqual(patient_reply[0], "sent")
+        self.assertIn("confirmada", patient_reply[1])
+        self.assertEqual(notification_rows[0][0:2], ("5491100000001", "failed"))
+        self.assertEqual(notification_rows[0][2], "No se pudo conectar con WhatsApp.")
+        self.assertEqual(notification_rows[1][0:2], ("5491100000002", "sent"))
+
+    def test_summary_failure_is_recorded_without_affecting_patient_reply(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                    call_id="call-create",
+                ),
+                ToolCall(name="create_appointment", arguments={}),
+            )
+        )
+
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {
+                "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            },
+        ):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(message_id="wamid.summary-failure"),
+                )
+                reason_response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(
+                        message_id="wamid.summary-failure-reason",
+                        text="Revision",
+                    ),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reason_response.status_code, 200)
+        self.assertEqual(
+            [recipient for recipient, _ in fake_client.sent_messages],
+            ["5491100000000", "5491100000000"],
+        )
+        with open_database(self.database_path) as connection:
+            patient_reply = connection.execute(
+                "SELECT status FROM messages WHERE direction = 'outgoing'"
+            ).fetchone()
+            notification = connection.execute(
+                "SELECT status, last_error FROM doctor_notifications"
+            ).fetchone()
+
+        self.assertEqual(patient_reply, ("sent",))
+        self.assertEqual(
+            notification,
+            ("failed", "No se pudo construir la notificacion al doctor."),
+        )
+
+    def test_duplicate_webhook_does_not_send_duplicate_doctor_notification(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                    call_id="call-create",
+                ),
+                '{"summary":"Solicitud de cita.","priority_signals":[]}',
+            )
+        )
+        payload = self.text_payload(message_id="wamid.duplicate")
+        reason_payload = self.text_payload(
+            message_id="wamid.duplicate-reason",
+            text="Revision",
+        )
+
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {
+                "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            },
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(client, payload, payload)
+                responses.extend(self.post_messages(client, reason_payload))
+
+        self.assertEqual([response.status_code for response in responses], [200, 200, 200])
+        self.assertEqual(
+            [recipient for recipient, _ in fake_client.sent_messages],
+            ["5491100000000", "5491100000000", "5491100000001"],
+        )
+        self.assertEqual(tool_provider.call_count, 2)
+        with open_database(self.database_path) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM doctor_notifications"
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
 
     def test_missing_api_key_sends_controlled_fallback_and_records_failure(self) -> None:
         fake_client = FakeWhatsAppClient()

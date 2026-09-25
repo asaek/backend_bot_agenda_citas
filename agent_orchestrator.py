@@ -1,6 +1,6 @@
 """Bucle del agente entre el proveedor LLM y las herramientas del backend."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -18,6 +18,10 @@ from llm_provider import (
     LLMProviderError,
     ToolCall,
 )
+from notification_domain import (
+    AppointmentNotificationEventSink,
+    appointment_notification_event_from_result,
+)
 from tool_executor import ToolExecutor
 from tool_results import tool_result_from_exception
 
@@ -31,6 +35,9 @@ class AgentOrchestrationError(LLMProviderError):
 
 class AgentIterationLimitError(AgentOrchestrationError):
     """Indica que el LLM solicito demasiadas herramientas consecutivas."""
+
+
+MutationRequestHandler = Callable[[ToolCall, PatientScope], Awaitable[str | None]]
 
 
 class AgentOrchestrator:
@@ -54,7 +61,17 @@ class AgentOrchestrator:
         *,
         messages: Sequence[ChatMessage],
         patient_scope: PatientScope,
+        incoming_message_id: int | None = None,
+        on_appointment_event: AppointmentNotificationEventSink | None = None,
+        on_mutation_requested: MutationRequestHandler | None = None,
     ) -> str:
+        if on_appointment_event is not None and (
+            incoming_message_id is None or incoming_message_id <= 0
+        ):
+            raise ValueError(
+                "incoming_message_id es obligatorio para observar eventos de citas"
+            )
+
         conversation = list(messages)
 
         for iteration in range(self.max_iterations + 1):
@@ -69,7 +86,19 @@ class AgentOrchestrator:
                 )
 
             tool_call = _with_call_id(response, iteration)
+            if on_mutation_requested is not None:
+                confirmation_reply = await on_mutation_requested(tool_call, patient_scope)
+                if confirmation_reply is not None:
+                    return confirmation_reply
             result = await self._execute_tool_call(tool_call, patient_scope)
+            if on_appointment_event is not None and incoming_message_id is not None:
+                self._emit_appointment_event(
+                    tool_call=tool_call,
+                    incoming_message_id=incoming_message_id,
+                    patient_scope=patient_scope,
+                    result=result,
+                    event_sink=on_appointment_event,
+                )
             conversation.append(
                 ChatMessage(
                     role="assistant",
@@ -88,6 +117,50 @@ class AgentOrchestrator:
         raise AgentIterationLimitError(
             "El agente alcanzo el limite de iteraciones de herramientas"
         )
+
+    async def execute_confirmed_tool(
+        self,
+        *,
+        tool_call: ToolCall,
+        patient_scope: PatientScope,
+        incoming_message_id: int | None = None,
+        on_appointment_event: AppointmentNotificationEventSink | None = None,
+    ) -> ToolResult:
+        """Ejecuta una mutacion ya autorizada por el flujo de confirmacion."""
+        result = await self._execute_tool_call(tool_call, patient_scope)
+        if on_appointment_event is not None and incoming_message_id is not None:
+            self._emit_appointment_event(
+                tool_call=tool_call,
+                incoming_message_id=incoming_message_id,
+                patient_scope=patient_scope,
+                result=result,
+                event_sink=on_appointment_event,
+            )
+        return result
+
+    @staticmethod
+    def _emit_appointment_event(
+        *,
+        tool_call: ToolCall,
+        incoming_message_id: int,
+        patient_scope: PatientScope,
+        result: ToolResult,
+        event_sink: AppointmentNotificationEventSink,
+    ) -> None:
+        try:
+            tool_name = ToolName(tool_call.name)
+        except (TypeError, ValueError):
+            return
+
+        event = appointment_notification_event_from_result(
+            tool_name=tool_name,
+            tool_call_id=tool_call.call_id or "",
+            incoming_message_id=incoming_message_id,
+            patient_scope=patient_scope,
+            result=result,
+        )
+        if event is not None:
+            event_sink(event)
 
     async def _execute_tool_call(
         self,

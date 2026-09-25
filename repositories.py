@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import sqlite3
 
+from notification_domain import AppointmentNotificationEvent
+
 
 @dataclass(frozen=True, slots=True)
 class PatientRecord:
@@ -42,6 +44,25 @@ class LLMFailureRecord:
     incoming_message_id: int
     error_type: str
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorNotificationRecord:
+    id: int
+    event_key: str
+    recipient_number: str
+    notification_type: str
+    patient_id: int
+    conversation_id: int
+    appointment_id: str
+    body: str
+    status: str
+    attempt_count: int
+    last_error: str | None
+    provider_message_id: str | None
+    created_at: str
+    updated_at: str
+    sent_at: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +129,26 @@ def _appointment_from_row(row: sqlite3.Row) -> AppointmentRecord:
         last_synced_at=row["last_synced_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _doctor_notification_from_row(row: sqlite3.Row) -> DoctorNotificationRecord:
+    return DoctorNotificationRecord(
+        id=row["id"],
+        event_key=row["event_key"],
+        recipient_number=row["recipient_number"],
+        notification_type=row["notification_type"],
+        patient_id=row["patient_id"],
+        conversation_id=row["conversation_id"],
+        appointment_id=row["appointment_id"],
+        body=row["body"],
+        status=row["status"],
+        attempt_count=row["attempt_count"],
+        last_error=row["last_error"],
+        provider_message_id=row["provider_message_id"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        sent_at=row["sent_at"],
     )
 
 
@@ -208,6 +249,22 @@ class ConversationRepository:
             WHERE id = ?
             """,
             (now, conversation_id),
+        )
+
+    def update_context(
+        self,
+        connection: sqlite3.Connection,
+        conversation_id: int,
+        context_json: str,
+        now: str,
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE conversations
+            SET context_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (context_json, now, conversation_id),
         )
 
 
@@ -364,6 +421,231 @@ class LLMFailureRepository:
             error_type=row["error_type"],
             created_at=row["created_at"],
         )
+
+
+class DoctorNotificationRepository:
+    def get_by_id(
+        self,
+        connection: sqlite3.Connection,
+        notification_id: int,
+    ) -> DoctorNotificationRecord | None:
+        row = connection.execute(
+            "SELECT * FROM doctor_notifications WHERE id = ?",
+            (notification_id,),
+        ).fetchone()
+        return _doctor_notification_from_row(row) if row else None
+
+    def get_by_event_and_recipient(
+        self,
+        connection: sqlite3.Connection,
+        event_key: str,
+        recipient_number: str,
+    ) -> DoctorNotificationRecord | None:
+        row = connection.execute(
+            """
+            SELECT * FROM doctor_notifications
+            WHERE event_key = ? AND recipient_number = ?
+            """,
+            (event_key.strip(), recipient_number.strip()),
+        ).fetchone()
+        return _doctor_notification_from_row(row) if row else None
+
+    def create_pending(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        event_key: str,
+        recipient_number: str,
+        notification_type: str,
+        patient_id: int,
+        conversation_id: int,
+        appointment_id: str,
+        body: str,
+        now: str,
+    ) -> DoctorNotificationRecord:
+        event_key = event_key.strip()
+        recipient_number = recipient_number.strip()
+        notification_type = getattr(notification_type, "value", notification_type)
+        connection.execute(
+            """
+            INSERT INTO doctor_notifications (
+                event_key, recipient_number, notification_type,
+                patient_id, conversation_id, appointment_id, body,
+                status, attempt_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+            ON CONFLICT(event_key, recipient_number) DO NOTHING
+            """,
+            (
+                event_key,
+                recipient_number,
+                notification_type,
+                patient_id,
+                conversation_id,
+                appointment_id,
+                body,
+                now,
+                now,
+            ),
+        )
+        record = self.get_by_event_and_recipient(
+            connection,
+            event_key,
+            recipient_number,
+        )
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la notificacion creada")
+        return record
+
+    def create_pending_for_event(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        event: AppointmentNotificationEvent,
+        recipient_number: str,
+        body: str,
+        now: str,
+    ) -> DoctorNotificationRecord:
+        return self.create_pending(
+            connection,
+            event_key=event.event_key,
+            recipient_number=recipient_number,
+            notification_type=event.notification_type.value,
+            patient_id=event.patient_scope.patient_id,
+            conversation_id=event.patient_scope.conversation_id,
+            appointment_id=event.appointment.id,
+            body=body,
+            now=now,
+        )
+
+    def list_for_event(
+        self,
+        connection: sqlite3.Connection,
+        event_key: str,
+    ) -> list[DoctorNotificationRecord]:
+        rows = connection.execute(
+            """
+            SELECT * FROM doctor_notifications
+            WHERE event_key = ?
+            ORDER BY id
+            """,
+            (event_key.strip(),),
+        ).fetchall()
+        return [_doctor_notification_from_row(row) for row in rows]
+
+    def list_for_recipient(
+        self,
+        connection: sqlite3.Connection,
+        recipient_number: str,
+    ) -> list[DoctorNotificationRecord]:
+        rows = connection.execute(
+            """
+            SELECT * FROM doctor_notifications
+            WHERE recipient_number = ?
+            ORDER BY id
+            """,
+            (recipient_number.strip(),),
+        ).fetchall()
+        return [_doctor_notification_from_row(row) for row in rows]
+
+    def list_retryable(
+        self,
+        connection: sqlite3.Connection,
+    ) -> list[DoctorNotificationRecord]:
+        rows = connection.execute(
+            """
+            SELECT * FROM doctor_notifications
+            WHERE status IN ('pending', 'failed')
+            ORDER BY id
+            """
+        ).fetchall()
+        return [_doctor_notification_from_row(row) for row in rows]
+
+    def claim_for_send(
+        self,
+        connection: sqlite3.Connection,
+        notification_id: int,
+        now: str,
+    ) -> DoctorNotificationRecord | None:
+        """Claims one pending/failed row without claiming it twice concurrently."""
+        cursor = connection.execute(
+            """
+            UPDATE doctor_notifications
+            SET status = 'sending',
+                attempt_count = attempt_count + 1,
+                last_error = NULL,
+                provider_message_id = NULL,
+                sent_at = NULL,
+                updated_at = ?
+            WHERE id = ? AND status IN ('pending', 'failed')
+            """,
+            (now, notification_id),
+        )
+        if cursor.rowcount != 1:
+            return None
+        return self.get_by_id(connection, notification_id)
+
+    def mark_sent(
+        self,
+        connection: sqlite3.Connection,
+        notification_id: int,
+        *,
+        provider_message_id: str | None,
+        now: str,
+    ) -> DoctorNotificationRecord:
+        normalized_provider_message_id = (
+            provider_message_id.strip()
+            if provider_message_id is not None and provider_message_id.strip()
+            else None
+        )
+        connection.execute(
+            """
+            UPDATE doctor_notifications
+            SET status = 'sent',
+                last_error = NULL,
+                provider_message_id = ?,
+                sent_at = ?,
+                updated_at = ?
+            WHERE id = ? AND status <> 'sent'
+            """,
+            (
+                normalized_provider_message_id,
+                now,
+                now,
+                notification_id,
+            ),
+        )
+        record = self.get_by_id(connection, notification_id)
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la notificacion enviada")
+        return record
+
+    def mark_failed(
+        self,
+        connection: sqlite3.Connection,
+        notification_id: int,
+        *,
+        error: str,
+        now: str,
+    ) -> DoctorNotificationRecord:
+        error = error.strip()
+        if not error:
+            raise ValueError("error no puede estar vacio")
+        connection.execute(
+            """
+            UPDATE doctor_notifications
+            SET status = 'failed',
+                last_error = ?,
+                provider_message_id = NULL,
+                sent_at = NULL,
+                updated_at = ?
+            WHERE id = ? AND status <> 'sent'
+            """,
+            (error, now, notification_id),
+        )
+        record = self.get_by_id(connection, notification_id)
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la notificacion fallida")
+        return record
 
 
 class AppointmentRepository:

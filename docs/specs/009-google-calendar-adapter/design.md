@@ -34,8 +34,9 @@ tokens solo se envian en el header `Authorization` de las llamadas HTTP.
 ## API utilizada
 
 - `POST /freeBusy` para consultar todos los calendarios configurados.
-- `GET /calendars/{calendarId}/events` con `singleEvents`, `showDeleted`, rango y
-  dos filtros `privateExtendedProperty` para el marcador y paciente.
+- `GET /calendars/{calendarId}/events` con `singleEvents`, `showDeleted=false`, rango
+  y dos filtros `privateExtendedProperty` para el marcador y paciente. Las consultas
+  normales no exponen tombstones de eventos cancelados.
 - `POST /calendars/{calendarId}/events` para crear una cita.
 - `PATCH /calendars/{calendarId}/events/{eventId}` para mover o cancelar una cita.
 
@@ -46,10 +47,12 @@ sus fechas. Para un evento activo consulta `freeBusy` solo en el calendario dond
 vive la cita, excluye su propio intervalo cuando corresponde y aplica el `PATCH` de
 inicio y fin; si el nuevo intervalo esta ocupado no se envia ningun `PATCH`.
 
-La cancelacion usa `status=cancelled` y no borra el evento. La disponibilidad trata
-cualquier periodo `busy` como bloqueado. La reserva vuelve a consultar disponibilidad
-antes de insertar, igual que el fake; la coordinacion entre procesos queda fuera de
-este corte.
+La cancelacion usa `status=cancelled` y no borra el evento. Las mutaciones usan
+`sendUpdates=all`; como el adaptador no agrega asistentes, esto no envia una
+notificacion al paciente y evita la perdida de eventos advertida por Google para
+`sendUpdates=none`. La disponibilidad trata cualquier periodo `busy` como bloqueado.
+La reserva vuelve a consultar disponibilidad antes de insertar, igual que el fake;
+la coordinacion entre procesos queda fuera de este corte.
 
 ## Traduccion y aislamiento
 

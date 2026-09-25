@@ -22,6 +22,8 @@
 - [x] Probar la reprogramacion a traves del ID interno persistido y el adaptador Google.
 - [x] Probar respuestas parciales y estados invalidos al cancelar un evento Google.
 - [x] Probar la cancelacion a traves del ID interno y la sincronizacion del estado local.
+- [x] Evitar tombstones cancelados en listados normales y usar `sendUpdates=all` en
+  las mutaciones.
 - [x] Ejecutar la suite completa en el mirror de Raspberry Pi.
 
 ## Fuera de este corte

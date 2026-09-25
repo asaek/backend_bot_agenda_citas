@@ -107,7 +107,10 @@ class FakeCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed, (created,))
         self.assertEqual(moved.start_at, self.start + timedelta(hours=1))
         self.assertEqual(cancelled.status, AppointmentStatus.CANCELLED)
-        self.assertEqual((await provider.list_appointments(patient_scope=self.patient)), (cancelled,))
+        self.assertEqual(
+            await provider.list_appointments(patient_scope=self.patient),
+            (),
+        )
 
     async def test_conflicts_block_creation_and_rescheduling(self) -> None:
         provider = FakeCalendarProvider(

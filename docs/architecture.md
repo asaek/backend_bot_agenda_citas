@@ -98,9 +98,25 @@ conversacion y el numero de WhatsApp resueltos por el backend. Conserva el
 historial y construye el contexto para el LLM. El `PatientScope` no se obtiene
 de los argumentos del LLM.
 El contexto comienza con las reglas del asistente y usa los mensajes mas
-recientes persistidos. Tambien solicita la respuesta al proveedor LLM y conserva
-el resultado del envio. Recibe un `ToolExecutor` compuesto por `main.py` y crea
-el `AgentOrchestrator` para ejecutar llamadas de herramientas.
+recientes persistidos. Las reglas indican que los detalles de una cita no deben
+mostrar su ID interno al paciente, aunque el agente conserva ese valor para
+operaciones posteriores. Tambien solicita la respuesta al proveedor LLM, convierte
+las tablas Markdown accidentales en listas compatibles con WhatsApp y conserva el
+resultado del envio. Recibe un `ToolExecutor` compuesto por `main.py` y crea el
+`AgentOrchestrator` para ejecutar llamadas de herramientas.
+
+Antes de enviar el contexto, agrega la fecha y hora local del reloj del
+`ToolExecutor`, la zona horaria de la agenda y los rangos ISO de hoy, manana y
+ayer. Esta informacion permite resolver expresiones relativas sin depender del
+conocimiento temporal del modelo. Las consultas normales excluyen tombstones
+cancelados de Google; una cancelacion solo aparece como resultado de la mutacion
+explicita que la confirma.
+
+Para una solicitud reconocible de agendamiento, incluidas expresiones como `sacar cita`,
+que contiene un dia pero no una hora, `ConversationService` consulta primero
+`check_availability` para todo ese dia. Muestra los slots libres como una lista unica y
+espera la seleccion del paciente; no crea una cita ni pregunta el motivo en ese turno.
+Las solicitudes con hora exacta continúan por el flujo normal.
 
 ### Modelo de dominio de citas
 
@@ -142,20 +158,30 @@ conversacion.
 
 ### Notificaciones al doctor
 
-Esta capacidad esta planificada en `specs/011-doctor-notifications/` y aun no forma
-parte del runtime implementado. Despues de una operacion exitosa de
-`create_appointment`, `reschedule_appointment` o `cancel_appointment`, el flujo
-propuesto emitira un evento para `DoctorNotificationService`.
+Esta capacidad esta implementada en `specs/011-doctor-notifications/`. Los cortes 1
+a 5 implementaron la emision de eventos internos despues de una operacion exitosa
+de `create_appointment`, `reschedule_appointment` o `cancel_appointment`, una
+bandeja SQLite persistente, la composicion segura del cuerpo, la entrega aislada
+por destinatario y la integracion con el webhook.
 
-`DoctorNotificationService` construira un unico mensaje con el tipo de evento, los
-datos de la cita, el paciente, el telefono, el resumen conversacional y las señales
-de prioridad disponibles. El resumen sera contenido de cada notificacion y no un
-disparador independiente.
+`DoctorNotificationService` carga el paciente y el historial persistido.
+`DoctorNotificationComposer` construye un unico cuerpo logico con el tipo de evento,
+los datos de la cita, el paciente, los ultimos 10 digitos del telefono, el resumen
+conversacional y las señales de prioridad disponibles. Ese cuerpo se entregara a
+cada doctor configurado.
+El resumen sera contenido de cada notificacion y no un disparador independiente.
 
-La entrega propuesta reutilizara `WhatsAppClient` y persistira una bandeja local de
-notificaciones con una clave de idempotencia, estado, error e identificador del
-proveedor. El servicio de agenda no enviara mensajes directamente. Un fallo al
-doctor no debera afectar la respuesta del paciente.
+La composicion usa `generate_text()` con un prompt interno sin herramientas. El
+resultado del LLM se valida y se limita; los diagnosticos, recomendaciones,
+transcripciones completas y valores internos conocidos se descartan o sustituyen
+por contenido seguro antes de formar el cuerpo.
+
+`DoctorNotificationDeliveryService` carga la configuracion de destinatarios,
+reutiliza `WhatsAppClient` y procesa cada fila mediante una reclamacion atomica.
+Los envios exitosos quedan en `sent` con el ID de Meta; los fallos se normalizan y
+quedan en `failed` sin detener a los demas destinatarios. Las filas enviadas no se
+reclaman otra vez y las fallidas pueden reintentarse posteriormente. El servicio de
+agenda no envia mensajes directamente.
 
 ```text
 ToolExecutor
@@ -163,14 +189,45 @@ ToolExecutor
     +-- CalendarProvider
     |
     +-- AppointmentNotificationEvent
+            | (collector por solicitud)
+            v
+    respuesta al paciente confirmada
             |
             v
-    DoctorNotificationService -> SQLite -> WhatsAppClient -> Doctor
+    DoctorNotificationService -> SQLite -> DoctorNotificationDeliveryService
+                                      -> WhatsAppClient -> Doctores configurados
 ```
 
-El mecanismo de eventos, la persistencia y la politica de reintentos se
-implementaran por cortes. Hasta entonces son un diseno propuesto y no deben
-interpretarse como comportamiento disponible.
+`main.py` recolecta los eventos durante `ConversationService.build_reply()`. Despues
+de enviar y persistir la respuesta del paciente, compone el resumen y llama a
+`DoctorNotificationDeliveryService` por cada evento. La entrega al doctor se
+encapsula en un limite de errores: una falla de configuracion, composicion,
+persistencia o WhatsApp se registra sin propagarse al paciente; el servicio de
+entrega mantiene ademas el aislamiento entre destinatarios.
+
+### Confirmacion de cambios de citas
+
+La funcionalidad definida en `specs/012-appointment-change-confirmation/` intercepta
+las solicitudes de cancelacion y reprogramacion antes de `ToolExecutor`. La accion
+exacta queda pendiente en `conversations.context_json` hasta que el paciente
+responde afirmativamente. Antes de preguntar, `ConversationService` usa una lectura
+del `ToolExecutor` para conservar fecha, horario y motivo de la cita en el snapshot
+de la accion; esos datos se muestran sin el ID interno. Una respuesta negativa o
+vencida no llama a una mutacion del calendario. Solo la ejecucion confirmada puede
+producir un evento de cita y una notificacion al doctor.
+
+### Motivo antes de crear una cita
+
+La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
+`create_appointment` antes de `ToolExecutor`. `ConversationService` guarda el
+horario en `conversations.context_json`, pregunta el motivo y descarta el valor que
+el LLM haya propuesto. El siguiente mensaje no vacio del paciente se normaliza solo
+en espacios y se usa como `reason` para ejecutar la cita.
+
+La primera pregunta no modifica la agenda ni genera eventos. Una creacion exitosa
+posterior conserva el mismo flujo de respuesta, persistencia y notificacion al
+doctor; una solicitud vencida despues de 10 minutos se limpia sin tocar el
+proveedor.
 
 ### LLMProvider y agente LLM basico
 
@@ -206,10 +263,12 @@ registra las solicitudes y permite simular texto, tool calls y errores sin red.
 ToolExecutor -> ToolResult -> LLM`. El alcance se recibe desde
 `ConversationContext`; el LLM solo entrega el nombre y los argumentos
 conversacionales. Los resultados enviados al siguiente turno se sanea para
-excluir identificadores internos de paciente y calendario. El limite de
-iteraciones se configura mediante `LLM_MAX_TOOL_ITERATIONS`. La composicion de
-runtime se define en `main.py`; `create_calendar_provider()` es el punto de
-seleccion del proveedor.
+excluir identificadores internos de paciente y calendario. Conservan el ID
+interno de las citas para que el agente pueda solicitar cambios posteriores; la
+redaccion final instruida por `ConversationService` no lo presenta al paciente y
+usa listas en lugar de tablas Markdown. El limite de iteraciones se configura
+mediante `LLM_MAX_TOOL_ITERATIONS`. La composicion de runtime se define en
+`main.py`; `create_calendar_provider()` es el punto de seleccion del proveedor.
 
 ### Uvicorn
 
@@ -249,7 +308,10 @@ disponibles, sin importar su titulo o categoria y sin necesitar interpretar su
 contenido.
 
 `GoogleCalendarProvider` usa `freeBusy` para consultar hasta 50 calendarios
-configurados y `events.list` con paginacion para localizar las citas del paciente.
+configurados y `events.list` con paginacion y `showDeleted=false` para localizar las
+citas vigentes del paciente. Las mutaciones usan `sendUpdates=all`: no hay asistentes
+agregados por el adaptador, pero se evita el modo `none`, que Google advierte que
+puede perder eventos o impedir su sincronizacion.
 Los eventos creados por el chatbot llevan propiedades extendidas privadas para
 identificarlos como citas administradas por el sistema. Las operaciones de lectura
 y modificacion exigen `managed_by=whatsapp_chatbot` y el `patient_id` del alcance

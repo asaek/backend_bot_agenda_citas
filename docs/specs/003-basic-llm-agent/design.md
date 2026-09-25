@@ -54,6 +54,10 @@ con OpenAI:
 El cliente HTTP puede inyectarse. Esto evita llamadas reales durante las
 pruebas y permite probar Groq y OpenRouter con el mismo codigo.
 
+Las solicitudes usan `temperature=0` para reducir variaciones entre mensajes
+equivalentes. Esto no sustituye la validacion del backend ni convierte al LLM en
+fuente de verdad de la agenda.
+
 ## Pruebas sin API
 
 `tests/fakes.py` contiene `FakeLLMProvider`, que cumple el contrato
@@ -80,6 +84,12 @@ persistido. Anteponer un `ChatMessage` con el prompt de sistema y conservar los
 mensajes persistidos en orden permite que el ultimo mensaje entrante quede como
 el mensaje `user` actual sin duplicarlo.
 
+El prompt se completa en cada solicitud con el reloj y la zona horaria del
+`ToolExecutor`. Incluye la fecha y hora local, ademas de rangos ISO de inicio de
+dia para hoy, manana y ayer. Asi el LLM puede convertir una expresion como
+"hoy" a un rango de `list_appointments` sin pedir una fecha que el backend ya
+conoce.
+
 La conversion usa `user` para mensajes entrantes y `assistant` para respuestas
 salientes con estado `sent`. Las respuestas `failed` no se incluyen porque no
 fueron entregadas al paciente. El historial se recorta a los ultimos 30
@@ -87,7 +97,8 @@ mensajes por defecto, con un limite positivo configurable por llamada.
 
 El prompt de sistema exige respuestas en español, breves y claras, sin inventar
 datos, afirmar acciones externas, proporcionar diagnosticos medicos ni usar un
-formato distinto de texto normal.
+formato distinto de texto normal. Tambien distingue citas vigentes de estados
+cancelados, completados o `no_show`.
 
 ## Ciclo integrado
 

@@ -99,7 +99,7 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
         event_request = self.requests[1]
         self.assertEqual(event_request.method, "POST")
         self.assertEqual(event_request.url.path, "/v3/calendars/calendar-1/events")
-        self.assertEqual(event_request.url.params["sendUpdates"], "none")
+        self.assertEqual(event_request.url.params["sendUpdates"], "all")
         body = json.loads(event_request.content)
         self.assertEqual(
             body["extendedProperties"]["private"],
@@ -126,6 +126,16 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"{PATIENT_ID_PROPERTY}=7", properties)
         self.assertEqual(self.requests[1].url.params["pageToken"], "page-2")
 
+    async def test_list_omits_cancelled_events_from_current_appointments(self) -> None:
+        self.mode = "list-with-cancelled"
+
+        appointments = await self.provider_for("calendar-1").list_appointments(
+            patient_scope=self.patient,
+        )
+
+        self.assertEqual([appointment.id for appointment in appointments], ["event-active"])
+        self.assertEqual(self.requests[0].url.params["showDeleted"], "false")
+
     async def test_reschedule_and_cancel_use_event_patch(self) -> None:
         self.mode = "reschedule"
         provider = self.provider_for("calendar-1")
@@ -140,6 +150,7 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(moved.start_at, new_start)
         patch_request = self.requests[-1]
         self.assertEqual(patch_request.method, "PATCH")
+        self.assertEqual(patch_request.url.params["sendUpdates"], "all")
         patch_body = json.loads(patch_request.content)
         self.assertEqual(patch_body["start"]["dateTime"], "2026-09-21T12:00:00Z")
         self.assertEqual(patch_body["end"]["dateTime"], "2026-09-21T12:30:00Z")
@@ -153,6 +164,7 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(cancelled.status, AppointmentStatus.CANCELLED)
         self.assertEqual(self.requests[-1].method, "PATCH")
+        self.assertEqual(self.requests[-1].url.params["sendUpdates"], "all")
         self.assertEqual(json.loads(self.requests[-1].content), {"status": "cancelled"})
 
     async def test_reschedule_rejects_a_busy_target_before_patching(self) -> None:
@@ -299,6 +311,16 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
                         )
                     ],
                     "nextPageToken": "page-2",
+                },
+            )
+        if self.mode == "list-with-cancelled" and request.method == "GET":
+            return self._json_response(
+                request,
+                {
+                    "items": [
+                        self._event("event-cancelled", status="cancelled"),
+                        self._event("event-active"),
+                    ]
                 },
             )
         if self.mode == "reschedule":

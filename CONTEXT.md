@@ -54,10 +54,20 @@ _Evitar_: Etiqueta interna
 Situacion vigente de una cita dentro de su ciclo de vida.
 _Evitar_: Estado del calendario
 
+**Confirmacion de una mutacion**:
+Respuesta afirmativa explicita del paciente que autoriza una cancelacion o una
+reprogramacion concreta antes de modificar la cita.
+_Evitar_: Intencion, solicitud pendiente
+
+**Accion pendiente de cita**:
+Solicitud de cancelacion o reprogramacion que aun espera la confirmacion del
+paciente y no ha cambiado la fuente de verdad de agenda.
+_Evitar_: Cita modificada, operacion confirmada
+
 **Notificacion al doctor**:
-Mensaje interno enviado al doctor despues de que una cita sea agendada,
-modificada o cancelada correctamente. Incluye los datos de la cita y un resumen
-de la conversacion relacionado con ese evento.
+Mensaje interno enviado a cada doctor configurado despues de que una cita sea
+agendada, modificada o cancelada correctamente. Incluye los datos de la cita y un
+resumen de la conversacion relacionado con ese evento.
 _Evitar_: Respuesta al paciente, alerta de diagnostico
 
 **Señal de prioridad**:

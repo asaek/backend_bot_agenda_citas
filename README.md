@@ -42,7 +42,9 @@ El agente actual genera texto y puede ejecutar `ToolCall` mediante un
 para probar la agenda sin servicios externos cuando `CALENDAR_PROVIDER=fake`. El
 limite de llamadas se configura con `LLM_MAX_TOOL_ITERATIONS`. RAG y memoria
 semantica siguen fuera del alcance. La suite automatizada usa proveedores falsos y
-no requiere credenciales externas.
+no requiere credenciales externas. Las respuestas con varias citas se envian como
+listas simples compatibles con WhatsApp; las tablas Markdown se convierten antes
+de enviarse.
 
 Para activar Google Calendar para todas las operaciones, cambia
 `CALENDAR_PROVIDER=google` y configura:
@@ -58,27 +60,54 @@ proveedor principal.
 - `GOOGLE_SERVICE_ACCOUNT_SUBJECT` solo cuando se use delegacion de dominio.
 - `GOOGLE_CALENDAR_TIMEZONE`, `GOOGLE_CALENDAR_BASE_URL` y
   `GOOGLE_CALENDAR_TIMEOUT_SECONDS`.
+- `GOOGLE_CALENDAR_TIMEZONE` tambien define como se resuelven expresiones
+  relativas como "hoy" y "mañana" en las consultas del paciente.
 - `BUSINESS_WORKDAYS`, `BUSINESS_HOURS_START` y `BUSINESS_HOURS_END` para definir
   los dias y el horario laboral sin modificar codigo.
 
 El adaptador consulta `freeBusy`, lista eventos paginados y administra solo los
 eventos con propiedades privadas `managed_by=whatsapp_chatbot` y `patient_id`.
-Cada cita ocupa 30 minutos y conserva el `PatientScope` resuelto por el backend.
+Los listados normales excluyen eventos cancelados; las mutaciones usan
+`sendUpdates=all` para evitar la perdida de eventos advertida por Google para
+`sendUpdates=none`. Cada cita ocupa 30 minutos y conserva el `PatientScope`
+resuelto por el backend.
 Los secretos deben vivir fuera del repositorio, por ejemplo en variables de
 entorno y archivos montados como secretos.
 
-La siguiente funcionalidad planificada es `011-doctor-notifications`. Cuando se
-implemente, una cita agendada, modificada o cancelada correctamente generara un
-unico mensaje para el doctor. El mensaje incluira el evento, los datos de la cita,
-el paciente, el telefono, el resumen conversacional y las señales de prioridad
-disponibles. El resumen sera contenido obligatorio de esos tres mensajes y no se
-enviara de forma independiente.
+La funcionalidad `011-doctor-notifications` se implementa por cortes. Una cita
+agendada, modificada o cancelada correctamente generara un unico mensaje para cada
+doctor configurado. El mensaje incluira el evento, los datos de la cita, el
+paciente, los ultimos 10 digitos del telefono, el resumen conversacional y las
+señales de prioridad disponibles. El resumen sera contenido obligatorio de esos
+tres mensajes y no se enviara de forma independiente.
+
+Las solicitudes para cancelar o reprogramar una cita requieren una confirmacion
+explicita del paciente. La primera solicitud no modifica la agenda y muestra la
+fecha, el horario y el motivo de la cita sin exponer su ID interno; la operacion se
+ejecuta solamente despues de recibir `Si` y expira despues de 10 minutos.
+
+Las solicitudes para crear una cita requieren primero el motivo expresado por el
+paciente. El backend conserva el horario, pregunta el motivo y crea la cita solamente
+despues del siguiente mensaje; no usa el motivo sugerido por el LLM como valor
+predeterminado.
+
+Si el paciente solicita agendar para un dia sin indicar una hora exacta, el backend
+consulta primero los espacios libres de ese dia y los muestra como una lista. La cita
+no se crea hasta que el paciente elige un horario.
+
+La configuracion prevista usa `DOCTOR_WHATSAPP_NUMBERS`, una lista de numeros
+separados por comas. Todos los doctores configurados reciben una copia del mismo
+mensaje. La entrega valida `DOCTOR_NOTIFICATIONS_ENABLED`, recorta espacios,
+normaliza numeros E.164 y elimina duplicados. El webhook recolecta los eventos de
+agenda confirmados, envia y persiste primero la respuesta del paciente y despues
+compone y entrega las notificaciones.
 
 Cuando se usa Google, SQLite conserva la identidad local de cada cita en la tabla
 `appointments`. El ID que reciben las herramientas es el `id` interno; el
 `google_event_id` queda separado junto con `calendar_id`, paciente, estado, fechas,
-motivo y `last_synced_at`. Google Calendar sigue siendo la fuente de verdad del
-estado de la agenda.
+motivo y `last_synced_at`. El ID interno se usa para reprogramar o cancelar y no
+se muestra al paciente al responder con los detalles de una cita. Google Calendar
+sigue siendo la fuente de verdad del estado de la agenda.
 
 El incremento verificado define el modelo de dominio, los contratos tipados de
 las cinco herramientas, la validacion previa al proveedor, los errores publicos,
@@ -91,8 +120,20 @@ genera la respuesta, ejecuta herramientas mediante el `ToolExecutor` configurado
 la envia por WhatsApp y registra el resultado. Un fallo de
 generacion o envio queda marcado como `failed` para permitir un reintento.
 
-Las notificaciones al doctor todavia no forman parte de este runtime. Su alcance,
-diseno y cortes estan documentados en `docs/specs/011-doctor-notifications/`.
+Los cortes de eventos, persistencia, composicion, entrega e integracion del webhook
+ya estan implementados.
+SQLite
+crea la tabla `doctor_notifications` con una entrega por
+`(event_key, recipient_number)` y conserva estados `pending`, `sending`, `sent` y
+`failed`, errores, intentos e IDs devueltos por WhatsApp. El compositor carga el
+historial persistido, genera un resumen en una solicitud sin herramientas y
+construye un formato fijo sin diagnosticos, transcripciones completas ni IDs
+internos. `DoctorNotificationDeliveryService` reutiliza `WhatsAppClient`, intenta
+cada destinatario de forma independiente y normaliza los errores antes de
+persistirlos. `main.py` conecta el compositor y el entregador al ciclo del webhook;
+los errores del doctor se registran sin cambiar la respuesta ya enviada al paciente.
+Su alcance, diseno y cortes estan documentados en
+`docs/specs/011-doctor-notifications/`.
 
 ## 3. Iniciar el servidor
 
@@ -144,14 +185,17 @@ uv run python -m unittest discover -s tests -v
 La suite usa un proveedor LLM falso, un cliente falso de WhatsApp y una base
 SQLite temporal. Tambien verifica la transformacion del historial, el mensaje
 actual, las respuestas `sent`, los errores del LLM, los webhooks duplicados y la
-verificacion de Meta.
+verificacion de Meta. Incluye los flujos completos de cita agendada, modificada y
+cancelada, asi como el aislamiento de un fallo de entrega al doctor.
 
 ## Endpoints
 
 - `GET /`: comprobacion sencilla del servidor.
 - `GET /webhook/whatsapp`: verificacion solicitada por Meta.
 - `POST /webhook/whatsapp`: recepcion de eventos enviados por Meta, persistencia
-  de mensajes y respuesta generada por el LLM para mensajes de texto.
+  de mensajes y respuesta generada por el LLM para mensajes de texto. Las
+  mutaciones exitosas tambien disparan notificaciones internas al doctor cuando la
+  funcionalidad esta habilitada.
 
 Los eventos que no sean mensajes de texto, como estados, imagenes o audios, se
 ignoran temporalmente. Las credenciales solo deben existir como variables de

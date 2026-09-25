@@ -23,8 +23,8 @@ credenciales, identificadores internos ni control del paciente al LLM.
 - Consultar disponibilidad con `freeBusy.query` y generar slots de 30 minutos.
 - Crear, reprogramar y cancelar eventos en los calendarios configurados.
 - Guardar `managed_by`, `patient_id` y `conversation_id` como propiedades privadas.
-- Listar citas del paciente mediante `events.list`, filtrando propiedades privadas
-  y siguiendo `nextPageToken`.
+- Listar citas vigentes del paciente mediante `events.list`, filtrando propiedades
+  privadas, excluyendo eventos cancelados y siguiendo `nextPageToken`.
 - Traducir eventos validos al modelo `Appointment` sin sustituir el `PatientScope`
   resuelto por el backend.
 - Reprogramar debe localizar el evento administrado del paciente, comprobar el nuevo
@@ -58,8 +58,16 @@ el marcador `managed_by=whatsapp_chatbot` y el `patient_id` del alcance actual.
 ### RF-904 - Eventos y paginacion
 
 La lista debe consultar cada calendario configurado, aplicar los limites opcionales,
-seguir todas las paginas y devolver citas ordenadas por inicio. Reprogramar y
-cancelar deben modificar el evento existente sin eliminarlo.
+seguir todas las paginas y devolver solo citas vigentes ordenadas por inicio. La
+consulta no debe solicitar tombstones cancelados con `showDeleted=true`. Reprogramar
+y cancelar deben modificar el evento existente sin eliminarlo.
+
+### RF-906 - Sincronizacion de mutaciones
+
+Crear, reprogramar y cancelar deben usar `sendUpdates=all`. El adaptador no agrega
+asistentes, por lo que esta opcion no envia avisos al paciente; evita el modo
+`sendUpdates=none`, que Google advierte que puede perder eventos o impedir su
+sincronizacion.
 
 ### RF-905 - Seguridad operacional
 
@@ -79,12 +87,13 @@ contexto enviado al LLM.
 6. `BusinessHours` puede configurarse mediante `BUSINESS_WORKDAYS`,
    `BUSINESS_HOURS_START` y `BUSINESS_HOURS_END`.
 7. La creacion guarda las tres propiedades privadas y devuelve un `Appointment`.
-8. La lista sigue paginas y solo devuelve eventos administrados por este sistema y
-   pertenecientes al paciente solicitado.
+8. La lista sigue paginas y solo devuelve eventos vigentes administrados por este
+   sistema y pertenecientes al paciente solicitado.
 9. Reprogramar y cancelar respetan acceso, estado y conflictos; un evento cancelado
    aunque Google lo devuelva sin fechas no puede reprogramarse y una cancelacion no
    puede devolverse como activa.
-10. Las pruebas no hacen llamadas de red real y cubren errores transitorios.
+10. Las mutaciones usan `sendUpdates=all` y las pruebas lo verifican.
+11. Las pruebas no hacen llamadas de red real y cubren errores transitorios.
 
 ## Fuera del alcance
 

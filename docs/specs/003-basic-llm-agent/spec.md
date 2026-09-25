@@ -30,6 +30,8 @@ El ciclo debe poder probarse sin realizar llamadas reales a Internet.
 - Permitir inyectar un cliente HTTP falso durante las pruebas.
 - Construir los mensajes del modelo desde el historial persistido.
 - Aplicar un prompt de sistema con las reglas conversacionales del MVP.
+- Inyectar en el prompt la fecha actual, la zona horaria de la agenda y los rangos
+  de fechas relativas resueltos por el backend.
 - Inyectar el proveedor en `ConversationService`.
 - Generar la respuesta antes de enviarla mediante WhatsApp.
 - Registrar fallos de generacion o envio para permitir reintentos.
@@ -85,6 +87,13 @@ y claro, no invente citas, horarios o datos, no afirme acciones externas, no
 proporcione diagnosticos medicos, pida aclaraciones cuando falte informacion y
 responda solo con texto normal.
 
+### RF-315 - Fechas relativas de agenda
+
+El contexto del LLM debe incluir la fecha y hora actuales del backend, la zona
+horaria de la agenda y los rangos ISO de hoy, manana y ayer. Cuando el paciente
+use una expresion relativa, el asistente debe resolverla con ese contexto y no
+pedir la fecha exacta.
+
 ### RF-308 - Ciclo de respuesta
 
 `ConversationService` debe recuperar el historial, construir los mensajes del
@@ -138,19 +147,22 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
 9. El contexto recupera el historial guardado y conserva el orden de sus roles.
 10. El contexto empieza con las reglas del mensaje `system` definidas para el MVP.
 11. El contexto solo usa los mensajes mas recientes dentro del limite configurado.
-12. Un mensaje valido genera la respuesta mediante el proveedor, la envia por
+12. El contexto temporal usa el reloj y la zona horaria del ejecutor de agenda.
+13. Una solicitud que use "hoy" recibe un rango de inicio y fin de ese dia en el
+    contexto del sistema.
+14. Un mensaje valido genera la respuesta mediante el proveedor, la envia por
     WhatsApp y la registra como `sent`.
-13. Una API key ausente, un timeout, un error HTTP, una respuesta vacia o una
+15. Una API key ausente, un timeout, un error HTTP, una respuesta vacia o una
     respuesta demasiado larga registran el tipo de fallo en SQLite.
-14. Un fallo del LLM envia la respuesta controlada y la registra como `sent` si
+16. Un fallo del LLM envia la respuesta controlada y la registra como `sent` si
     WhatsApp esta disponible.
-15. El `FakeLLMProvider` recibe el historial convertido y el mensaje actual como
+17. El `FakeLLMProvider` recibe el historial convertido y el mensaje actual como
     el ultimo mensaje `user`.
-16. Una respuesta generada por el fake se envia por WhatsApp y queda guardada
+18. Una respuesta generada por el fake se envia por WhatsApp y queda guardada
     como `sent`.
-17. Un webhook duplicado no incrementa las llamadas al LLM despues de una
+19. Un webhook duplicado no incrementa las llamadas al LLM despues de una
     respuesta enviada.
-18. La suite cubre errores del LLM y la verificacion de Meta sin usar servicios
+20. La suite cubre errores del LLM y la verificacion de Meta sin usar servicios
     externos.
 
 ## Fuera de alcance

@@ -49,6 +49,12 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   WhatsApp antes de cualquier operacion de agenda.
 - Construir el contexto de chat desde el historial reciente y las reglas del
   asistente.
+- Resolver expresiones relativas como "hoy" con el reloj y la zona horaria de la
+  agenda antes de pedir al LLM una respuesta.
+- Solicitar el motivo expresado por el paciente antes de crear una cita y conservar
+  el horario mientras se espera ese dato.
+- Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
+  con variantes como `sacar cita`, sin indicar una hora exacta.
 - Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 
@@ -108,8 +114,11 @@ del LLM. La especificacion esta en `specs/006-llm-tool-calling/`.
 
 El agente ejecuta el ciclo entre `LLMProvider`, `ToolExecutor` y la redaccion
 final con un limite de iteraciones. El `PatientScope` se inyecta desde WhatsApp y
-los resultados no exponen campos internos de paciente o calendario al LLM. El
-orquestador esta en `specs/007-agent-orchestrator/`.
+los resultados no exponen campos internos de paciente o calendario al LLM. Los
+detalles de una cita no muestran al paciente el ID interno, aunque el agente lo
+conserva para reprogramar o cancelar cuando corresponda. Las respuestas con varias
+citas se entregan como listas compatibles con WhatsApp y no como tablas Markdown.
+El orquestador esta en `specs/007-agent-orchestrator/`.
 
 ### Corte verificado: integracion del ToolExecutor
 
@@ -127,6 +136,9 @@ disponibilidad mediante `freeBusy`, lista eventos paginados y administra citas d
 30 minutos identificadas por propiedades privadas. Las operaciones conservan el
 `PatientScope` del backend y convierten fallos externos en errores publicos. El
 fake sigue siendo el valor por defecto para pruebas y desarrollo sin credenciales.
+Los listados normales excluyen eventos cancelados que Google conserva como
+tombstones, y las mutaciones usan `sendUpdates=all` para evitar la perdida de
+eventos asociada por Google con `sendUpdates=none`.
 La implementacion y las pruebas del mirror estan verificadas. La especificacion
 esta en `specs/009-google-calendar-adapter/`.
 
@@ -139,19 +151,55 @@ mapa para que las herramientas reciban IDs internos y Google siga siendo la fuen
 de verdad. La implementacion y la suite de Raspberry Pi estan verificadas. La
 especificacion esta en `specs/010-appointment-persistence/`.
 
-### Corte planificado: notificaciones al doctor
+### Corte verificado: notificaciones al doctor
 
-La siguiente funcionalidad definida en `specs/011-doctor-notifications/` enviara
-un unico mensaje al doctor cuando una cita sea agendada, modificada o cancelada
-correctamente. El mensaje incluira el tipo de evento, los datos de la cita, el
-paciente, el telefono, el resumen conversacional y las señales de prioridad
-disponibles. El resumen sera contenido obligatorio de esos tres mensajes y no
-tendra un disparador independiente.
+La funcionalidad definida en `specs/011-doctor-notifications/` envia un unico
+mensaje a cada doctor configurado cuando una cita sea agendada, modificada o
+cancelada correctamente. El mensaje incluye el tipo de evento, los datos de la
+cita, el paciente, los ultimos 10 digitos del telefono, el resumen conversacional y
+las señales de prioridad disponibles. El resumen es contenido obligatorio de esos
+tres mensajes y no tiene un disparador independiente.
 
-La entrega propuesta reutiliza WhatsApp Cloud API y conserva una bandeja local de
-notificaciones para registrar idempotencia, estados y errores sin bloquear la
-respuesta al paciente. Esta arquitectura permanece en propuesta hasta que los
-cortes de implementacion sean ejecutados y verificados.
+La frontera de eventos del corte 1 relaciona la mutacion exitosa con el mensaje
+entrante y la llamada de herramienta. El corte 2 agrega la tabla
+`doctor_notifications` y una bandeja local por evento y destinatario para registrar
+idempotencia, estados, errores, intentos e IDs del proveedor sin bloquear la
+respuesta al paciente. El corte 3 agrega un compositor que carga el historial
+persistido y crea un cuerpo fijo sin diagnosticos, transcripciones completas ni IDs
+internos. El corte 4 agrega la configuracion de doctores y una entrega persistente
+por destinatario mediante WhatsApp, con errores aislados y reintentos de filas
+fallidas. El corte 5 conecta esos servicios al webhook: la respuesta del paciente se
+envia y persiste antes de intentar la notificacion, y los tres eventos completos
+quedan cubiertos por pruebas de integracion junto con el webhook duplicado.
+La suite local y la del mirror de Raspberry Pi pasan con 151 pruebas; la evidencia
+HTTP del health check y de ambos metodos del webhook esta en
+`docs/verification/2026-09-22-doctor-notifications-webhook.md`.
+
+### Corte implementado: confirmacion de cambios de citas
+
+La funcionalidad definida en `specs/012-appointment-change-confirmation/` exige una
+confirmacion explicita antes de cancelar o reprogramar una cita. Las acciones
+pendientes se conservan por conversacion durante 10 minutos; una respuesta
+negativa, ambigua o vencida no modifica la agenda. Las notificaciones al doctor se
+emiten solo despues de una operacion confirmada y exitosa. La pregunta muestra,
+cuando la agenda puede recuperar la cita, su fecha, horario y motivo sin exponer
+el ID interno; si esa consulta de lectura falla, conserva la confirmacion con el
+texto generico.
+
+### Corte implementado: motivo antes de crear una cita
+
+La funcionalidad definida en `specs/013-appointment-reason-collection/` evita que el
+LLM complete un motivo que el paciente de prueba no ha expresado. Antes de crear una
+cita, el backend conserva el horario en el contexto de la conversacion y pregunta el
+motivo. El siguiente mensaje del paciente completa la solicitud; solo entonces se
+crea la cita y pueden emitirse las notificaciones al doctor.
+
+### Corte implementado: disponibilidad antes de elegir la hora
+
+La funcionalidad definida en `specs/014-date-only-availability/` consulta el dia
+completo cuando el paciente pide agendar para una fecha reconocible sin indicar una
+hora. El backend muestra los espacios libres, no crea una cita y espera la seleccion
+del paciente. Una solicitud con hora exacta continua hacia la recoleccion del motivo.
 
 ### Fase incremental: disponibilidad real
 
@@ -217,7 +265,7 @@ adicional para el doctor:
 Operacion de cita confirmada
     |
     v
-Notificacion al doctor
+Notificacion a los doctores configurados
     |
     v
 WhatsApp Cloud API
@@ -248,6 +296,7 @@ Cada cita debera contener como minimo:
 - Fecha y hora.
 - Duracion fija de 30 minutos durante el MVP tecnico.
 - Motivo de la cita.
+- ID interno disponible solo para operaciones del agente; no se muestra al paciente.
 - Notas.
 - Cero o mas etiquetas internas.
 - Estado.

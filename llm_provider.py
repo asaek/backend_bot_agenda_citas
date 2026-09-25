@@ -188,6 +188,21 @@ class OpenAICompatibleLLMProvider:
         self.http_client = http_client
 
     async def generate(self, messages: Sequence[ChatMessage]) -> LLMResponse:
+        return await self._generate(messages, allow_tools=True)
+
+    async def generate_text(self, messages: Sequence[ChatMessage]) -> str:
+        """Genera texto sin publicar ni aceptar herramientas del agente."""
+        response = await self._generate(messages, allow_tools=False)
+        if not isinstance(response, str):
+            raise LLMResponseError("El proveedor devolvio una herramienta en modo texto")
+        return response
+
+    async def _generate(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        allow_tools: bool,
+    ) -> LLMResponse:
         if not messages:
             raise LLMProviderError("El LLM requiere al menos un mensaje")
 
@@ -220,9 +235,11 @@ class OpenAICompatibleLLMProvider:
             "model": self.settings.model,
             "messages": request_messages,
             "max_tokens": self.settings.max_output_tokens,
-            "tools": llm_tool_definitions(),
-            "tool_choice": "auto",
+            "temperature": 0,
         }
+        if allow_tools:
+            payload["tools"] = llm_tool_definitions()
+            payload["tool_choice"] = "auto"
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
@@ -267,9 +284,9 @@ class OpenAICompatibleLLMProvider:
                 f"{self.settings.provider} devolvio una respuesta invalida"
             ) from error
 
-        return self._parse_response(data)
+        return self._parse_response(data, allow_tools=allow_tools)
 
-    def _parse_response(self, data: object) -> LLMResponse:
+    def _parse_response(self, data: object, *, allow_tools: bool = True) -> LLMResponse:
         try:
             choices = data["choices"]  # type: ignore[index]
             message = choices[0]["message"]
@@ -290,6 +307,10 @@ class OpenAICompatibleLLMProvider:
                 f"{self.settings.provider} devolvio mas de un tipo de respuesta"
             )
         if direct_tool_call is not None:
+            if not allow_tools:
+                raise LLMResponseError(
+                    f"{self.settings.provider} devolvio una herramienta en modo texto"
+                )
             return _parse_tool_call(direct_tool_call)
         if native_tool_calls is not None:
             if not isinstance(native_tool_calls, list):
@@ -301,6 +322,10 @@ class OpenAICompatibleLLMProvider:
                     f"{self.settings.provider} devolvio mas de una herramienta"
                 )
             if native_tool_calls:
+                if not allow_tools:
+                    raise LLMResponseError(
+                        f"{self.settings.provider} devolvio una herramienta en modo texto"
+                    )
                 return _parse_tool_call(native_tool_calls[0], native=True)
 
         content = message.get("content")

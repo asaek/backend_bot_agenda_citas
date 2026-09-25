@@ -32,3 +32,9 @@ class FakeLLMProvider:
             reply_index = min(len(self.received_messages) - 1, len(self.replies) - 1)
             return self.replies[reply_index]
         return self.reply
+
+    async def generate_text(self, messages: Sequence[ChatMessage]) -> str:
+        response = await self.generate(messages)
+        if not isinstance(response, str):
+            raise LLMProviderError("El fake devolvio una herramienta en modo texto")
+        return response

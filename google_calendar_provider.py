@@ -340,7 +340,7 @@ class GoogleCalendarProvider(CalendarProvider):
             "POST",
             self._events_path(calendar_id),
             params=(
-                ("sendUpdates", "none"),
+                ("sendUpdates", "all"),
             ),
             json_body=self._event_body(patient_scope, start_at, end_at, reason),
         )
@@ -362,6 +362,7 @@ class GoogleCalendarProvider(CalendarProvider):
         if start_at is not None and end_at is not None:
             _validate_range(start_at, end_at)
 
+        # Las consultas normales representan citas vigentes, no tombstones de Google.
         appointments: list[Appointment] = []
         for calendar_id in self.calendar_ids:
             events = await self._list_events(
@@ -376,7 +377,10 @@ class GoogleCalendarProvider(CalendarProvider):
                     event,
                     patient_scope=patient_scope,
                 )
-                if appointment is not None:
+                if (
+                    appointment is not None
+                    and appointment.status is not AppointmentStatus.CANCELLED
+                ):
                     appointments.append(appointment)
         return tuple(sorted(appointments, key=lambda item: (item.start_at, item.id)))
 
@@ -412,7 +416,7 @@ class GoogleCalendarProvider(CalendarProvider):
             "PATCH",
             self._event_path(calendar_id, appointment_id),
             params=(
-                ("sendUpdates", "none"),
+                ("sendUpdates", "all"),
             ),
             json_body={
                 "start": self._event_time(new_start_at),
@@ -442,7 +446,7 @@ class GoogleCalendarProvider(CalendarProvider):
             "PATCH",
             self._event_path(calendar_id, appointment_id),
             params=(
-                ("sendUpdates", "none"),
+                ("sendUpdates", "all"),
             ),
             json_body={"status": "cancelled"},
         )
@@ -517,7 +521,7 @@ class GoogleCalendarProvider(CalendarProvider):
         while True:
             params: list[tuple[str, str]] = [
                 ("singleEvents", "true"),
-                ("showDeleted", "true"),
+                ("showDeleted", "false"),
                 ("orderBy", "startTime"),
                 ("maxResults", "2500"),
                 (

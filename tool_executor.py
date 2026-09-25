@@ -9,6 +9,7 @@ from calendar_domain import (
     DomainValidationError,
     ToolRequest,
     ToolResult,
+    PatientScope,
 )
 from tool_contracts import (
     CancelAppointmentInput,
@@ -69,6 +70,25 @@ class ToolExecutor:
             return ToolResult.success(output)
         except Exception as error:
             return tool_result_from_exception(error)
+
+    async def find_appointment(
+        self,
+        *,
+        patient_scope: PatientScope,
+        appointment_id: str,
+    ) -> Appointment | None:
+        """Obtiene una cita del alcance para mostrarla antes de una mutacion."""
+        appointments = await self.provider.list_appointments(
+            patient_scope=patient_scope,
+        )
+        return next(
+            (
+                appointment
+                for appointment in appointments
+                if appointment.id == appointment_id
+            ),
+            None,
+        )
 
     async def _load_snapshot(self, tool_input: ToolInput) -> Sequence[Appointment]:
         return await self.provider.list_appointments(
@@ -151,3 +171,7 @@ class ToolExecutor:
     def _current_time(self) -> datetime:
         current_time = self._now() if callable(self._now) else self._now
         return current_time or datetime.now(timezone.utc)
+
+    def current_time(self) -> datetime:
+        """Expone el reloj del ejecutor para resolver fechas relativas."""
+        return self._current_time()

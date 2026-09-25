@@ -177,6 +177,7 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["max_tokens"], 500)
+        self.assertEqual(payload["temperature"], 0)
         self.assertEqual(payload["tool_choice"], "auto")
         self.assertEqual(
             [tool["function"]["name"] for tool in payload["tools"]],
@@ -199,6 +200,40 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
             {"start_at", "end_at"},
         )
         self.assertNotIn("required", list_appointments["parameters"])
+
+    def test_generate_text_does_not_publish_or_accept_tools(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "Resumen seguro"}}]},
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    LLMSettings(
+                        provider="groq",
+                        api_key="test-key",
+                        model="test-model",
+                        base_url="https://api.groq.test/openai/v1",
+                        timeout_seconds=20.0,
+                        max_history_messages=20,
+                        max_output_tokens=500,
+                    ),
+                    http_client=http_client,
+                )
+                return await provider.generate_text(
+                    [ChatMessage(role="user", content="Resume")]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Resumen seguro")
+        payload = json.loads(requests[0].content)
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("tool_choice", payload)
 
     def test_reuses_adapter_with_openrouter_configuration(self) -> None:
         requests: list[httpx.Request] = []

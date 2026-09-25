@@ -41,7 +41,7 @@ TOOL_DEFINITIONS: Mapping[ToolName, ToolDefinition] = MappingProxyType(
         ToolName.LIST_APPOINTMENTS: ToolDefinition(
             name=ToolName.LIST_APPOINTMENTS,
             description=(
-                "Lista las citas del paciente; acepta un rango completo opcional "
+                "Lista las citas vigentes del paciente; acepta un rango completo opcional "
                 "con start_at y end_at."
             ),
             required_arguments=(),
@@ -75,7 +75,8 @@ def llm_tool_definitions() -> list[dict[str, object]]:
                 "name": ToolName.CHECK_AVAILABILITY.value,
                 "description": (
                     "Consulta espacios disponibles de 30 minutos para un rango. "
-                    "Usala cuando el paciente pida horarios y proporcione una fecha."
+                    "Usala antes de agendar cuando el paciente proporcione una fecha "
+                    "pero no una hora exacta, y muestra los espacios libres."
                 ),
                 "parameters": {
                     "type": "object",
@@ -112,7 +113,7 @@ def llm_tool_definitions() -> list[dict[str, object]]:
             "function": {
                 "name": ToolName.LIST_APPOINTMENTS.value,
                 "description": (
-                    "Lista las citas del paciente. Usala cuando pregunte por sus "
+                    "Lista las citas vigentes del paciente. Usala cuando pregunte por sus "
                     "citas; sin fechas lista todas y con fechas requiere start_at "
                     "y end_at."
                 ),

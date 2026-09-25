@@ -24,6 +24,7 @@
 
 - [x] Construir los mensajes del LLM desde el historial de SQLite.
 - [x] Definir el prompt de sistema y el limite del historial.
+- [x] Inyectar fecha, hora, zona horaria y rangos relativos en el prompt de agenda.
 
 ## Integracion del ciclo
 
@@ -46,3 +47,4 @@
 - [x] Verificar que los errores del LLM quedan registrados.
 - [x] Verificar la respuesta de verificacion de Meta.
 - [x] Ejecutar la suite sin credenciales ni servicios externos.
+- [x] Probar que "hoy" se resuelve con el rango del reloj configurado.

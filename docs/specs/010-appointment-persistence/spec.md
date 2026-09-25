@@ -14,7 +14,8 @@ un registro sincronizable para que las herramientas no dependan del ID de Google
 
 La tabla `appointments` usa SQLite y contiene:
 
-- `id`: entero autoincremental, ID interno expuesto por las herramientas.
+- `id`: entero autoincremental, ID interno usado por las herramientas para futuras
+  modificaciones; no forma parte de los detalles mostrados al paciente.
 - `calendar_id`: calendario Google donde vive el evento.
 - `google_event_id`: ID del evento en Google Calendar.
 - `patient_id`: paciente de prueba asociado, con referencia a `patients`.

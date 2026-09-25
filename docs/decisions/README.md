@@ -28,3 +28,8 @@ indique cual decision anterior queda obsoleta.
 - [0017 - Esquemas de herramientas en solicitudes LLM](./0017-llm-tool-schemas.md)
 - [0018 - Migracion incremental del proveedor de disponibilidad](./0018-incremental-availability-provider.md)
 - [0019 - Entrega de notificaciones al doctor](./0019-doctor-notification-delivery.md)
+- [0020 - Formato de respuestas compatible con WhatsApp](./0020-whatsapp-compatible-response-format.md)
+- [0021 - Contexto temporal confiable para la agenda](./0021-relative-date-context.md)
+- [0022 - Sincronizacion y listados de Google Calendar](./0022-google-calendar-event-sync.md)
+- [0023 - Motivo de cita controlado por el backend](./0023-backend-owned-appointment-reason.md)
+- [0024 - Disponibilidad antes de elegir la hora](./0024-date-only-availability-before-booking.md)

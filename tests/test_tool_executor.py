@@ -59,6 +59,11 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
             availability_provider=availability_provider,
         )
 
+    def test_exposes_the_configured_clock_for_conversation_context(self) -> None:
+        executor = self.executor(FakeCalendarProvider())
+
+        self.assertEqual(executor.current_time(), self.now)
+
     def request(self, tool_name: ToolName, arguments: dict[str, object]) -> ToolRequest:
         return ToolRequest(
             tool_name=tool_name,

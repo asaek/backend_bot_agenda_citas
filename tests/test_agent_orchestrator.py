@@ -3,10 +3,20 @@ import unittest
 from datetime import datetime, time, timezone
 
 from agent_orchestrator import AgentIterationLimitError, AgentOrchestrator
-from calendar_domain import PatientScope, ToolErrorCode
+from calendar_domain import (
+    AppointmentStatus,
+    CalendarProviderUnavailable,
+    PatientScope,
+    ToolErrorCode,
+    ToolName,
+)
 from fake_calendar_provider import FakeCalendarProvider
 from llm_provider import ChatMessage, ToolCall
 from fakes import FakeLLMProvider
+from notification_domain import (
+    AppointmentNotificationEvent,
+    AppointmentNotificationType,
+)
 from tool_executor import ToolExecutor
 from tool_validation import BusinessHours, TimeWindow
 
@@ -71,8 +81,170 @@ class AgentOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assistant_message.tool_calls[0].name, "create_appointment")
         tool_payload = json.loads(llm.received_messages[1][2].content)
         self.assertTrue(tool_payload["ok"])
+        self.assertEqual(
+            tool_payload["data"]["appointment"]["id"],
+            provider.appointments[0].id,
+        )
         self.assertNotIn("5491100000000", llm.received_messages[1][2].content)
         self.assertNotIn("calendar-1", llm.received_messages[1][2].content)
+
+    async def test_emits_event_for_successful_create_with_request_identity(self) -> None:
+        provider = FakeCalendarProvider()
+        llm = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                    call_id="call-create",
+                ),
+                "La cita fue creada.",
+            )
+        )
+        orchestrator = AgentOrchestrator(
+            llm_provider=llm,
+            tool_executor=self.executor(provider),
+        )
+        events: list[AppointmentNotificationEvent] = []
+
+        await orchestrator.run(
+            messages=[ChatMessage(role="user", content="Necesito una cita")],
+            patient_scope=self.patient_scope,
+            incoming_message_id=42,
+            on_appointment_event=events.append,
+        )
+
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.notification_type, AppointmentNotificationType.SCHEDULED)
+        self.assertEqual(event.tool_name, ToolName.CREATE_APPOINTMENT)
+        self.assertEqual(event.incoming_message_id, 42)
+        self.assertEqual(event.tool_call_id, "call-create")
+        self.assertEqual(event.patient_scope, self.patient_scope)
+        self.assertEqual(event.appointment, provider.appointments[0])
+
+    async def test_emits_events_for_successful_reschedule_and_cancel(self) -> None:
+        provider = FakeCalendarProvider()
+        appointment = await provider.create_appointment(
+            patient_scope=self.patient_scope,
+            start_at=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
+            reason="Revision",
+        )
+        events: list[AppointmentNotificationEvent] = []
+
+        for message_id, tool_name, arguments, call_id in (
+            (
+                43,
+                "reschedule_appointment",
+                {
+                    "appointment_id": appointment.id,
+                    "new_start_at": "2026-09-21T11:00:00",
+                },
+                "call-reschedule",
+            ),
+            (
+                44,
+                "cancel_appointment",
+                {"appointment_id": appointment.id},
+                "call-cancel",
+            ),
+        ):
+            orchestrator = AgentOrchestrator(
+                llm_provider=FakeLLMProvider(
+                    replies=(
+                        ToolCall(
+                            name=tool_name,
+                            arguments=arguments,
+                            call_id=call_id,
+                        ),
+                        "Operacion completada.",
+                    )
+                ),
+                tool_executor=self.executor(provider),
+            )
+
+            await orchestrator.run(
+                messages=[ChatMessage(role="user", content="Actualiza mi cita")],
+                patient_scope=self.patient_scope,
+                incoming_message_id=message_id,
+                on_appointment_event=events.append,
+            )
+
+        self.assertEqual(
+            [event.notification_type for event in events],
+            [
+                AppointmentNotificationType.MODIFIED,
+                AppointmentNotificationType.CANCELLED,
+            ],
+        )
+        self.assertEqual(
+            [event.tool_name for event in events],
+            [ToolName.RESCHEDULE_APPOINTMENT, ToolName.CANCEL_APPOINTMENT],
+        )
+        self.assertEqual(
+            [event.tool_call_id for event in events],
+            ["call-reschedule", "call-cancel"],
+        )
+        self.assertEqual(events[-1].appointment.status, AppointmentStatus.CANCELLED)
+
+    async def test_does_not_emit_event_when_appointment_operation_fails(self) -> None:
+        provider = FakeCalendarProvider(
+            simulated_errors={
+                ToolName.CREATE_APPOINTMENT: CalendarProviderUnavailable,
+            }
+        )
+        llm = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T10:00:00",
+                        "reason": "Revision",
+                    },
+                ),
+                "No pude crear la cita.",
+            )
+        )
+        orchestrator = AgentOrchestrator(
+            llm_provider=llm,
+            tool_executor=self.executor(provider),
+        )
+        events: list[AppointmentNotificationEvent] = []
+
+        await orchestrator.run(
+            messages=[ChatMessage(role="user", content="Necesito una cita")],
+            patient_scope=self.patient_scope,
+            incoming_message_id=45,
+            on_appointment_event=events.append,
+        )
+
+        self.assertEqual(events, [])
+        self.assertEqual(provider.appointments, ())
+
+    async def test_does_not_emit_event_for_non_mutating_tool(self) -> None:
+        provider = FakeCalendarProvider()
+        llm = FakeLLMProvider(
+            replies=(
+                ToolCall(name="list_appointments", arguments={}),
+                "No tienes citas.",
+            )
+        )
+        orchestrator = AgentOrchestrator(
+            llm_provider=llm,
+            tool_executor=self.executor(provider),
+        )
+        events: list[AppointmentNotificationEvent] = []
+
+        await orchestrator.run(
+            messages=[ChatMessage(role="user", content="Lista mis citas")],
+            patient_scope=self.patient_scope,
+            incoming_message_id=46,
+            on_appointment_event=events.append,
+        )
+
+        self.assertEqual(events, [])
 
     async def test_rejects_patient_and_calendar_arguments_before_provider(self) -> None:
         provider = FakeCalendarProvider()

@@ -212,10 +212,15 @@ class FakeCalendarProvider(CalendarProvider):
         if start_at is not None and end_at is not None:
             _validate_range(start_at, end_at)
 
+        active_statuses = {
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED,
+        }
         appointments = [
             appointment
             for appointment in self._appointments.values()
             if appointment.patient_scope.patient_id == patient_scope.patient_id
+            and appointment.status in active_statuses
             and _matches_range(appointment, start_at, end_at)
         ]
         return tuple(self._sorted_appointments(appointments))

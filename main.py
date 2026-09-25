@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import asdict
@@ -25,10 +26,20 @@ from google_calendar_provider import (
 from llm_provider import (
     LLMConfigurationError,
     LLMProviderError,
+    LLMProvider,
     ToolCall,
     create_llm_provider,
     load_llm_settings,
 )
+from notification_composer import (
+    DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES,
+    DoctorNotificationService,
+)
+from notification_delivery import (
+    DoctorNotificationDeliveryService,
+    create_doctor_notification_delivery,
+)
+from notification_domain import AppointmentNotificationEvent
 from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
 from persistent_calendar_provider import PersistentCalendarProvider
 from tool_executor import ToolExecutor
@@ -39,6 +50,7 @@ from whatsapp_client import WhatsAppClient, WhatsAppConfigurationError
 load_dotenv(Path(__file__).with_name(".env"))
 
 app = FastAPI(title="WhatsApp Chatbot")
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CALENDAR_TIMEZONE = "UTC"
@@ -177,6 +189,16 @@ def create_conversation_service(
     )
     database_path = os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)
     database = SQLiteDatabase(database_path)
+    conversation_timezone = (
+        resolved_tool_executor.default_timezone
+        if resolved_tool_executor is not None
+        else DEFAULT_CALENDAR_TIMEZONE
+    )
+    conversation_now = (
+        resolved_tool_executor.current_time
+        if resolved_tool_executor is not None
+        else None
+    )
     try:
         settings = load_llm_settings()
         llm_provider = create_llm_provider(settings)
@@ -185,6 +207,8 @@ def create_conversation_service(
             database,
             llm_configuration_error=error,
             tool_executor=resolved_tool_executor,
+            timezone_name=conversation_timezone,
+            now=conversation_now,
         )
     return ConversationService(
         database,
@@ -192,7 +216,103 @@ def create_conversation_service(
         max_history_messages=settings.max_history_messages,
         max_tool_iterations=settings.max_tool_iterations,
         tool_executor=resolved_tool_executor,
+        timezone_name=conversation_timezone,
+        now=conversation_now,
     )
+
+
+def create_doctor_notification_service(
+    database: SQLiteDatabase,
+    summary_provider: LLMProvider | None,
+    *,
+    max_history_messages: int = DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES,
+) -> DoctorNotificationService | None:
+    """Compone el servicio de resumen con el mismo proveedor LLM del runtime."""
+    if summary_provider is None:
+        return None
+    return DoctorNotificationService(
+        database,
+        summary_provider,
+        max_history_messages=max_history_messages,
+    )
+
+
+async def deliver_doctor_notifications(
+    conversation_service: ConversationService,
+    whatsapp_client: WhatsAppClient,
+    events: list[AppointmentNotificationEvent],
+) -> None:
+    """Entrega eventos ya confirmados sin propagar fallos al paciente."""
+    if not events:
+        return
+
+    try:
+        delivery_service: DoctorNotificationDeliveryService = (
+            create_doctor_notification_delivery(
+                conversation_service.database,
+                whatsapp_client=whatsapp_client,
+            )
+        )
+    except Exception as error:
+        logger.warning(
+            "No se pudo configurar la entrega al doctor: %s",
+            type(error).__name__,
+        )
+        return
+
+    if not delivery_service.settings.enabled:
+        return
+
+    composition_service = create_doctor_notification_service(
+        conversation_service.database,
+        conversation_service.llm_provider,
+        max_history_messages=conversation_service.max_history_messages,
+    )
+    if composition_service is None:
+        logger.warning("No hay proveedor LLM para componer la notificacion al doctor")
+        return
+
+    for event in events:
+        try:
+            notification = await composition_service.compose(event)
+        except Exception as error:
+            try:
+                delivery_service.record_failed(
+                    event,
+                    error="No se pudo construir la notificacion al doctor.",
+                )
+            except Exception as persistence_error:
+                logger.warning(
+                    "No se pudo registrar el fallo de notificacion (%s): %s",
+                    event.notification_type.value,
+                    type(persistence_error).__name__,
+                )
+            logger.warning(
+                "No se pudo componer la notificacion al doctor (%s): %s",
+                event.notification_type.value,
+                type(error).__name__,
+            )
+            continue
+
+        try:
+            await delivery_service.deliver(event, notification.body)
+        except Exception as error:
+            try:
+                delivery_service.record_failed(
+                    event,
+                    error="No se pudo persistir la notificacion al doctor.",
+                )
+            except Exception as persistence_error:
+                logger.warning(
+                    "No se pudo registrar el fallo de notificacion (%s): %s",
+                    event.notification_type.value,
+                    type(persistence_error).__name__,
+                )
+            logger.warning(
+                "No se pudo completar la notificacion al doctor (%s): %s",
+                event.notification_type.value,
+                type(error).__name__,
+            )
 
 
 app.state.calendar_provider = create_calendar_provider()
@@ -318,8 +438,12 @@ async def receive_webhook(request: Request) -> dict[str, str]:
         if context.reply_status == "sent":
             continue
 
+        appointment_events: list[AppointmentNotificationEvent] = []
         try:
-            reply = await conversation_service.build_reply(context)
+            reply = await conversation_service.build_reply(
+                context,
+                appointment_event_sink=appointment_events.append,
+            )
         except LLMProviderError as error:
             conversation_service.record_llm_failure(
                 context,
@@ -351,6 +475,11 @@ async def receive_webhook(request: Request) -> dict[str, str]:
             context,
             body=reply,
             provider_message_id=extract_provider_message_id(result),
+        )
+        await deliver_doctor_notifications(
+            conversation_service,
+            whatsapp_client,
+            appointment_events,
         )
 
     return {"status": "ok"}

@@ -22,6 +22,12 @@ al LLM la identidad del paciente ni la seleccion de calendarios.
 - Limitar el numero de iteraciones de herramientas.
 - Ocultar del resultado al LLM los campos de paciente y calendario controlados por
   el backend.
+- Mantener los IDs internos de citas disponibles para operaciones posteriores, sin
+  presentarlos al paciente al redactar detalles de una cita.
+- Formatear la respuesta final para WhatsApp sin tablas Markdown; las citas deben
+  presentarse como una lista simple.
+- Resolver expresiones relativas de fecha con el contexto temporal confiable del
+  backend antes de consultar citas.
 
 ## Requisitos funcionales
 
@@ -57,6 +63,21 @@ que el LLM pueda redactar una respuesta. No deben propagarse detalles internos.
 El ciclo solo termina exitosamente con texto. Una llamada no ejecutable o un
 limite agotado no se debe enviar como texto al paciente.
 
+### RF-707 - Detalles de una cita
+
+Cuando el paciente solicite detalles de una cita, la respuesta debe incluir la
+fecha, la hora y el motivo cuando esten disponibles, pero no debe mostrar el ID
+interno de la cita. El ID puede permanecer en el contexto interno del agente para
+permitir una reprogramacion o cancelacion posterior.
+
+### RF-708 - Formato compatible con WhatsApp
+
+La respuesta textual final no debe usar tablas Markdown ni separadores con barras
+verticales. Cuando se listen varias citas, debe usar una lista simple con una cita
+por linea e incluir la hora y el motivo cuando esten disponibles. Si el LLM
+devuelve una tabla, `ConversationService` debe convertir sus filas a esa lista y
+omitir columnas de ID interno.
+
 ## Criterios de aceptacion
 
 1. Una llamada valida se convierte en `ToolRequest` con el `PatientScope` actual.
@@ -69,7 +90,11 @@ limite agotado no se debe enviar como texto al paciente.
    de paciente ni `calendar_id`.
 7. El limite impide una llamada adicional y produce un error controlado.
 8. El limite se carga desde `LLM_MAX_TOOL_ITERATIONS` y por defecto es 3.
-9. La suite funciona sin servicios externos.
+9. Una respuesta de detalles de cita no presenta el ID interno al paciente.
+10. El resultado interno conserva el ID de la cita para futuras mutaciones.
+11. Una respuesta con varias citas se envia como lista y no contiene una tabla
+    Markdown ni una columna de ID interno.
+12. La suite funciona sin servicios externos.
 
 ## Fuera de alcance
 
