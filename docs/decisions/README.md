@@ -33,3 +33,8 @@ indique cual decision anterior queda obsoleta.
 - [0022 - Sincronizacion y listados de Google Calendar](./0022-google-calendar-event-sync.md)
 - [0023 - Motivo de cita controlado por el backend](./0023-backend-owned-appointment-reason.md)
 - [0024 - Disponibilidad antes de elegir la hora](./0024-date-only-availability-before-booking.md)
+- [0025 - Validacion minima del motivo de cita](./0025-appointment-reason-minimum-validation.md)
+- [0026 - Evaluacion estructurada del motivo de cita](./0026-structured-appointment-reason-evaluation.md)
+- [0027 - Señales de prioridad sin diagnostico](./0027-priority-signals-without-diagnosis.md)
+- [0028 - Nombre del paciente antes de agendar](./0028-patient-name-before-booking.md)
+- [0029 - Seleccion de disponibilidad controlada por el backend](./0029-backend-owned-availability-selection.md)

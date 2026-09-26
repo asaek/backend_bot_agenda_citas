@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from appointment_availability import (
+    PendingAppointmentAvailability,
     date_only_availability_request,
     format_availability_reply,
+    parse_time_selection,
 )
 from calendar_domain import AvailableSlot, ToolResult
 from tool_contracts import CheckAvailabilityOutput
@@ -73,3 +75,52 @@ class AppointmentAvailabilityTests(unittest.TestCase):
 
         self.assertEqual(reply.count("- 11:00 a 11:30"), 1)
         self.assertIn("Elige uno", reply)
+
+    def test_parses_common_patient_time_selections(self) -> None:
+        cases = (
+            ("damela a las 10 am", (10, 0)),
+            ("a las 10:30", (10, 30)),
+            ("a las 1 pm", (13, 0)),
+            ("13:30", (13, 30)),
+        )
+
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(parse_time_selection(text), expected)
+
+    def test_pending_availability_round_trips_and_matches_a_slot(self) -> None:
+        request = date_only_availability_request(
+            "Agendame una cita para mañana",
+            now=self.now,
+            timezone=self.timezone,
+        )
+        self.assertIsNotNone(request)
+        start_at = datetime(2026, 9, 21, 10, tzinfo=timezone.utc)
+        pending = PendingAppointmentAvailability.from_slots(
+            request,
+            (
+                AvailableSlot(
+                    calendar_id="calendar-1",
+                    start_at=start_at,
+                    end_at=start_at.replace(minute=30),
+                ),
+                AvailableSlot(
+                    calendar_id="calendar-1",
+                    start_at=start_at.replace(hour=13),
+                    end_at=start_at.replace(hour=13, minute=30),
+                ),
+            ),
+            timezone=self.timezone,
+            now=self.now,
+        )
+        self.assertIsNotNone(pending)
+
+        restored = PendingAppointmentAvailability.from_context(pending.to_context())
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.target_date, "2026-09-21")
+        self.assertIsNotNone(
+            restored.matching_slot("damela a las 10 am", timezone=self.timezone)
+        )
+        self.assertIsNotNone(restored.matching_slot("a la 1", timezone=self.timezone))
+        self.assertIsNone(restored.matching_slot("a las 11 am", timezone=self.timezone))

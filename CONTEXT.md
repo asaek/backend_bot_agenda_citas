@@ -50,6 +50,24 @@ _Evitar_: Motivo de la cita, estado de la cita, diagnostico
 Descripcion proporcionada por el paciente de prueba sobre la razon de su visita.
 _Evitar_: Etiqueta interna
 
+**Nombre del paciente**:
+Nombre proporcionado por el paciente de prueba y conservado para identificarlo en la
+notificacion operativa al doctor. No es un diagnostico ni sustituye al numero de
+WhatsApp como alcance tecnico.
+_Evitar_: Nombre inventado, identidad verificada
+
+**Motivo validado**:
+Motivo expresado por el paciente que supera las reglas locales de calidad minima
+necesarias para continuar una solicitud de cita. La validacion no representa un
+diagnostico ni una confirmacion clinica.
+_Evitar_: Motivo diagnosticado, motivo clasificado
+
+**Evaluacion del motivo**:
+Resultado estructurado que registra la calidad, categoria operativa, señales de
+prioridad, confianza y fecha de evaluacion de un motivo. No reemplaza el texto del
+paciente ni autoriza por si sola una cita.
+_Evitar_: Diagnostico, triage clinico, motivo generado
+
 **Estado de la cita**:
 Situacion vigente de una cita dentro de su ciclo de vida.
 _Evitar_: Estado del calendario
@@ -72,7 +90,8 @@ _Evitar_: Respuesta al paciente, alerta de diagnostico
 
 **Señal de prioridad**:
 Indicador interno derivado del mensaje que advierte que una solicitud podria
-requerir atencion prioritaria. No representa un diagnostico medico.
+requerir atencion prioritaria. Se expresa con lenguaje operativo seguro y no
+incluye nombres de enfermedades, diagnosticos ni instrucciones clinicas.
 _Evitar_: Diagnostico, estado de la cita
 
 **Resumen conversacional**:

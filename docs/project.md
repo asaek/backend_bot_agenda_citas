@@ -51,10 +51,17 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   asistente.
 - Resolver expresiones relativas como "hoy" con el reloj y la zona horaria de la
   agenda antes de pedir al LLM una respuesta.
-- Solicitar el motivo expresado por el paciente antes de crear una cita y conservar
-  el horario mientras se espera ese dato.
+- Solicitar, validar y evaluar estructuradamente el motivo expresado por el paciente
+  antes de crear una cita; conservar el horario y metadata mientras se espera ese
+  dato.
+- Solicitar y persistir el nombre del paciente cuando aun no este registrado antes
+  de continuar con el motivo.
+- Separar señales operativas de prioridad de cualquier diagnostico y conservarlas sin
+  cambiar el flujo de agendamiento.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
+- Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes
+  de iniciar la recoleccion de nombre y motivo.
 - Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 
@@ -190,16 +197,28 @@ texto generico.
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` evita que el
 LLM complete un motivo que el paciente de prueba no ha expresado. Antes de crear una
-cita, el backend conserva el horario en el contexto de la conversacion y pregunta el
-motivo. El siguiente mensaje del paciente completa la solicitud; solo entonces se
-crea la cita y pueden emitirse las notificaciones al doctor.
+cita, si el paciente no tiene nombre registrado, el backend lo solicita y lo conserva
+en `patients.name`; despues pregunta el motivo. El horario y el estado pendiente se
+conservan en el contexto de la conversacion. El validador local rechaza entradas
+evidentemente ilegibles sin perder ese estado. Un evaluador estructurado clasifica la
+calidad, categoria y señales permitidas; el backend conserva los intentos y la fecha,
+pero mantiene el texto del paciente como unico motivo. Solo una evaluacion aceptable
+completa la solicitud y permite crear la cita y emitir las notificaciones al doctor.
+
+Las referencias vagas como `Lo de siempre` piden aclaracion. Las señales de prioridad
+se limitan a codigos evidenciados por el texto y se convierten en descripciones
+operativas sin nombres de enfermedades antes de incluirse en una notificacion
+interna. Este comportamiento es solo tecnico: falta una politica clinica explicita
+antes de usarlo con pacientes reales.
 
 ### Corte implementado: disponibilidad antes de elegir la hora
 
 La funcionalidad definida en `specs/014-date-only-availability/` consulta el dia
 completo cuando el paciente pide agendar para una fecha reconocible sin indicar una
-hora. El backend muestra los espacios libres, no crea una cita y espera la seleccion
-del paciente. Una solicitud con hora exacta continua hacia la recoleccion del motivo.
+hora. El backend muestra los espacios libres, conserva la fecha y los slots en la
+conversacion y valida la seleccion del paciente antes de iniciar la recoleccion de
+nombre y motivo. Una solicitud con hora exacta continua hacia la recoleccion del
+motivo.
 
 ### Fase incremental: disponibilidad real
 

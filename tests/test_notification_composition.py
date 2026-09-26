@@ -17,7 +17,7 @@ from notification_composer import (
 )
 from notification_domain import AppointmentNotificationEvent, AppointmentNotificationType
 from persistence import SQLiteDatabase
-from repositories import MessageRepository
+from repositories import MessageRecord, MessageRepository
 from fakes import FakeLLMProvider
 
 
@@ -224,6 +224,46 @@ class NotificationCompositionTests(unittest.TestCase):
         self.assertNotIn("diagnost", message.body.lower())
         self.assertNotIn("Paciente: Necesito una cita", message.body)
         self.assertEqual(message.priority_signals, ())
+
+    def test_detected_priority_signal_uses_operational_language_without_diagnosis(self) -> None:
+        provider = FakeLLMProvider(
+            reply=json.dumps(
+                {
+                    "summary": "El paciente refiere una molestia ocular.",
+                    "priority_signals": [],
+                }
+            )
+        )
+        history = (
+            MessageRecord(
+                id=1,
+                conversation_id=self.scope.conversation_id,
+                direction="incoming",
+                provider_message_id="wamid.incoming",
+                text="Tuve contacto con una sustancia química en el ojo.",
+                message_type="text",
+                status="received",
+                reply_to_message_id=None,
+                created_at="2026-09-20T12:01:00+00:00",
+            ),
+        )
+        composer = DoctorNotificationComposer(provider)
+
+        message = asyncio.run(
+            composer.compose(
+                self.event,
+                patient_name=None,
+                history=history,
+            )
+        )
+
+        self.assertIn(
+            "El paciente refiere contacto ocular con una sustancia química que podría "
+            "requerir atención prioritaria.",
+            message.body,
+        )
+        self.assertNotIn("glaucoma", message.body.lower())
+        self.assertNotIn("desprendimiento", message.body.lower())
 
     def test_renderer_sanitizes_untrusted_summary_values(self) -> None:
         message = render_doctor_notification(

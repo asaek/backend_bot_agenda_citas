@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import tempfile
 import unittest
@@ -6,7 +7,9 @@ from datetime import datetime, time, timezone
 
 from calendar_domain import PatientScope
 from calendar_domain import AppointmentStatus, ToolName
+from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from conversation_service import (
+    APPOINTMENT_REASON_REPLY,
     SYSTEM_PROMPT,
     ConversationService,
     IncomingTextMessage,
@@ -192,6 +195,109 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(provider.appointments, ())
 
+    def test_backend_owns_slot_selection_before_requesting_reason(self) -> None:
+        provider = FakeCalendarProvider()
+        llm_provider = FakeLLMProvider(
+            reply="¿Podrías indicarme el motivo de la consulta?"
+        )
+        fixed_now = datetime(2026, 9, 26, 5, 42, tzinfo=timezone.utc)
+        service = ConversationService(
+            SQLiteDatabase(self.database_path),
+            llm_provider=llm_provider,
+            now=fixed_now,
+            tool_executor=ToolExecutor(
+                provider=provider,
+                business_hours=BusinessHours(
+                    timezone_name="UTC",
+                    windows_by_weekday={
+                        weekday: (TimeWindow(time(9), time(17)),)
+                        for weekday in range(5)
+                    },
+                ),
+                default_timezone="UTC",
+                now=fixed_now,
+            ),
+        )
+
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.transcript-date",
+                message_type="text",
+                text="Hola quisiera agendar una cita para el lunes",
+            )
+        )
+        date_reply = asyncio.run(service.build_reply(date_context))
+        service.record_reply_sent(
+            date_context,
+            body=date_reply,
+            provider_message_id="wamid.transcript-date-reply",
+        )
+        with service.database.transaction() as connection:
+            conversation = service.conversations.get_by_id(
+                connection,
+                date_context.conversation_id,
+            )
+        self.assertIsNotNone(conversation)
+        availability_context = json.loads(conversation.context_json)
+        self.assertEqual(
+            availability_context["pending_appointment_availability"]["target_date"],
+            "2026-09-28",
+        )
+        self.assertTrue(
+            availability_context["pending_appointment_availability"]["slots"]
+        )
+        with service.database.transaction() as connection:
+            service.patients.update_name(
+                connection,
+                date_context.patient_id,
+                "Paciente de Prueba",
+                fixed_now.isoformat(),
+            )
+
+        choice_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.transcript-choice",
+                message_type="text",
+                text="damela a las 10 am",
+            )
+        )
+        choice_reply = asyncio.run(service.build_reply(choice_context))
+        service.record_reply_sent(
+            choice_context,
+            body=choice_reply,
+            provider_message_id="wamid.transcript-choice-reply",
+        )
+
+        reason_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.transcript-reason",
+                message_type="text",
+                text="Siento rara la vista",
+            )
+        )
+        reason_reply = asyncio.run(service.build_reply(reason_context))
+
+        self.assertIn("horarios disponibles", date_reply.lower())
+        self.assertEqual(choice_reply, APPOINTMENT_REASON_REPLY)
+        self.assertIn("confirmada", reason_reply.lower())
+        self.assertEqual(llm_provider.call_count, 0)
+        self.assertEqual(len(provider.appointments), 1)
+        self.assertEqual(provider.appointments[0].reason, "Siento rara la vista")
+        self.assertEqual(provider.appointments[0].start_at.hour, 10)
+
+        with service.database.transaction() as connection:
+            conversation = service.conversations.get_by_id(
+                connection,
+                reason_context.conversation_id,
+            )
+        self.assertIsNotNone(conversation)
+        persisted_context = json.loads(conversation.context_json)
+        self.assertNotIn("pending_appointment_availability", persisted_context)
+        self.assertNotIn("pending_appointment_reason", persisted_context)
+
     def test_build_reply_converts_markdown_appointment_table_to_a_list(self) -> None:
         self.llm_provider.reply = (
             "Para manana tienes dos citas confirmadas:\n\n"
@@ -308,9 +414,22 @@ class ConversationContextTests(unittest.TestCase):
             service.build_reply(context, appointment_event_sink=events.append)
         )
 
-        self.assertIn("motivo", reply.lower())
+        self.assertIn("nombre", reply.lower())
         self.assertEqual(calendar_provider.appointments, ())
         self.assertEqual(events, [])
+
+        name_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.event.name",
+                message_type="text",
+                text="Paciente de Prueba",
+            )
+        )
+        name_reply = asyncio.run(
+            service.build_reply(name_context, appointment_event_sink=events.append)
+        )
+        self.assertIn("motivo", name_reply.lower())
 
         reason_context = service.receive_message(
             IncomingTextMessage(
@@ -518,6 +637,21 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
             ),
         )
+        with self.service.database.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO patients (
+                    id, whatsapp_number, name, created_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    self.scope_sender,
+                    "Paciente de Prueba",
+                    "2026-09-20T12:00:00+00:00",
+                    "2026-09-20T12:00:00+00:00",
+                ),
+            )
         self.scope = PatientScope(
             patient_id=1,
             conversation_id=1,
@@ -530,6 +664,79 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 reason="Revision de cornea",
             )
         )
+
+    def test_create_requests_and_persists_missing_patient_name(self) -> None:
+        sender = "5491100000001"
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T15:00:00",
+                    "reason": "Consulta general",
+                },
+                call_id="call-create-name",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=sender,
+                message_id="wamid.create-name-request",
+                message_type="text",
+                text="Agendame una cita a las 15:00",
+            )
+        )
+
+        first_reply = asyncio.run(self.service.build_reply(first_context))
+
+        self.assertIn("nombre", first_reply.lower())
+        self.assertEqual(len(self.provider.appointments), 1)
+
+        name_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=sender,
+                message_id="wamid.create-name-name",
+                message_type="text",
+                text="Ana Prueba",
+            )
+        )
+        name_reply = asyncio.run(self.service.build_reply(name_context))
+
+        self.assertIn("motivo", name_reply.lower())
+        with self.service.database.transaction() as connection:
+            patient = connection.execute(
+                "SELECT name FROM patients WHERE whatsapp_number = ?",
+                (sender,),
+            ).fetchone()
+        self.assertEqual(patient[0], "Ana Prueba")
+
+        repeated_name_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=sender,
+                message_id="wamid.create-name-name",
+                message_type="text",
+                text="Texto ignorado por idempotencia",
+            )
+        )
+        repeated_name_reply = asyncio.run(
+            self.service.build_reply(repeated_name_context)
+        )
+
+        self.assertIn("motivo", repeated_name_reply.lower())
+        self.assertEqual(len(self.provider.appointments), 1)
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=sender,
+                message_id="wamid.create-name-reason",
+                message_type="text",
+                text="Revisión general",
+            )
+        )
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("confirmada", reply)
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertEqual(self.provider.appointments[-1].reason, "Revisión general")
 
     def test_create_asks_for_reason_before_provider_execution(self) -> None:
         self.service.llm_provider.replies = (
@@ -583,6 +790,434 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(self.provider.appointments[-1].reason, "Revision de cornea")
+
+    def test_invalid_reason_keeps_pending_request_until_valid_reason_arrives(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T15:00:00",
+                    "reason": "Consulta general",
+                },
+                call_id="call-create-invalid-reason",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.invalid-reason-request",
+                message_type="text",
+                text="Agendame otra cita a las 15:00",
+            )
+        )
+
+        events = []
+        first_reply = asyncio.run(
+            self.service.build_reply(first_context, appointment_event_sink=events.append)
+        )
+
+        invalid_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.invalid-reason",
+                message_type="text",
+                text="jnbajnbsdijkqnbwikbdqwd",
+            )
+        )
+        invalid_reply = asyncio.run(
+            self.service.build_reply(invalid_context, appointment_event_sink=events.append)
+        )
+
+        self.assertIn("motivo", first_reply.lower())
+        self.assertIn("no pude identificar", invalid_reply.lower())
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+        self.assertEqual(events, [])
+        self.assertEqual(self.service.llm_provider.call_count, 1)
+
+        valid_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.valid-reason",
+                message_type="text",
+                text="Veo borroso desde ayer",
+            )
+        )
+        valid_reply = asyncio.run(
+            self.service.build_reply(valid_context, appointment_event_sink=events.append)
+        )
+
+        self.assertIn("confirmada", valid_reply)
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertEqual(
+            self.provider.appointments[-1].reason,
+            "Veo borroso desde ayer",
+        )
+        self.assertEqual(len(events), 1)
+
+    def test_asdf_reason_does_not_create_appointment(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T13:00:00",
+                    "reason": "Motivo inventado",
+                },
+                call_id="call-asdf-reason",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.asdf-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.asdf-reason",
+                message_type="text",
+                text="asdf",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("no pude identificar", reply.lower())
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+
+    def test_valid_blurred_reason_creates_appointment_at_one_pm(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T13:00:00",
+                    "reason": "Motivo inventado",
+                },
+                call_id="call-blurred-reason",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.blurred-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.blurred-reason",
+                message_type="text",
+                text="Veo borroso desde ayer",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("confirmada", reply)
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertEqual(self.provider.appointments[-1].start_at.hour, 13)
+        self.assertEqual(
+            self.provider.appointments[-1].reason,
+            "Veo borroso desde ayer",
+        )
+
+    def test_eye_pain_reason_creates_appointment_and_registers_priority_signal(self) -> None:
+        llm_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name=ToolName.CREATE_APPOINTMENT.value,
+                    arguments={
+                        "start_at": "2026-09-21T13:00:00",
+                        "reason": "Motivo inventado",
+                    },
+                    call_id="call-eye-pain-reason",
+                ),
+            )
+        )
+        evaluator_provider = FakeLLMProvider(
+            reply=(
+                '{"quality":"valid","category":"visual_symptom",'
+                '"priority_signals":[],"confidence":0.94}'
+            )
+        )
+        service = ConversationService(
+            self.service.database,
+            llm_provider=llm_provider,
+            tool_executor=self.service.tool_executor,
+            reason_evaluator=StructuredAppointmentReasonEvaluator(evaluator_provider),
+        )
+        first_context = service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.eye-pain-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(service.build_reply(first_context))
+
+        reason_context = service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.eye-pain-reason",
+                message_type="text",
+                text="Me duele el ojo y está rojo",
+            )
+        )
+        events = []
+
+        reply = asyncio.run(
+            service.build_reply(reason_context, appointment_event_sink=events.append)
+        )
+
+        self.assertIn("confirmada", reply)
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertEqual(len(events), 1)
+        with service.database.transaction() as connection:
+            conversation = service.conversations.get_by_id(
+                connection,
+                reason_context.conversation_id,
+            )
+        self.assertIsNotNone(conversation)
+        context = json.loads(conversation.context_json)
+        self.assertEqual(
+            context["last_appointment_reason_evaluation"]["evaluation"][
+                "priority_signals"
+            ],
+            ["eye_pain"],
+        )
+
+    def test_general_review_reason_creates_appointment(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T13:00:00",
+                    "reason": "Motivo inventado",
+                },
+                call_id="call-general-review",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.general-review-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.general-review-reason",
+                message_type="text",
+                text="Revisión general",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("confirmada", reply)
+        self.assertEqual(len(self.provider.appointments), 2)
+
+    def test_vague_reason_requests_clarification(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T13:00:00",
+                    "reason": "Motivo inventado",
+                },
+                call_id="call-vague-reason",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.vague-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.vague-reason",
+                message_type="text",
+                text="Lo de siempre",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("no pude identificar", reply.lower())
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+
+    def test_valid_reason_after_invalid_reason_creates_only_one_appointment(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T13:00:00",
+                    "reason": "Motivo inventado",
+                },
+                call_id="call-invalid-then-valid",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.invalid-then-valid-request",
+                message_type="text",
+                text="Agendame otra cita a la 1 pm",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        invalid_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.invalid-then-valid-invalid",
+                message_type="text",
+                text="asdf",
+            )
+        )
+        asyncio.run(self.service.build_reply(invalid_context))
+
+        valid_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.invalid-then-valid-valid",
+                message_type="text",
+                text="Revisión general",
+            )
+        )
+        asyncio.run(self.service.build_reply(valid_context))
+
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertEqual(self.provider.appointments[-1].start_at.hour, 13)
+
+    def test_structured_reason_evaluation_persists_attempts_and_metadata(self) -> None:
+        llm_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name=ToolName.CREATE_APPOINTMENT.value,
+                    arguments={
+                        "start_at": "2026-09-21T15:00:00",
+                        "reason": "Motivo inventado por el LLM",
+                    },
+                    call_id="call-structured-reason",
+                ),
+            )
+        )
+        evaluator_provider = FakeLLMProvider(
+            replies=(
+                (
+                    '{"quality":"out_of_scope","category":"out_of_scope",'
+                    '"priority_signals":[],"confidence":0.91}'
+                ),
+                (
+                    '{"quality":"valid","category":"follow_up",'
+                    '"priority_signals":["ocular_trauma"],"confidence":0.93}'
+                ),
+            )
+        )
+        service = ConversationService(
+            self.service.database,
+            llm_provider=llm_provider,
+            tool_executor=self.service.tool_executor,
+            reason_evaluator=StructuredAppointmentReasonEvaluator(evaluator_provider),
+        )
+        first_context = service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.structured-reason-request",
+                message_type="text",
+                text="Agendame otra cita a las 15:00",
+            )
+        )
+
+        asyncio.run(service.build_reply(first_context))
+
+        out_of_scope_context = service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.structured-reason-out-of-scope",
+                message_type="text",
+                text="Necesito ayuda con un tramite administrativo",
+            )
+        )
+        out_of_scope_reply = asyncio.run(service.build_reply(out_of_scope_context))
+
+        self.assertIn("no estar relacionado", out_of_scope_reply.lower())
+        with service.database.transaction() as connection:
+            conversation = service.conversations.get_by_id(
+                connection,
+                out_of_scope_context.conversation_id,
+            )
+        self.assertIsNotNone(conversation)
+        context = json.loads(conversation.context_json)
+        self.assertEqual(context["pending_appointment_reason"]["attempt_count"], 1)
+        self.assertEqual(
+            context["pending_appointment_reason"]["last_evaluation"]["quality"],
+            "out_of_scope",
+        )
+
+        restarted_service = ConversationService(
+            service.database,
+            llm_provider=FakeLLMProvider(),
+            tool_executor=service.tool_executor,
+            reason_evaluator=StructuredAppointmentReasonEvaluator(evaluator_provider),
+        )
+        valid_context = restarted_service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.structured-reason-valid",
+                message_type="text",
+                text="Seguimiento después de un golpe ocular",
+            )
+        )
+        valid_reply = asyncio.run(restarted_service.build_reply(valid_context))
+
+        self.assertIn("confirmada", valid_reply)
+        self.assertEqual(
+            self.provider.appointments[-1].reason,
+            "Seguimiento después de un golpe ocular",
+        )
+        with restarted_service.database.transaction() as connection:
+            conversation = restarted_service.conversations.get_by_id(
+                connection,
+                valid_context.conversation_id,
+            )
+        self.assertIsNotNone(conversation)
+        context = json.loads(conversation.context_json)
+        self.assertNotIn("pending_appointment_reason", context)
+        self.assertEqual(context["last_appointment_reason_evaluation"]["attempt_count"], 2)
+        self.assertEqual(
+            context["last_appointment_reason_evaluation"]["evaluation"][
+                "category"
+            ],
+            "follow_up",
+        )
+        self.assertEqual(
+            context["last_appointment_reason_evaluation"]["evaluation"][
+                "priority_signals"
+            ],
+            ["ocular_trauma"],
+        )
+        self.assertEqual(evaluator_provider.call_count, 2)
 
     def test_pending_reason_survives_a_service_restart(self) -> None:
         self.service.llm_provider.replies = (

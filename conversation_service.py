@@ -13,10 +13,22 @@ from appointment_confirmation import (
     confirmation_reply,
 )
 from appointment_availability import (
+    PENDING_APPOINTMENT_AVAILABILITY_KEY,
+    PendingAppointmentAvailability,
     date_only_availability_request,
     format_availability_reply,
 )
+from appointment_reason_evaluation import (
+    AppointmentReasonCategory,
+    AppointmentReasonEvaluation,
+    AppointmentReasonEvaluator,
+    AppointmentReasonQuality,
+    failed_appointment_reason_evaluation,
+    local_appointment_reason_evaluation,
+)
+from appointment_reason_validation import validate_appointment_reason
 from appointment_scheduling import (
+    LAST_APPOINTMENT_REASON_EVALUATION_KEY,
     PENDING_APPOINTMENT_REASON_KEY,
     PendingAppointmentReason,
 )
@@ -41,13 +53,36 @@ from repositories import (
     MessageRepository,
     PatientRepository,
 )
-from tool_contracts import CreateAppointmentOutput
+from tool_contracts import CheckAvailabilityOutput, CreateAppointmentOutput
 from tool_executor import ToolExecutor
 
 
 CONTROLLED_FALLBACK_REPLY = (
     "En este momento no pude procesar tu mensaje. "
     "Intenta nuevamente en unos minutos."
+)
+APPOINTMENT_NAME_REPLY = (
+    "Antes de agendar tu cita, ¿cuál es tu nombre completo?"
+)
+APPOINTMENT_NAME_CLARIFICATION_REPLY = (
+    "Necesito tu nombre completo para continuar. ¿Cómo te llamas?"
+)
+APPOINTMENT_REASON_REPLY = "Gracias. Ahora, ¿cuál es el motivo de la consulta?"
+APPOINTMENT_REASON_CLARIFICATION_REPLY = (
+    "No pude identificar el motivo de la consulta. "
+    "¿Qué problema de la vista deseas revisar? Puedes escribirlo con tus palabras, "
+    "por ejemplo: visión borrosa, dolor ocular, ojo rojo, seguimiento de córnea "
+    "o revisión general."
+)
+APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY = (
+    "El motivo parece no estar relacionado con una consulta de la vista. "
+    "Si deseas una cita oftalmológica, indícame qué problema deseas revisar."
+)
+APPOINTMENT_SLOT_SELECTION_REPLY = (
+    "Elige uno de los horarios disponibles indicando la hora, por ejemplo: 10:00."
+)
+APPOINTMENT_AVAILABILITY_EXPIRED_REPLY = (
+    "La lista de horarios expiró. Solicita nuevamente la disponibilidad para ese día."
 )
 SYSTEM_PROMPT = "\n".join(
     (
@@ -61,8 +96,12 @@ SYSTEM_PROMPT = "\n".join(
         "consultar primero check_availability para todo ese dia; no pedir aun la hora "
         "ni el motivo.",
         "Despues de mostrar los horarios libres, esperar a que el paciente elija uno; "
-        "solo entonces solicitar create_appointment. El backend preguntara el motivo "
-        "antes de ejecutarla.",
+        "solo entonces solicitar create_appointment. Si el paciente no tiene nombre "
+        "registrado, el backend lo preguntara y despues solicitara el motivo antes de "
+        "ejecutarla.",
+        "Cuando el backend muestre horarios disponibles, no pidas directamente el nombre "
+        "ni el motivo y no vuelvas a consultar disponibilidad; espera la seleccion del "
+        "paciente.",
         "Nunca inventar un motivo ni usar un motivo predeterminado.",
         "Nunca cancelar ni reprogramar una cita sin confirmación explícita del paciente.",
         "Cuando el paciente pida horarios y dé una fecha o rango, usar check_availability.",
@@ -127,12 +166,14 @@ class ConversationService:
         tool_executor: ToolExecutor | None = None,
         timezone_name: str = "UTC",
         now: datetime | NowSource | None = None,
+        reason_evaluator: AppointmentReasonEvaluator | None = None,
     ) -> None:
         self.database = database
         self.llm_provider = llm_provider
         self.max_history_messages = max_history_messages
         self.llm_configuration_error = llm_configuration_error
         self.tool_executor = tool_executor
+        self.reason_evaluator = reason_evaluator
         try:
             self._timezone = ZoneInfo(timezone_name)
         except (TypeError, ZoneInfoNotFoundError) as error:
@@ -234,6 +275,9 @@ class ConversationService:
         availability_reply = await self._resolve_date_only_availability(context)
         if availability_reply is not None:
             return availability_reply
+        pending_reply = await self._resolve_pending_appointment_availability(context)
+        if pending_reply is not None:
+            return pending_reply
         messages = self.build_chat_messages(context)
         if self.agent_orchestrator is not None:
             reply = await self.agent_orchestrator.run(
@@ -277,11 +321,53 @@ class ConversationService:
                 patient_scope=context.patient_scope,
             )
         )
+        self._clear_pending_appointment_availability(context.conversation_id)
+        if result.ok and isinstance(result.data, CheckAvailabilityOutput):
+            pending_availability = PendingAppointmentAvailability.from_slots(
+                request,
+                result.data.slots,
+                timezone=self._timezone,
+                now=self._current_local_time(),
+            )
+            if pending_availability is not None:
+                self._save_pending_appointment_availability(
+                    context.conversation_id,
+                    pending_availability,
+                )
         return format_availability_reply(
             result,
             request,
             timezone=self._timezone,
         )
+
+    async def _resolve_pending_appointment_availability(
+        self,
+        context: ConversationContext,
+    ) -> str | None:
+        pending_availability = self._load_pending_appointment_availability(
+            context.conversation_id,
+        )
+        if pending_availability is None:
+            return None
+        if pending_availability.is_expired_at(self._current_local_time()):
+            self._clear_pending_appointment_availability(context.conversation_id)
+            return APPOINTMENT_AVAILABILITY_EXPIRED_REPLY
+
+        selected_slot = pending_availability.matching_slot(
+            context.incoming_text,
+            timezone=self._timezone,
+        )
+        if selected_slot is None:
+            return APPOINTMENT_SLOT_SELECTION_REPLY
+
+        pending_reason = PendingAppointmentReason.from_start_at(
+            selected_slot.start_at,
+            call_id=f"backend-availability-{context.incoming_message_id}",
+            source_message_id=context.incoming_message_id,
+        )
+        reply = self._start_pending_appointment_reason(context, pending_reason)
+        self._clear_pending_appointment_availability(context.conversation_id)
+        return reply
 
     async def _handle_mutation_request(
         self,
@@ -294,11 +380,7 @@ class ConversationService:
             source_message_id=context.incoming_message_id,
         )
         if pending_reason is not None:
-            self._save_pending_appointment_reason(
-                context.conversation_id,
-                pending_reason,
-            )
-            return "Antes de agendar tu cita, ¿cuál es el motivo de la consulta?"
+            return self._start_pending_appointment_reason(context, pending_reason)
         return await self._request_appointment_confirmation(
             context,
             tool_call,
@@ -396,18 +478,81 @@ class ConversationService:
                 "Solicítala nuevamente indicando el horario."
             )
         if pending_reason.source_message_id == context.incoming_message_id:
-            return "Antes de agendar tu cita, ¿cuál es el motivo de la consulta?"
+            return self._appointment_data_reply(context)
 
-        reason = " ".join(context.incoming_text.split())
-        if not reason:
-            return "Antes de agendar tu cita, ¿cuál es el motivo de la consulta?"
+        patient_name = self._load_patient_name(context.patient_id)
+        if pending_reason.name_message_id == context.incoming_message_id:
+            if patient_name is not None:
+                return APPOINTMENT_REASON_REPLY
 
+        if patient_name is None:
+            normalized_name = _normalize_patient_name(context.incoming_text)
+            if normalized_name is None:
+                return APPOINTMENT_NAME_CLARIFICATION_REPLY
+            named_pending_reason = pending_reason.with_name_message(
+                context.incoming_message_id
+            )
+            self._save_patient_name_and_pending_reason(
+                context,
+                normalized_name,
+                named_pending_reason,
+            )
+            return APPOINTMENT_REASON_REPLY
+
+        evaluated_at = utc_now()
+        validation = validate_appointment_reason(context.incoming_text)
+        if not validation.accepted:
+            evaluation = local_appointment_reason_evaluation(
+                validation,
+                evaluated_at=evaluated_at,
+            )
+        elif self.reason_evaluator is None:
+            evaluation = local_appointment_reason_evaluation(
+                validation,
+                evaluated_at=evaluated_at,
+            )
+        else:
+            try:
+                evaluation = await self.reason_evaluator.evaluate(
+                    validation.normalized_text,
+                    evaluated_at=evaluated_at,
+                )
+                if not isinstance(evaluation, AppointmentReasonEvaluation):
+                    raise TypeError("El evaluador devolvio un resultado invalido")
+            except Exception as error:
+                self.record_llm_failure(
+                    context,
+                    error_type=type(error).__name__,
+                )
+                evaluation = failed_appointment_reason_evaluation(
+                    validation,
+                    evaluated_at=evaluated_at,
+                )
+
+        evaluated_pending_reason = pending_reason.with_evaluation(evaluation)
+        self._save_pending_appointment_reason(
+            context.conversation_id,
+            evaluated_pending_reason,
+        )
+        if (
+            evaluation.quality is AppointmentReasonQuality.OUT_OF_SCOPE
+            or evaluation.category is AppointmentReasonCategory.OUT_OF_SCOPE
+        ):
+            return APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY
+        if not evaluation.accepted:
+            return APPOINTMENT_REASON_CLARIFICATION_REPLY
+
+        self._save_last_appointment_reason_evaluation(
+            context.conversation_id,
+            attempt_count=evaluated_pending_reason.attempt_count,
+            evaluation=evaluation,
+        )
         self._clear_pending_appointment_reason(context.conversation_id)
         if self.agent_orchestrator is None:
             return CONTROLLED_FALLBACK_REPLY
 
         result = await self.agent_orchestrator.execute_confirmed_tool(
-            tool_call=pending_reason.to_tool_call(reason),
+            tool_call=pending_reason.to_tool_call(validation.normalized_text),
             patient_scope=context.patient_scope,
             incoming_message_id=context.incoming_message_id,
             on_appointment_event=appointment_event_sink,
@@ -464,6 +609,24 @@ class ConversationService:
             context.get(PENDING_APPOINTMENT_REASON_KEY)
         )
 
+    def _load_pending_appointment_availability(
+        self,
+        conversation_id: int,
+    ) -> PendingAppointmentAvailability | None:
+        with self.database.transaction() as connection:
+            conversation = self.conversations.get_by_id(connection, conversation_id)
+        if conversation is None:
+            return None
+        try:
+            context = json.loads(conversation.context_json)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(context, dict):
+            return None
+        return PendingAppointmentAvailability.from_context(
+            context.get(PENDING_APPOINTMENT_AVAILABILITY_KEY)
+        )
+
     def _save_pending_appointment_action(
         self,
         conversation_id: int,
@@ -483,6 +646,114 @@ class ConversationService:
 
     def _clear_pending_appointment_reason(self, conversation_id: int) -> None:
         self._update_appointment_reason_context(conversation_id, None)
+
+    def _start_pending_appointment_reason(
+        self,
+        context: ConversationContext,
+        pending_reason: PendingAppointmentReason,
+    ) -> str:
+        self._clear_last_appointment_reason_evaluation(context.conversation_id)
+        self._save_pending_appointment_reason(
+            context.conversation_id,
+            pending_reason,
+        )
+        return self._appointment_data_reply(context)
+
+    def _save_pending_appointment_availability(
+        self,
+        conversation_id: int,
+        availability: PendingAppointmentAvailability,
+    ) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            PENDING_APPOINTMENT_AVAILABILITY_KEY,
+            availability.to_context(),
+        )
+
+    def _clear_pending_appointment_availability(self, conversation_id: int) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            PENDING_APPOINTMENT_AVAILABILITY_KEY,
+            None,
+        )
+
+    def _appointment_data_reply(self, context: ConversationContext) -> str:
+        if self._load_patient_name(context.patient_id) is None:
+            return APPOINTMENT_NAME_REPLY
+        return APPOINTMENT_REASON_REPLY
+
+    def _load_patient_name(self, patient_id: int) -> str | None:
+        with self.database.transaction() as connection:
+            patient = self.patients.get_by_id(connection, patient_id)
+        if patient is None or not isinstance(patient.name, str):
+            return None
+        normalized_name = " ".join(patient.name.split())
+        return normalized_name or None
+
+    def _save_patient_name_and_pending_reason(
+        self,
+        context: ConversationContext,
+        name: str,
+        pending_reason: PendingAppointmentReason,
+    ) -> None:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            patient = self.patients.get_by_id(
+                connection,
+                context.patient_id,
+            )
+            if patient is None:
+                raise RuntimeError("No se encontro el paciente activo")
+            self.patients.update_name(
+                connection,
+                context.patient_id,
+                name,
+                now,
+            )
+            conversation = self.conversations.get_by_id(
+                connection,
+                context.conversation_id,
+            )
+            if conversation is None:
+                raise RuntimeError("No se encontro la conversacion activa")
+            try:
+                conversation_context = json.loads(conversation.context_json)
+            except json.JSONDecodeError:
+                conversation_context = {}
+            if not isinstance(conversation_context, dict):
+                conversation_context = {}
+            conversation_context[PENDING_APPOINTMENT_REASON_KEY] = (
+                pending_reason.to_context()
+            )
+            self.conversations.update_context(
+                connection,
+                context.conversation_id,
+                json.dumps(conversation_context, ensure_ascii=False, sort_keys=True),
+                now,
+            )
+
+    def _save_last_appointment_reason_evaluation(
+        self,
+        conversation_id: int,
+        *,
+        attempt_count: int,
+        evaluation: AppointmentReasonEvaluation,
+    ) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            LAST_APPOINTMENT_REASON_EVALUATION_KEY,
+            {
+                "attempt_count": attempt_count,
+                "evaluation": evaluation.to_context(),
+            },
+        )
+
+    def _clear_last_appointment_reason_evaluation(self, conversation_id: int) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            LAST_APPOINTMENT_REASON_EVALUATION_KEY,
+            None,
+        )
 
     def _update_appointment_action_context(
         self,
@@ -754,3 +1025,14 @@ def _is_internal_id_header(header: str) -> bool:
         "identificador",
         "identificador interno",
     }
+
+
+def _normalize_patient_name(value: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    if not 2 <= len(normalized) <= 120:
+        return None
+    if not re.search(r"[^\W\d_]", normalized, flags=re.UNICODE):
+        return None
+    return normalized

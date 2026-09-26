@@ -32,6 +32,7 @@ El adaptador compatible con OpenAI usa estas variables adicionales:
 - `LLM_MAX_OUTPUT_TOKENS=500`
 - `LLM_MAX_RESPONSE_CHARACTERS=4000`
 - `LLM_MAX_TOOL_ITERATIONS=3`
+- `LLM_REASON_EVALUATION_ENABLED=true`
 
 Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
 `LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
@@ -45,6 +46,17 @@ semantica siguen fuera del alcance. La suite automatizada usa proveedores falsos
 no requiere credenciales externas. Las respuestas con varias citas se envian como
 listas simples compatibles con WhatsApp; las tablas Markdown se convierten antes
 de enviarse.
+
+Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
+objeto JSON estructurado antes de crear la cita. La respuesta debe contener
+`quality`, `category`, `priority_signals` y `confidence`; el backend valida esos
+campos y exige una confianza minima de `0.75`. El LLM no proporciona el motivo ni
+ejecuta la cita. Si la evaluacion no es valida, la solicitud permanece pendiente y
+se pide una aclaracion. Las señales de prioridad se registran como metadata y no
+activan triage clinico automatico en este MVP. Sus descripciones internas usan
+lenguaje operativo, no diagnosticos como glaucoma o desprendimiento, y pueden
+acompañar la notificacion al doctor despues de una cita creada correctamente. Antes
+de usar estas señales con pacientes reales hace falta una politica clinica explicita.
 
 Para activar Google Calendar para todas las operaciones, cambia
 `CALENDAR_PROVIDER=google` y configura:
@@ -86,10 +98,14 @@ explicita del paciente. La primera solicitud no modifica la agenda y muestra la
 fecha, el horario y el motivo de la cita sin exponer su ID interno; la operacion se
 ejecuta solamente despues de recibir `Si` y expira despues de 10 minutos.
 
-Las solicitudes para crear una cita requieren primero el motivo expresado por el
-paciente. El backend conserva el horario, pregunta el motivo y crea la cita solamente
-despues del siguiente mensaje; no usa el motivo sugerido por el LLM como valor
-predeterminado.
+Las solicitudes para crear una cita requieren el nombre del paciente y el motivo
+expresado por el paciente. Si no hay nombre registrado, el backend conserva el
+horario, solicita primero el nombre, lo guarda en `patients.name` y despues pregunta
+el motivo. La cita se crea solamente despues de un motivo legible; no usa el motivo
+sugerido por el LLM como valor predeterminado. Si el mensaje es evidentemente
+ilegible, conserva la solicitud pendiente y pide al paciente que describa nuevamente
+el motivo. El texto normalizado del paciente sigue siendo el unico valor guardado
+como motivo de la cita.
 
 Si el paciente solicita agendar para un dia sin indicar una hora exacta, el backend
 consulta primero los espacios libres de ese dia y los muestra como una lista. La cita

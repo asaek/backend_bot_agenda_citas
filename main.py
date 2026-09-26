@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from calendar_domain import CalendarProvider
 from conversation_service import (
     CONTROLLED_FALLBACK_REPLY,
@@ -57,6 +58,7 @@ DEFAULT_CALENDAR_TIMEZONE = "UTC"
 DEFAULT_BUSINESS_WORKDAYS = "0,1,2,3,4"
 DEFAULT_BUSINESS_HOURS_START = "09:00"
 DEFAULT_BUSINESS_HOURS_END = "17:00"
+DEFAULT_LLM_REASON_EVALUATION_ENABLED = True
 
 
 def create_calendar_provider(
@@ -210,6 +212,14 @@ def create_conversation_service(
             timezone_name=conversation_timezone,
             now=conversation_now,
         )
+    reason_evaluator = (
+        StructuredAppointmentReasonEvaluator(llm_provider)
+        if _environment_flag(
+            os.getenv("LLM_REASON_EVALUATION_ENABLED"),
+            default=DEFAULT_LLM_REASON_EVALUATION_ENABLED,
+        )
+        else None
+    )
     return ConversationService(
         database,
         llm_provider=llm_provider,
@@ -218,7 +228,14 @@ def create_conversation_service(
         tool_executor=resolved_tool_executor,
         timezone_name=conversation_timezone,
         now=conversation_now,
+        reason_evaluator=reason_evaluator,
     )
+
+
+def _environment_flag(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def create_doctor_notification_service(

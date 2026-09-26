@@ -7,6 +7,11 @@ import json
 import re
 import unicodedata
 
+from appointment_reason_evaluation import (
+    PRIORITY_SIGNAL_MESSAGES,
+    priority_signal_messages,
+    priority_signals_for_text,
+)
 from calendar_domain import AppointmentStatus
 from llm_provider import ChatMessage, LLMProvider, ToolCall
 from notification_domain import (
@@ -371,6 +376,7 @@ def _sanitize_priority_signals(
     for value in values:
         if not isinstance(value, str):
             continue
+        value = PRIORITY_SIGNAL_MESSAGES.get(value, value)
         text = _compact_text(_redact_internal_values(value, event))
         if (
             not text
@@ -387,27 +393,12 @@ def _sanitize_priority_signals(
 
 
 def _detect_priority_signals(history: Sequence[MessageRecord]) -> tuple[str, ...]:
-    incoming_text = [
-        _policy_text(message.text)
+    incoming_text = " ".join(
+        message.text
         for message in history
         if message.direction == "incoming"
-    ]
-    signals: list[str] = []
-    combined = " ".join(incoming_text)
-    if _has_non_negated(combined, r"\b(?:urgente|urgencia|emergencia|prioridad)\b"):
-        signals.append("Solicitud de atencion prioritaria.")
-    if _has_non_negated(
-        combined,
-        r"\b(?:no puedo ver|perdida de vision|perdida visual|vision muy reducida)\b",
-    ):
-        signals.append("Refiere alteracion visual.")
-    if _has_non_negated(combined, r"\bdolor\b"):
-        signals.append("Refiere dolor ocular.")
-    if _has_non_negated(combined, r"\b(?:golpe|trauma|traumatismo)\b"):
-        signals.append("Refiere traumatismo ocular.")
-    if _has_non_negated(combined, r"\b(?:sangrado|sangre en el ojo)\b"):
-        signals.append("Refiere sangrado ocular.")
-    return tuple(signals)
+    )
+    return priority_signal_messages(priority_signals_for_text(incoming_text))
 
 
 def _merge_signals(
@@ -501,15 +492,6 @@ def _contains_unsafe_clinical_language(value: str) -> bool:
         r"recomendacion clinica)\b",
     )
     return any(re.search(pattern, normalized) for pattern in patterns)
-
-
-def _has_non_negated(value: str, pattern: str) -> bool:
-    if not re.search(pattern, value):
-        return False
-    if re.search(r"\b(?:no|sin)\s+(?:es\s+)?(?:urgente|urgencia|dolor)\b", value):
-        if "dolor" in pattern or "urg" in pattern:
-            return False
-    return True
 
 
 def _event_name(value: AppointmentNotificationType) -> str:

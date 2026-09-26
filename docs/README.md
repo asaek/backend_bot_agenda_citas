@@ -35,6 +35,11 @@ esten aprobados.
 - [Verificacion del webhook y notificaciones al doctor](./verification/2026-09-22-doctor-notifications-webhook.md)
 - [Verificacion de sincronizacion de Google Calendar](./verification/2026-09-24-google-calendar-event-sync.md)
 - [Verificacion del motivo antes de agendar](./verification/2026-09-24-appointment-reason.md)
+- [Verificacion de validacion minima del motivo](./verification/2026-09-25-appointment-reason-validation.md)
+- [Verificacion de evaluacion estructurada del motivo](./verification/2026-09-25-structured-reason-evaluation.md)
+- [Verificacion de señales de prioridad y flujo del motivo](./verification/2026-09-25-priority-signals-and-reason-flow.md)
+- [Verificacion del nombre del paciente antes de agendar](./verification/2026-09-26-patient-name-before-booking.md)
+- [Verificacion de seleccion de horario controlada por el backend](./verification/2026-09-26-backend-slot-selection.md)
 - [Verificacion de horarios libres antes de agendar](./verification/2026-09-24-date-only-availability.md)
 - [Verificacion de variantes de lenguaje para horarios](./verification/2026-09-25-date-only-availability-language.md)
 
@@ -46,3 +51,6 @@ esten aprobados.
 - [014 - Horarios libres antes de elegir una cita](./specs/014-date-only-availability/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
+- [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
+- [ADR 0028 - Nombre del paciente antes de agendar](./decisions/0028-patient-name-before-booking.md)
+- [ADR 0029 - Seleccion de disponibilidad controlada por el backend](./decisions/0029-backend-owned-availability-selection.md)

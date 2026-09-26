@@ -19,3 +19,42 @@
 - [x] Probar continuidad despues de reiniciar `ConversationService`.
 - [x] Ejecutar la suite completa en el mirror de Raspberry Pi.
 - [x] Verificar health check y ambos metodos del webhook en el mirror.
+
+## Corte 4 - Calidad minima del motivo
+
+- [x] Crear un validador independiente para normalizar y evaluar el texto.
+- [x] Rechazar entradas vacias, no textuales, demasiado cortas o evidentemente
+      ilegibles.
+- [x] Mantener la solicitud pendiente cuando el motivo sea rechazado.
+- [x] Permitir continuar con un motivo valido posterior sin repetir el horario.
+- [x] Cubrir el caso `jnbajnbsdijkqnbwikbdqwd` sin crear una cita.
+- [x] Ejecutar la suite completa y verificar el webhook en el mirror de Raspberry Pi.
+
+## Corte 5 - Evaluacion estructurada y estado enriquecido
+
+- [x] Definir enums para calidad, categoria y señales de prioridad.
+- [x] Validar la respuesta JSON del LLM sin aceptar motivos generados.
+- [x] Aplicar confianza minima y degradar respuestas invalidas a aclaracion.
+- [x] Persistir intentos, resultado, categoria, señales y fecha de evaluacion.
+- [x] Conservar el texto normalizado del paciente como unico `reason` de la cita.
+- [x] Mantener las señales de prioridad como metadata sin activar triage clinico.
+
+## Corte 6 - Señales de prioridad sin diagnostico
+
+- [x] Definir codigos y descripciones operativas para perdida visual, dolor, trauma,
+      exposicion quimica, sangrado, destellos y alteraciones visuales importantes.
+- [x] Filtrar señales no soportadas o diagnosticos enviados por el LLM.
+- [x] Reutilizar las descripciones seguras al componer la notificacion al doctor.
+- [x] Rechazar referencias vagas como `Lo de siempre` sin perder el horario pendiente.
+- [x] Cubrir entradas invalidas, motivos validos, horario de la 1 pm, una señal de
+      prioridad y ausencia de notificacion mientras el motivo sea invalido.
+- [x] Documentar que la politica clinica para pacientes reales queda pendiente.
+
+## Corte 7 - Nombre del paciente antes del motivo
+
+- [x] Solicitar el nombre cuando el paciente no tenga uno registrado.
+- [x] Persistir el nombre en `patients.name` junto con el estado pendiente.
+- [x] Evitar que un reintento del mensaje del nombre se procese como motivo.
+- [x] Cubrir el flujo nombre, motivo, cita y notificacion en pruebas.
+- [x] Ejecutar la suite completa y verificar health check y ambos metodos del webhook
+      en el mirror de Raspberry Pi.

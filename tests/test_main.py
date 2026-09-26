@@ -13,6 +13,7 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
+from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from conversation_service import (
     CONTROLLED_FALLBACK_REPLY,
     ConversationService,
@@ -223,6 +224,34 @@ class WebhookTests(unittest.TestCase):
             prompt,
         )
 
+    def test_conversation_service_enables_structured_reason_evaluation_by_default(self) -> None:
+        executor = ToolExecutor(
+            provider=FakeCalendarProvider(),
+            business_hours=BusinessHours(
+                timezone_name="UTC",
+                windows_by_weekday={
+                    weekday: (TimeWindow(time(9), time(17)),)
+                    for weekday in range(5)
+                },
+            ),
+            default_timezone="UTC",
+            now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_PATH": self.database_path,
+                "LLM_API_KEY": "test-key",
+                "LLM_MODEL": "test-model",
+            },
+            clear=True,
+        ):
+            with patch("main.create_llm_provider", return_value=FakeLLMProvider()):
+                service = create_conversation_service(executor)
+
+        self.assertIsInstance(service.reason_evaluator, StructuredAppointmentReasonEvaluator)
+
     @contextmanager
     def configured_runtime(
         self,
@@ -235,6 +264,7 @@ class WebhookTests(unittest.TestCase):
             "DATABASE_PATH": self.database_path,
             "LLM_API_KEY": "test-key",
             "LLM_MODEL": "test-model",
+            "LLM_REASON_EVALUATION_ENABLED": "false",
         }
         if environment is not None:
             runtime_environment.update(environment)
@@ -625,6 +655,10 @@ class WebhookTests(unittest.TestCase):
                     client,
                     self.text_payload(message_id="wamid.create", text="Agendar"),
                     self.text_payload(
+                        message_id="wamid.create-name",
+                        text="Ana Prueba",
+                    ),
+                    self.text_payload(
                         message_id="wamid.create-reason",
                         text="Revision",
                     ),
@@ -642,11 +676,12 @@ class WebhookTests(unittest.TestCase):
 
         self.assertEqual(
             [response.status_code for response in responses],
-            [200, 200, 200, 200, 200, 200],
+            [200, 200, 200, 200, 200, 200, 200],
         )
         self.assertEqual(
             [recipient for recipient, _ in fake_client.sent_messages],
             [
+                "5491100000000",
                 "5491100000000",
                 "5491100000000",
                 "5491100000001",
@@ -660,15 +695,16 @@ class WebhookTests(unittest.TestCase):
         )
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
         self.assertIn("Tipo de evento: Cita agendada", doctor_bodies[0])
+        self.assertIn("Nombre: Ana Prueba", doctor_bodies[0])
         self.assertIn("Tipo de evento: Cita modificada", doctor_bodies[1])
         self.assertIn("Hora: 11:00-11:30", doctor_bodies[1])
         self.assertIn("Tipo de evento: Cita cancelada", doctor_bodies[2])
-        self.assertIn("confirmas", fake_client.sent_messages[3][1].lower())
-        self.assertIn("confirmas", fake_client.sent_messages[6][1].lower())
-        self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[6][1])
-        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[6][1])
-        self.assertIn("Motivo: Revision", fake_client.sent_messages[6][1])
-        self.assertNotIn("appointment-1", fake_client.sent_messages[6][1])
+        self.assertIn("confirmas", fake_client.sent_messages[4][1].lower())
+        self.assertIn("confirmas", fake_client.sent_messages[7][1].lower())
+        self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[7][1])
+        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[7][1])
+        self.assertIn("Motivo: Revision", fake_client.sent_messages[7][1])
+        self.assertNotIn("appointment-1", fake_client.sent_messages[7][1])
         with open_database(self.database_path) as connection:
             notification_rows = connection.execute(
                 """
@@ -686,6 +722,62 @@ class WebhookTests(unittest.TestCase):
                 ("appointment_cancelled", "sent", 1),
             ],
         )
+
+    def test_invalid_appointment_reason_does_not_notify_the_doctor(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={
+                        "start_at": "2026-09-21T13:00:00",
+                        "reason": "Motivo inventado",
+                    },
+                    call_id="call-invalid-notification",
+                ),
+            )
+        )
+
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {
+                "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            },
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(
+                        message_id="wamid.invalid-notification-request",
+                        text="Agendame una cita a la 1 pm",
+                    ),
+                    self.text_payload(
+                        message_id="wamid.invalid-notification-name",
+                        text="Ana Prueba",
+                    ),
+                    self.text_payload(
+                        message_id="wamid.invalid-notification-reason",
+                        text="asdf",
+                    ),
+                )
+
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [200, 200, 200],
+        )
+        self.assertEqual(
+            [recipient for recipient, _ in fake_client.sent_messages],
+            ["5491100000000", "5491100000000", "5491100000000"],
+        )
+        with open_database(self.database_path) as connection:
+            notification_count = connection.execute(
+                "SELECT COUNT(*) FROM doctor_notifications"
+            ).fetchone()[0]
+        self.assertEqual(notification_count, 0)
+        self.assertEqual(app.state.calendar_provider.appointments, ())
 
     def test_doctor_failure_does_not_change_successful_patient_reply(self) -> None:
         self.set_fixed_calendar_runtime()
@@ -717,6 +809,13 @@ class WebhookTests(unittest.TestCase):
                     "/webhook/whatsapp",
                     json=self.text_payload(message_id="wamid.doctor-failure"),
                 )
+                name_response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(
+                        message_id="wamid.doctor-failure-name",
+                        text="Ana Prueba",
+                    ),
+                )
                 reason_response = client.post(
                     "/webhook/whatsapp",
                     json=self.text_payload(
@@ -726,10 +825,16 @@ class WebhookTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(name_response.status_code, 200)
         self.assertEqual(reason_response.status_code, 200)
         self.assertEqual(
             [recipient for recipient, _ in fake_client.sent_messages],
-            ["5491100000000", "5491100000000", "5491100000002"],
+            [
+                "5491100000000",
+                "5491100000000",
+                "5491100000000",
+                "5491100000002",
+            ],
         )
         with open_database(self.database_path) as connection:
             patient_reply = connection.execute(
@@ -785,6 +890,13 @@ class WebhookTests(unittest.TestCase):
                     "/webhook/whatsapp",
                     json=self.text_payload(message_id="wamid.summary-failure"),
                 )
+                name_response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(
+                        message_id="wamid.summary-failure-name",
+                        text="Ana Prueba",
+                    ),
+                )
                 reason_response = client.post(
                     "/webhook/whatsapp",
                     json=self.text_payload(
@@ -794,10 +906,11 @@ class WebhookTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(name_response.status_code, 200)
         self.assertEqual(reason_response.status_code, 200)
         self.assertEqual(
             [recipient for recipient, _ in fake_client.sent_messages],
-            ["5491100000000", "5491100000000"],
+            ["5491100000000", "5491100000000", "5491100000000"],
         )
         with open_database(self.database_path) as connection:
             patient_reply = connection.execute(
@@ -834,6 +947,10 @@ class WebhookTests(unittest.TestCase):
             message_id="wamid.duplicate-reason",
             text="Revision",
         )
+        name_payload = self.text_payload(
+            message_id="wamid.duplicate-name",
+            text="Ana Prueba",
+        )
 
         with self.configured_runtime(
             fake_client,
@@ -845,12 +962,21 @@ class WebhookTests(unittest.TestCase):
         ):
             with TestClient(app) as client:
                 responses = self.post_messages(client, payload, payload)
+                responses.extend(self.post_messages(client, name_payload))
                 responses.extend(self.post_messages(client, reason_payload))
 
-        self.assertEqual([response.status_code for response in responses], [200, 200, 200])
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [200, 200, 200, 200],
+        )
         self.assertEqual(
             [recipient for recipient, _ in fake_client.sent_messages],
-            ["5491100000000", "5491100000000", "5491100000001"],
+            [
+                "5491100000000",
+                "5491100000000",
+                "5491100000000",
+                "5491100000001",
+            ],
         )
         self.assertEqual(tool_provider.call_count, 2)
         with open_database(self.database_path) as connection:

@@ -186,6 +186,22 @@ class PatientRepository:
             raise RuntimeError("No se pudo recuperar el paciente creado")
         return _patient_from_row(result)
 
+    def update_name(
+        self,
+        connection: sqlite3.Connection,
+        patient_id: int,
+        name: str,
+        now: str,
+    ) -> PatientRecord:
+        connection.execute(
+            "UPDATE patients SET name = ?, last_seen_at = ? WHERE id = ?",
+            (name, now, patient_id),
+        )
+        patient = self.get_by_id(connection, patient_id)
+        if patient is None:
+            raise RuntimeError("No se pudo recuperar el paciente actualizado")
+        return patient
+
 
 class ConversationRepository:
     def get_by_id(

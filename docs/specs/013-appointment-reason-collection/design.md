@@ -17,13 +17,22 @@ LLM solicita create_appointment
 ConversationService intercepta la mutacion
     |
     +-- guarda el horario en conversations.context_json
+    +-- si falta el nombre, lo pregunta y guarda el siguiente mensaje en patients
     +-- pregunta el motivo, sin tocar el calendario
     |
     v
 Siguiente mensaje del paciente
     |
     v
-ConversationService reconstruye create_appointment con el motivo recibido
+Validador local de calidad minima
+    |
+    +-- texto ilegible o ambiguo --> conserva la solicitud y pide aclaracion
+    |
+    +-- texto aceptable --> evaluacion estructurada
+                              |
+                              +-- needs_clarification/out_of_scope --> conserva estado
+                              |
+                              +-- valid --> registra metadata y reconstruye create_appointment
     |
     v
 ToolExecutor -> CalendarProvider
@@ -39,20 +48,48 @@ Respuesta al paciente y notificacion posterior al doctor
 el LLM haya enviado un valor para `reason`. Ese valor se descarta porque no es una
 prueba de que el paciente lo haya expresado.
 
-`PendingAppointmentReason` conserva el `start_at`, el ID de la llamada, el mensaje
-entrante que inicio la solicitud y los tiempos de creacion y expiracion. Vincular el
-estado al mensaje evita crear la cita con el mismo texto si WhatsApp reintenta la
-entrega de la pregunta. El estado se guarda bajo
+`PendingAppointmentReason` conserva el `start_at`, el ID de la llamada, los mensajes
+entrantes que iniciaron la solicitud y entregaron el nombre, y los tiempos de
+creacion y expiracion. Vincular el estado a esos mensajes evita crear la cita con el
+mismo texto si WhatsApp reintenta la entrega de una pregunta. El estado se guarda bajo
 `pending_appointment_reason` dentro de `conversations.context_json`, junto con
-cualquier otro contexto existente.
+cualquier otro contexto existente. Tambien conserva `attempt_count` y
+`last_evaluation` mientras espera una respuesta.
 
 ## Resolucion
 
-En el siguiente mensaje, `ConversationService` toma el texto entrante como motivo,
-normaliza espacios y limpia el estado pendiente antes de ejecutar la llamada
-reconstruida. La ejecucion usa el `PatientScope` resuelto por el backend. Si el
-proveedor devuelve un error, se devuelve el error publico y no se emite un evento de
-cita.
+Si el paciente no tiene nombre, `ConversationService` toma el siguiente mensaje,
+normaliza espacios, lo valida como nombre y lo persiste en `patients.name` junto con
+el marcador del mensaje que lo entrego. El reintento de ese mensaje solo devuelve la
+pregunta por el motivo. Despues, `ConversationService` toma el siguiente mensaje como
+motivo, lo pasa por `appointment_reason_validation.py` y normaliza espacios sin
+reemplazar el contenido del paciente. Si el texto es evidentemente ilegible, devuelve
+una solicitud de aclaracion y conserva el estado pendiente, por lo que no toca el
+calendario ni emite una notificacion.
+
+Para texto legible, `StructuredAppointmentReasonEvaluator` solicita un unico objeto
+JSON al proveedor LLM. El backend valida enums, confianza y señales permitidas; una
+respuesta invalida se degrada a `needs_clarification`. El LLM solo clasifica y nunca
+proporciona el `reason`. Las señales detectadas localmente se combinan con las
+señales permitidas del LLM, sin aceptar diagnosticos ni texto libre. Los codigos se
+convierten mediante un catalogo compartido en mensajes operativos, por ejemplo
+`El paciente refiere dolor ocular que podria requerir atencion prioritaria.`
+
+Cada intento actualiza el estado pendiente antes de responder. Un resultado
+`needs_clarification` o `out_of_scope` lo conserva. Un resultado `valid` con
+confianza minima registra `last_appointment_reason_evaluation`, limpia el estado
+pendiente y ejecuta la llamada reconstruida con el texto normalizado del paciente.
+La politica del MVP permite continuar aun con señales de prioridad, que quedan
+registradas y pueden incluirse en la notificacion interna posterior. La ejecucion usa el `PatientScope`
+resuelto por el backend. Si el proveedor devuelve un error, se devuelve el error
+publico y no se emite un evento de cita.
+
+El validador aplica solamente reglas de calidad minima: no usa una lista cerrada de
+sintomas y no exige un diagnostico. La evaluacion usa categorias operativas, no
+clasificacion clinica. Las señales de prioridad son indicadores internos, se
+describen sin nombres de enfermedades y no representan diagnosticos ni instrucciones
+de atencion. Antes de usar el sistema con pacientes reales, una politica clinica
+debe definir como se revisan y atienden.
 
 La respuesta de exito se construye con la cita creada y muestra fecha, hora y motivo.
 No se muestra el ID interno. La respuesta se persiste antes de intentar la

@@ -116,7 +116,11 @@ Para una solicitud reconocible de agendamiento, incluidas expresiones como `saca
 que contiene un dia pero no una hora, `ConversationService` consulta primero
 `check_availability` para todo ese dia. Muestra los slots libres como una lista unica y
 espera la seleccion del paciente; no crea una cita ni pregunta el motivo en ese turno.
-Las solicitudes con hora exacta continúan por el flujo normal.
+La fecha y los slots ofrecidos quedan en `conversations.context_json` durante 10 minutos.
+Cuando el paciente elige una hora, el backend la valida contra ese estado y crea la
+solicitud pendiente de cita directamente, por lo que las preguntas de nombre y motivo
+no dependen de una respuesta textual del LLM. Las solicitudes con hora exacta continúan
+por el flujo normal y conservan la interceptacion de `create_appointment` como defensa.
 
 ### Modelo de dominio de citas
 
@@ -167,8 +171,9 @@ por destinatario y la integracion con el webhook.
 `DoctorNotificationService` carga el paciente y el historial persistido.
 `DoctorNotificationComposer` construye un unico cuerpo logico con el tipo de evento,
 los datos de la cita, el paciente, los ultimos 10 digitos del telefono, el resumen
-conversacional y las señales de prioridad disponibles. Ese cuerpo se entregara a
-cada doctor configurado.
+conversacional y las señales de prioridad disponibles. Las señales usan un catalogo
+compartido de descripciones operativas y nunca incluyen diagnosticos. Ese cuerpo se
+entregara a cada doctor configurado.
 El resumen sera contenido de cada notificacion y no un disparador independiente.
 
 La composicion usa `generate_text()` con un prompt interno sin herramientas. El
@@ -220,14 +225,19 @@ producir un evento de cita y una notificacion al doctor.
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
 `create_appointment` antes de `ToolExecutor`. `ConversationService` guarda el
-horario en `conversations.context_json`, pregunta el motivo y descarta el valor que
-el LLM haya propuesto. El siguiente mensaje no vacio del paciente se normaliza solo
-en espacios y se usa como `reason` para ejecutar la cita.
+horario en `conversations.context_json`, solicita el nombre si falta en `patients`,
+y despues pregunta el motivo. El valor que el LLM haya propuesto se descarta. El
+mensaje que entrega el nombre queda marcado en el estado pendiente para que un
+reintento no se use como motivo. El siguiente mensaje de motivo se normaliza solo en
+espacios y se usa como `reason` para ejecutar la cita; referencias vagas como `Lo de
+siempre` se conservan pendientes y solicitan aclaracion.
 
 La primera pregunta no modifica la agenda ni genera eventos. Una creacion exitosa
 posterior conserva el mismo flujo de respuesta, persistencia y notificacion al
-doctor; una solicitud vencida despues de 10 minutos se limpia sin tocar el
-proveedor.
+doctor. Las señales de prioridad se derivan de codigos limitados, se registran en la
+evaluacion y se convierten en lenguaje operativo sin diagnosticos antes de la
+notificacion. Una solicitud vencida despues de 10 minutos se limpia sin tocar el
+proveedor. La politica clinica para pacientes reales permanece fuera del alcance.
 
 ### LLMProvider y agente LLM basico
 

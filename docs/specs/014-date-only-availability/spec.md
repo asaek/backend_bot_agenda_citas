@@ -2,9 +2,12 @@
 
 ## Estado
 
-Verificado. La evidencia de ejecucion se conserva en
+Verificado. El backend conserva los horarios ofrecidos, valida la seleccion del
+paciente y transfiere el flujo directamente a la recoleccion de nombre y motivo. La
+evidencia de ejecucion se conserva en
 `docs/verification/2026-09-24-date-only-availability.md` y
-`docs/verification/2026-09-25-date-only-availability-language.md`.
+`docs/verification/2026-09-25-date-only-availability-language.md`, además de
+`docs/verification/2026-09-26-backend-slot-selection.md`.
 
 ## Objetivo
 
@@ -19,7 +22,10 @@ La funcionalidad cubre:
   de la semana sin hora exacta.
 - Consulta de disponibilidad para el dia completo mediante `ToolExecutor`.
 - Presentacion de horarios de 30 minutos sin duplicarlos por calendario.
+- Persistencia de la fecha, slots ofrecidos y expiracion en `conversations.context_json`.
+- Validacion backend de la seleccion del paciente contra los slots ofrecidos.
 - Espera de la seleccion del paciente antes de iniciar la creacion.
+- Transferencia directa a la solicitud controlada de nombre y motivo sin invocar al LLM.
 - Conservacion del flujo existente cuando la hora ya fue indicada.
 
 ## Requisitos funcionales
@@ -41,8 +47,17 @@ hasta que el paciente elija un horario.
 
 ### RF-1404 - Hora exacta
 
-Una solicitud que ya contenga una hora exacta no debe ser interceptada por este flujo;
+Una solicitud inicial que ya contenga una hora exacta no debe ser interceptada por este flujo;
 debe continuar hacia la creacion y la recoleccion obligatoria del motivo.
+
+### RF-1405 - Seleccion controlada
+
+Despues de mostrar horarios, el backend debe conservar la fecha y los slots ofrecidos
+en `conversations.context_json` durante 10 minutos. Una hora expresada por el paciente
+solo es valida si coincide con uno de esos slots. Una seleccion valida debe crear el
+estado pendiente de la cita y continuar con las preguntas fijas de nombre y motivo sin
+consultar al LLM. Una seleccion invalida debe conservar los slots y pedir que elija uno
+de la lista.
 
 ## Criterios de aceptacion
 
@@ -53,9 +68,14 @@ debe continuar hacia la creacion y la recoleccion obligatoria del motivo.
 5. `Agendame una cita para manana a las 11:30` conserva el flujo normal.
 6. Variantes equivalentes como `sacar cita` tambien consultan la disponibilidad sin
    invocar al LLM.
+7. `Hola quisiera agendar una cita para el lunes`, `damela a las 10 am` y `Siento rara
+   la vista` solicitan el motivo una sola vez y crean una sola cita con ese texto.
+8. La seleccion valida no invoca al LLM, conserva el estado entre mensajes y elimina el
+   estado de disponibilidad despues de iniciar la recoleccion de datos.
+9. Una hora no ofrecida, una solicitud sin hora o una disponibilidad vencida no crea la
+   cita ni pierde los controles del backend.
 
 ## Fuera del alcance
 
 - Interpretacion de fechas arbitrarias no reconocidas por el detector.
-- Seleccion automatica de un horario por parte del backend.
 - Confirmacion adicional despues de que el paciente elija un horario.
