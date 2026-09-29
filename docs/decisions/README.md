@@ -38,3 +38,4 @@ indique cual decision anterior queda obsoleta.
 - [0027 - Señales de prioridad sin diagnostico](./0027-priority-signals-without-diagnosis.md)
 - [0028 - Nombre del paciente antes de agendar](./0028-patient-name-before-booking.md)
 - [0029 - Seleccion de disponibilidad controlada por el backend](./0029-backend-owned-availability-selection.md)
+- [0030 - Continuacion de fecha de reserva controlada por el backend](./0030-backend-owned-booking-date.md)

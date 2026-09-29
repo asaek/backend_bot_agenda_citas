@@ -43,6 +43,7 @@ class LLMFailureRecord:
     conversation_id: int
     incoming_message_id: int
     error_type: str
+    http_status_code: int | None
     created_at: str
 
 
@@ -415,14 +416,22 @@ class LLMFailureRepository:
         incoming_message_id: int,
         error_type: str,
         now: str,
+        http_status_code: int | None = None,
     ) -> LLMFailureRecord:
         cursor = connection.execute(
             """
             INSERT INTO llm_failures (
-                conversation_id, incoming_message_id, error_type, created_at
-            ) VALUES (?, ?, ?, ?)
+                conversation_id, incoming_message_id, error_type,
+                http_status_code, created_at
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (conversation_id, incoming_message_id, error_type, now),
+            (
+                conversation_id,
+                incoming_message_id,
+                error_type,
+                http_status_code,
+                now,
+            ),
         )
         row = connection.execute(
             "SELECT * FROM llm_failures WHERE id = ?",
@@ -435,6 +444,7 @@ class LLMFailureRepository:
             conversation_id=row["conversation_id"],
             incoming_message_id=row["incoming_message_id"],
             error_type=row["error_type"],
+            http_status_code=row["http_status_code"],
             created_at=row["created_at"],
         )
 

@@ -13,6 +13,8 @@ from tool_contracts import CheckAvailabilityOutput
 
 PENDING_APPOINTMENT_AVAILABILITY_KEY = "pending_appointment_availability"
 APPOINTMENT_AVAILABILITY_TTL = timedelta(minutes=10)
+PENDING_APPOINTMENT_DATE_KEY = "pending_appointment_date"
+APPOINTMENT_DATE_TTL = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +171,51 @@ class PendingAppointmentAvailability:
         return matching_slots[0] if len(matching_slots) == 1 else None
 
 
+@dataclass(frozen=True, slots=True)
+class PendingAppointmentDate:
+    """Estado temporal que espera la fecha de una nueva solicitud de cita."""
+
+    created_at: str
+    expires_at: str
+
+    def __post_init__(self) -> None:
+        _parse_timestamp(self.created_at)
+        _parse_timestamp(self.expires_at)
+
+    @classmethod
+    def start(cls, now: datetime) -> "PendingAppointmentDate":
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now debe incluir una zona horaria")
+        return cls(
+            created_at=now.isoformat(),
+            expires_at=(now + APPOINTMENT_DATE_TTL).isoformat(),
+        )
+
+    @classmethod
+    def from_context(cls, value: object) -> "PendingAppointmentDate | None":
+        if not isinstance(value, Mapping):
+            return None
+        created_at = value.get("created_at")
+        expires_at = value.get("expires_at")
+        if not isinstance(created_at, str) or not isinstance(expires_at, str):
+            return None
+        try:
+            return cls(created_at=created_at, expires_at=expires_at)
+        except ValueError:
+            return None
+
+    def is_expired_at(self, now: datetime) -> bool:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now debe incluir una zona horaria")
+        return _parse_timestamp(self.expires_at) <= now.astimezone(dt_timezone.utc)
+
+    def to_context(self) -> dict[str, str]:
+        return {
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+
+
 _WEEKDAYS = {
     "lunes": 0,
     "martes": 1,
@@ -210,7 +257,47 @@ def date_only_availability_request(
     requested_date = _requested_date(normalized, local_now.date())
     if requested_date is None:
         return None
+    return _availability_request_for_date(requested_date, local_now, timezone)
 
+
+def appointment_date_is_required(
+    text: str,
+    *,
+    now: datetime,
+    timezone: ZoneInfo,
+) -> bool:
+    """Indica que hay intencion de agendar, pero falta la fecha."""
+    normalized = _normalize(text)
+    if not _matches_any(normalized, _AVAILABILITY_INTENT_PATTERNS):
+        return False
+    if _matches_any(normalized, _EXACT_TIME_PATTERNS):
+        return False
+    local_now = now.astimezone(timezone)
+    return _requested_date(normalized, local_now.date()) is None
+
+
+def date_only_availability_follow_up_request(
+    text: str,
+    *,
+    now: datetime,
+    timezone: ZoneInfo,
+) -> DateOnlyAvailabilityRequest | None:
+    """Interpreta una fecha como respuesta a una pregunta pendiente de agenda."""
+    normalized = _normalize(text)
+    if _matches_any(normalized, _EXACT_TIME_PATTERNS):
+        return None
+    local_now = now.astimezone(timezone)
+    requested_date = _requested_date(normalized, local_now.date())
+    if requested_date is None:
+        return None
+    return _availability_request_for_date(requested_date, local_now, timezone)
+
+
+def _availability_request_for_date(
+    requested_date: date,
+    local_now: datetime,
+    timezone: ZoneInfo,
+) -> DateOnlyAvailabilityRequest | None:
     start_at = datetime.combine(requested_date, time.min, tzinfo=timezone)
     end_at = start_at + timedelta(days=1)
     if requested_date == local_now.date():

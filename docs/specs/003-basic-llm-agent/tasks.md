@@ -48,3 +48,5 @@
 - [x] Verificar la respuesta de verificacion de Meta.
 - [x] Ejecutar la suite sin credenciales ni servicios externos.
 - [x] Probar que "hoy" se resuelve con el rango del reloj configurado.
+- [x] Persistir el codigo HTTP del proveedor y migrar la columna sin perder filas previas.
+- [x] Registrar solo tipo y codigo HTTP, sin imprimir el contenido entrante.

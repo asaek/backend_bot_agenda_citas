@@ -13,8 +13,13 @@ from appointment_confirmation import (
     confirmation_reply,
 )
 from appointment_availability import (
+    DateOnlyAvailabilityRequest,
+    PENDING_APPOINTMENT_DATE_KEY,
     PENDING_APPOINTMENT_AVAILABILITY_KEY,
+    PendingAppointmentDate,
     PendingAppointmentAvailability,
+    appointment_date_is_required,
+    date_only_availability_follow_up_request,
     date_only_availability_request,
     format_availability_reply,
 )
@@ -80,6 +85,10 @@ APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY = (
 )
 APPOINTMENT_SLOT_SELECTION_REPLY = (
     "Elige uno de los horarios disponibles indicando la hora, por ejemplo: 10:00."
+)
+APPOINTMENT_DATE_REPLY = "Para agendar una cita, ¿qué día te gustaría reservar?"
+APPOINTMENT_DATE_EXPIRED_REPLY = (
+    "La solicitud de reserva expiró. Si aún quieres agendar, dime qué día te gustaría reservar."
 )
 APPOINTMENT_AVAILABILITY_EXPIRED_REPLY = (
     "La lista de horarios expiró. Solicita nuevamente la disponibilidad para ese día."
@@ -256,10 +265,6 @@ class ConversationService:
         context: ConversationContext,
         appointment_event_sink: AppointmentNotificationEventSink | None = None,
     ) -> LLMResponse:
-        if self.llm_configuration_error is not None:
-            raise self.llm_configuration_error
-        if self.llm_provider is None:
-            raise LLMProviderError("ConversationService requiere un proveedor LLM")
         pending_reply = await self._resolve_pending_appointment_action(
             context,
             appointment_event_sink,
@@ -275,9 +280,19 @@ class ConversationService:
         availability_reply = await self._resolve_date_only_availability(context)
         if availability_reply is not None:
             return availability_reply
+        pending_reply = await self._resolve_pending_appointment_date(context)
+        if pending_reply is not None:
+            return pending_reply
+        date_question = self._begin_pending_appointment_date(context)
+        if date_question is not None:
+            return date_question
         pending_reply = await self._resolve_pending_appointment_availability(context)
         if pending_reply is not None:
             return pending_reply
+        if self.llm_configuration_error is not None:
+            raise self.llm_configuration_error
+        if self.llm_provider is None:
+            raise LLMProviderError("ConversationService requiere un proveedor LLM")
         messages = self.build_chat_messages(context)
         if self.agent_orchestrator is not None:
             reply = await self.agent_orchestrator.run(
@@ -311,6 +326,66 @@ class ConversationService:
         if request is None:
             return None
 
+        return await self._execute_date_only_availability(context, request)
+
+    async def _resolve_pending_appointment_date(
+        self,
+        context: ConversationContext,
+    ) -> str | None:
+        if self.tool_executor is None:
+            return None
+        pending_date = self._load_pending_appointment_date(context.conversation_id)
+        if pending_date is None:
+            return None
+
+        now = self._current_local_time()
+        if pending_date.is_expired_at(now):
+            self._clear_pending_appointment_date(context.conversation_id)
+            return APPOINTMENT_DATE_EXPIRED_REPLY
+
+        request = date_only_availability_follow_up_request(
+            context.incoming_text,
+            now=now,
+            timezone=self._timezone,
+        )
+        if request is None:
+            return APPOINTMENT_DATE_REPLY
+        return await self._execute_date_only_availability(context, request)
+
+    def _begin_pending_appointment_date(
+        self,
+        context: ConversationContext,
+    ) -> str | None:
+        if self.tool_executor is None:
+            return None
+        now = self._current_local_time()
+        if not appointment_date_is_required(
+            context.incoming_text,
+            now=now,
+            timezone=self._timezone,
+        ):
+            return None
+        self._save_pending_appointment_date(
+            context.conversation_id,
+            PendingAppointmentDate.start(now),
+        )
+        self._clear_pending_appointment_availability(context.conversation_id)
+        return APPOINTMENT_DATE_REPLY
+
+    async def _execute_date_only_availability(
+        self,
+        context: ConversationContext,
+        request: DateOnlyAvailabilityRequest,
+    ) -> str:
+        if self.tool_executor is None:
+            raise RuntimeError("La disponibilidad requiere un ToolExecutor")
+
+        now = self._current_local_time()
+        self._save_pending_appointment_date(
+            context.conversation_id,
+            PendingAppointmentDate.start(now),
+        )
+
         result = await self.tool_executor.execute(
             ToolRequest(
                 tool_name=ToolName.CHECK_AVAILABILITY,
@@ -323,6 +398,7 @@ class ConversationService:
         )
         self._clear_pending_appointment_availability(context.conversation_id)
         if result.ok and isinstance(result.data, CheckAvailabilityOutput):
+            self._clear_pending_appointment_date(context.conversation_id)
             pending_availability = PendingAppointmentAvailability.from_slots(
                 request,
                 result.data.slots,
@@ -334,6 +410,11 @@ class ConversationService:
                     context.conversation_id,
                     pending_availability,
                 )
+        else:
+            self._save_pending_appointment_date(
+                context.conversation_id,
+                PendingAppointmentDate.start(self._current_local_time()),
+            )
         return format_availability_reply(
             result,
             request,
@@ -627,6 +708,24 @@ class ConversationService:
             context.get(PENDING_APPOINTMENT_AVAILABILITY_KEY)
         )
 
+    def _load_pending_appointment_date(
+        self,
+        conversation_id: int,
+    ) -> PendingAppointmentDate | None:
+        with self.database.transaction() as connection:
+            conversation = self.conversations.get_by_id(connection, conversation_id)
+        if conversation is None:
+            return None
+        try:
+            context = json.loads(conversation.context_json)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(context, dict):
+            return None
+        return PendingAppointmentDate.from_context(
+            context.get(PENDING_APPOINTMENT_DATE_KEY)
+        )
+
     def _save_pending_appointment_action(
         self,
         conversation_id: int,
@@ -668,6 +767,24 @@ class ConversationService:
             conversation_id,
             PENDING_APPOINTMENT_AVAILABILITY_KEY,
             availability.to_context(),
+        )
+
+    def _save_pending_appointment_date(
+        self,
+        conversation_id: int,
+        pending_date: PendingAppointmentDate,
+    ) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            PENDING_APPOINTMENT_DATE_KEY,
+            pending_date.to_context(),
+        )
+
+    def _clear_pending_appointment_date(self, conversation_id: int) -> None:
+        self._update_conversation_context_value(
+            conversation_id,
+            PENDING_APPOINTMENT_DATE_KEY,
+            None,
         )
 
     def _clear_pending_appointment_availability(self, conversation_id: int) -> None:
@@ -908,6 +1025,7 @@ class ConversationService:
         self,
         context: ConversationContext,
         error_type: str,
+        http_status_code: int | None = None,
     ) -> LLMFailureRecord:
         with self.database.transaction() as connection:
             return self.llm_failures.create(
@@ -916,6 +1034,7 @@ class ConversationService:
                 incoming_message_id=context.incoming_message_id,
                 error_type=error_type,
                 now=utc_now(),
+                http_status_code=http_status_code,
             )
 
     def _record_reply(

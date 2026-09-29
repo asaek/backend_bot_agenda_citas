@@ -60,9 +60,12 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   cambiar el flujo de agendamiento.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
+- Conservar durante 10 minutos la intencion de agendar sin hora exacta mientras se
+  espera el dia y resolver respuestas como `hoy` directamente en el backend.
 - Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes
   de iniciar la recoleccion de nombre y motivo.
-- Integrar el LLM en el ciclo de respuesta y conservar los fallos en SQLite.
+- Integrar el LLM en el ciclo de respuesta y conservar en SQLite el tipo de fallo y,
+  cuando exista, el codigo HTTP del proveedor sin copiar contenido sensible al log.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 
 ## Estrategia de implementacion por cortes
@@ -217,8 +220,9 @@ La funcionalidad definida en `specs/014-date-only-availability/` consulta el dia
 completo cuando el paciente pide agendar para una fecha reconocible sin indicar una
 hora. El backend muestra los espacios libres, conserva la fecha y los slots en la
 conversacion y valida la seleccion del paciente antes de iniciar la recoleccion de
-nombre y motivo. Una solicitud con hora exacta continua hacia la recoleccion del
-motivo.
+nombre y motivo. Si primero falta el dia y no se indico una hora exacta, conserva la
+solicitud y procesa una respuesta relativa posterior, como `hoy`, sin depender del LLM.
+Una solicitud con hora exacta continua hacia la recoleccion del motivo.
 
 ### Fase incremental: disponibilidad real
 

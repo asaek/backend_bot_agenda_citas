@@ -76,6 +76,12 @@ valida antes de acceder al contenido o a `tool_calls`, y una respuesta vacia,
 con mas de una herramienta o con argumentos que no sean un objeto tambien se
 rechaza.
 
+`main.py` registra el tipo de excepcion y, para `LLMHTTPError`, el codigo HTTP
+numerico. `llm_failures.http_status_code` conserva ese codigo para diagnostico; los
+demas tipos guardan `NULL`. El log no copia el texto entrante, el cuerpo HTTP ni
+credenciales. La inicializacion de SQLite agrega la columna de forma compatible a
+bases ya existentes.
+
 ## Construccion del contexto
 
 `ConversationService.build_chat_messages(context)` llama a
@@ -109,10 +115,10 @@ respuestas de texto con `WhatsAppClient`. Si recibe un `ToolCall` antes de
 integrar el ejecutor, registra el tipo `UnsupportedToolCall` y envia la respuesta
 controlada; nunca serializa la llamada como texto para el paciente.
 
-Si la generacion falla, `main.py` registra el tipo de error en la tabla de
-fallos del LLM y envia la respuesta controlada. Si WhatsApp esta disponible, la
-respuesta controlada se registra como `sent`; si tambien falla, queda como
-`failed`. Como las respuestas fallidas no forman parte del contexto, el
+Si la generacion falla, `main.py` registra el tipo de error y el codigo HTTP seguro
+cuando existe en la tabla de fallos del LLM, y envia la respuesta controlada. Si
+WhatsApp esta disponible, la respuesta controlada se registra como `sent`; si tambien
+falla, queda como `failed`. Como las respuestas fallidas no forman parte del contexto, el
 siguiente webhook puede reintentar la generacion sin presentar una respuesta no
 entregada al modelo.
 

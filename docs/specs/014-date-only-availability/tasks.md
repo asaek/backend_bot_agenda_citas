@@ -11,6 +11,8 @@
 - [x] Mantener el flujo existente para solicitudes con hora.
 - [x] Reforzar las instrucciones del LLM para casos no detectados.
 - [x] Cubrir variantes frecuentes como `sacar cita` en el detector determinista.
+- [x] Guardar la intencion de agendar sin fecha y resolver una respuesta relativa posterior
+      directamente contra disponibilidad.
 
 ## Pruebas y verificacion
 
@@ -24,3 +26,4 @@
       por el motivo ni una segunda cita.
 - [x] Ejecutar la suite completa en la Raspberry Pi.
 - [x] Verificar health check y ambos metodos del webhook en la Raspberry Pi.
+- [x] Probar `Quisiera agendar una` seguido de `hoy` sin llamadas al LLM.

@@ -40,6 +40,7 @@ esten aprobados.
 - [Verificacion de señales de prioridad y flujo del motivo](./verification/2026-09-25-priority-signals-and-reason-flow.md)
 - [Verificacion del nombre del paciente antes de agendar](./verification/2026-09-26-patient-name-before-booking.md)
 - [Verificacion de seleccion de horario controlada por el backend](./verification/2026-09-26-backend-slot-selection.md)
+- [Verificacion de continuacion de fecha y diagnostico LLM](./verification/2026-09-29-booking-date-and-llm-diagnostics.md)
 - [Verificacion de horarios libres antes de agendar](./verification/2026-09-24-date-only-availability.md)
 - [Verificacion de variantes de lenguaje para horarios](./verification/2026-09-25-date-only-availability-language.md)
 
@@ -54,3 +55,4 @@ esten aprobados.
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
 - [ADR 0028 - Nombre del paciente antes de agendar](./decisions/0028-patient-name-before-booking.md)
 - [ADR 0029 - Seleccion de disponibilidad controlada por el backend](./decisions/0029-backend-owned-availability-selection.md)
+- [ADR 0030 - Continuacion de fecha de reserva controlada por el backend](./decisions/0030-backend-owned-booking-date.md)

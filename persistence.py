@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS llm_failures (
     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     incoming_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     error_type TEXT NOT NULL,
+    http_status_code INTEGER CHECK (http_status_code BETWEEN 100 AND 599),
     created_at TEXT NOT NULL
 );
 
@@ -134,9 +135,27 @@ class SQLiteDatabase:
         connection = self.connect()
         try:
             connection.executescript(SCHEMA)
+            self._migrate_llm_failure_http_status(connection)
             connection.commit()
         finally:
             connection.close()
+
+    @staticmethod
+    def _migrate_llm_failure_http_status(
+        connection: sqlite3.Connection,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(llm_failures)")
+        }
+        if "http_status_code" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE llm_failures
+                ADD COLUMN http_status_code INTEGER
+                    CHECK (http_status_code BETWEEN 100 AND 599)
+                """
+            )
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

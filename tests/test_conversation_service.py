@@ -43,7 +43,7 @@ class ConversationContextTests(unittest.TestCase):
                 sender="5491100000000",
                 message_id="wamid.first",
                 message_type="text",
-                text="Necesito una cita",
+                text="Hola, ¿qué servicios ofrecen?",
             )
         )
         self.service.record_reply_sent(
@@ -75,7 +75,7 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(
             [(message.role, message.content) for message in received_messages[1:]],
             [
-                ("user", "Necesito una cita"),
+                ("user", "Hola, ¿qué servicios ofrecen?"),
                 ("assistant", "¿Qué día prefieres?"),
                 ("user", "El viernes"),
             ],
@@ -192,6 +192,70 @@ class ConversationContextTests(unittest.TestCase):
         self.assertIn("horarios disponibles", reply.lower())
         self.assertIn("09:00", reply)
         self.assertIn("16:30", reply)
+        self.assertEqual(llm_provider.call_count, 0)
+        self.assertEqual(provider.appointments, ())
+
+    def test_booking_without_date_keeps_date_follow_up_out_of_the_llm(self) -> None:
+        provider = FakeCalendarProvider()
+        llm_provider = FakeLLMProvider(reply="El LLM no deberia responder este turno")
+        fixed_now = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+        service = ConversationService(
+            SQLiteDatabase(self.database_path),
+            llm_provider=llm_provider,
+            timezone_name="UTC",
+            now=fixed_now,
+            tool_executor=ToolExecutor(
+                provider=provider,
+                business_hours=BusinessHours(
+                    timezone_name="UTC",
+                    windows_by_weekday={
+                        weekday: (TimeWindow(time(9), time(17)),)
+                        for weekday in range(5)
+                    },
+                ),
+                default_timezone="UTC",
+                now=fixed_now,
+            ),
+        )
+        booking_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-without-date",
+                message_type="text",
+                text="quisiera agendar una",
+            )
+        )
+
+        date_question = asyncio.run(service.build_reply(booking_context))
+        service.record_reply_sent(
+            booking_context,
+            body=date_question,
+            provider_message_id="wamid.booking-date-question",
+        )
+        service = ConversationService(
+            database=service.database,
+            llm_provider=llm_provider,
+            timezone_name="UTC",
+            now=fixed_now,
+            tool_executor=service.tool_executor,
+        )
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-today",
+                message_type="text",
+                text="hoy",
+            )
+        )
+
+        availability_reply = asyncio.run(service.build_reply(date_context))
+
+        self.assertEqual(
+            date_question,
+            "Para agendar una cita, ¿qué día te gustaría reservar?",
+        )
+        self.assertIn("Horarios disponibles para el 29/09/2026", availability_reply)
+        self.assertIn("Elige uno de estos horarios", availability_reply)
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(provider.appointments, ())
 
@@ -405,7 +469,7 @@ class ConversationContextTests(unittest.TestCase):
                 sender="5491100000000",
                 message_id="wamid.event",
                 message_type="text",
-                text="Necesito una cita",
+                text="Agendame una cita para el lunes a las 10:00",
             )
         )
         events = []

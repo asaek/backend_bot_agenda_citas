@@ -35,6 +35,8 @@ El ciclo debe poder probarse sin realizar llamadas reales a Internet.
 - Inyectar el proveedor en `ConversationService`.
 - Generar la respuesta antes de enviarla mediante WhatsApp.
 - Registrar fallos de generacion o envio para permitir reintentos.
+- Persistir el tipo de fallo LLM y, para errores HTTP, el codigo numerico recibido;
+  los logs no deben incluir texto del paciente, credenciales ni cuerpos del proveedor.
 - Probar el ciclo con un `FakeLLMProvider`, un cliente falso de WhatsApp y SQLite
   temporal.
 
@@ -107,6 +109,14 @@ Si el LLM no genera una respuesta, el backend debe registrar el fallo y enviar
 la respuesta controlada. Si WhatsApp tambien falla, debe registrar esa salida
 como `failed` y permitir reintentar el mensaje entrante posteriormente.
 
+### RF-316 - Diagnostico seguro de errores HTTP
+
+Cuando el proveedor LLM responda con un error HTTP, el backend debe guardar su codigo
+en `llm_failures.http_status_code` junto con el tipo de excepcion. Los fallos que no
+tengan codigo HTTP guardan `NULL`. El log operativo puede registrar el tipo y el codigo,
+pero no el contenido del mensaje, credenciales ni la respuesta del proveedor. La columna
+debe agregarse de forma compatible a las bases existentes.
+
 ### RF-310 - Respuesta controlada
 
 La respuesta controlada debe ser: `En este momento no pude procesar tu mensaje.
@@ -164,6 +174,10 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
     respuesta enviada.
 20. La suite cubre errores del LLM y la verificacion de Meta sin usar servicios
     externos.
+21. Un `LLMHTTPError(429)` deja el codigo `429` en SQLite y en el log operativo sin
+    incluir el texto entrante; otros errores LLM mantienen el codigo HTTP en `NULL`.
+22. La inicializacion agrega la columna nullable a una base existente sin perder sus
+    fallos LLM ya guardados.
 
 ## Fuera de alcance
 

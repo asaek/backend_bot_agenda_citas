@@ -2,12 +2,13 @@
 
 ## Estado
 
-Verificado. El backend conserva los horarios ofrecidos, valida la seleccion del
-paciente y transfiere el flujo directamente a la recoleccion de nombre y motivo. La
-evidencia de ejecucion se conserva en
+Verificado. El backend conserva la fecha pendiente y los horarios ofrecidos, valida la
+seleccion del paciente y transfiere el flujo directamente a la recoleccion de nombre y
+motivo. La evidencia de ejecucion se conserva en
 `docs/verification/2026-09-24-date-only-availability.md` y
 `docs/verification/2026-09-25-date-only-availability-language.md`, además de
-`docs/verification/2026-09-26-backend-slot-selection.md`.
+`docs/verification/2026-09-26-backend-slot-selection.md` y
+`docs/verification/2026-09-29-booking-date-and-llm-diagnostics.md`.
 
 ## Objetivo
 
@@ -20,6 +21,8 @@ La funcionalidad cubre:
 
 - Deteccion de solicitudes de agenda para `hoy`, `manana`, `pasado manana` o un dia
   de la semana sin hora exacta.
+- Solicitud backend de la fecha cuando el paciente expresa intencion de agendar pero
+  aun no indica el dia; la respuesta posterior se interpreta en la zona horaria de agenda.
 - Consulta de disponibilidad para el dia completo mediante `ToolExecutor`.
 - Presentacion de horarios de 30 minutos sin duplicarlos por calendario.
 - Persistencia de la fecha, slots ofrecidos y expiracion en `conversations.context_json`.
@@ -59,6 +62,13 @@ estado pendiente de la cita y continuar con las preguntas fijas de nombre y moti
 consultar al LLM. Una seleccion invalida debe conservar los slots y pedir que elija uno
 de la lista.
 
+### RF-1406 - Fecha como continuacion de una reserva
+
+Cuando un mensaje reconocible pide agendar sin indicar el dia ni una hora exacta, el
+backend debe guardar una solicitud pendiente durante 10 minutos y preguntar que dia
+desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse mediante
+`check_availability` sin volver a depender del LLM para conservar la intencion.
+
 ## Criterios de aceptacion
 
 1. `Agendame una cita para manana` devuelve los horarios libres del dia.
@@ -74,6 +84,8 @@ de la lista.
    estado de disponibilidad despues de iniciar la recoleccion de datos.
 9. Una hora no ofrecida, una solicitud sin hora o una disponibilidad vencida no crea la
    cita ni pierde los controles del backend.
+10. `Quisiera agendar una` seguido de `hoy` consulta y muestra los horarios disponibles
+    sin invocar al LLM en ninguno de esos dos turnos.
 
 ## Fuera del alcance
 

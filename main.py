@@ -2,7 +2,6 @@ import json
 import logging
 import os
 from collections.abc import Mapping
-from dataclasses import asdict
 from datetime import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from google_calendar_provider import (
 )
 from llm_provider import (
     LLMConfigurationError,
+    LLMHTTPError,
     LLMProviderError,
     LLMProvider,
     ToolCall,
@@ -451,7 +451,6 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     whatsapp_client = WhatsAppClient()
     for message in messages:
         context: ConversationContext = conversation_service.receive_message(message)
-        print(json.dumps(asdict(message), ensure_ascii=False), flush=True)
         if context.reply_status == "sent":
             continue
 
@@ -462,9 +461,18 @@ async def receive_webhook(request: Request) -> dict[str, str]:
                 appointment_event_sink=appointment_events.append,
             )
         except LLMProviderError as error:
+            http_status_code = (
+                error.status_code if isinstance(error, LLMHTTPError) else None
+            )
+            logger.warning(
+                "LLM provider failure: error_type=%s http_status_code=%s",
+                type(error).__name__,
+                http_status_code,
+            )
             conversation_service.record_llm_failure(
                 context,
                 error_type=type(error).__name__,
+                http_status_code=http_status_code,
             )
             reply = CONTROLLED_FALLBACK_REPLY
         if isinstance(reply, ToolCall):

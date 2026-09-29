@@ -117,6 +117,10 @@ que contiene un dia pero no una hora, `ConversationService` consulta primero
 `check_availability` para todo ese dia. Muestra los slots libres como una lista unica y
 espera la seleccion del paciente; no crea una cita ni pregunta el motivo en ese turno.
 La fecha y los slots ofrecidos quedan en `conversations.context_json` durante 10 minutos.
+Si la solicitud inicial no contiene dia ni hora exacta, el backend guarda
+`pending_appointment_date`, pregunta el dia y resuelve una respuesta relativa posterior,
+como `hoy`, directamente contra `check_availability`. La solicitud pendiente tambien
+expira a los 10 minutos.
 Cuando el paciente elige una hora, el backend la valida contra ese estado y crea la
 solicitud pendiente de cita directamente, por lo que las preguntas de nombre y motivo
 no dependen de una respuesta textual del LLM. Las solicitudes con hora exacta continúan
@@ -147,6 +151,10 @@ La suite verifica esta frontera sin Google Calendar.
 `persistence.py` administra conexiones, esquema y transacciones SQLite.
 `repositories.py` encapsula las operaciones de pacientes, conversaciones y
 mensajes y citas. La ruta de la base se configura mediante `DATABASE_PATH`.
+La tabla `llm_failures` conserva el tipo de excepcion y un codigo HTTP nullable para
+los errores del proveedor; las bases existentes reciben esa columna mediante una
+migracion aditiva. El log registra solo esos campos y omite el texto entrante, el cuerpo
+del proveedor y las credenciales.
 La tabla `appointments` conserva el ID interno de la cita, el calendario y evento
 de Google, el paciente, el estado, el intervalo, el motivo y las fechas de
 sincronizacion. `PersistentCalendarProvider` traduce el ID interno expuesto a las

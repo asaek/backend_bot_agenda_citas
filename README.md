@@ -111,6 +111,11 @@ Si el paciente solicita agendar para un dia sin indicar una hora exacta, el back
 consulta primero los espacios libres de ese dia y los muestra como una lista. La cita
 no se crea hasta que el paciente elige un horario.
 
+Si expresa que quiere agendar sin indicar el dia ni una hora exacta, el backend pregunta
+la fecha y conserva esa intencion durante 10 minutos. Una respuesta relativa como `hoy`
+consulta directamente la disponibilidad usando la zona horaria configurada, sin necesitar
+que el LLM reconstruya el contexto.
+
 La configuracion prevista usa `DOCTOR_WHATSAPP_NUMBERS`, una lista de numeros
 separados por comas. Todos los doctores configurados reciben una copia del mismo
 mensaje. La entrega valida `DOCTOR_NOTIFICATIONS_ENABLED`, recorta espacios,
@@ -135,6 +140,8 @@ El webhook crea el proveedor, recupera el historial desde `ConversationService`,
 genera la respuesta, ejecuta herramientas mediante el `ToolExecutor` configurado,
 la envia por WhatsApp y registra el resultado. Un fallo de
 generacion o envio queda marcado como `failed` para permitir un reintento.
+Los fallos de generacion guardan el tipo de excepcion y el codigo HTTP cuando aplica;
+el log operativo no registra el texto del paciente ni la respuesta completa del proveedor.
 
 Los cortes de eventos, persistencia, composicion, entrega e integracion del webhook
 ya estan implementados.

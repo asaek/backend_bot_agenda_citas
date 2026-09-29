@@ -5,8 +5,9 @@ import sqlite3
 import tempfile
 import unittest
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from datetime import datetime, time, timezone
+from io import StringIO
 from typing import Any
 from unittest.mock import patch
 
@@ -21,7 +22,7 @@ from conversation_service import (
 )
 from fake_calendar_provider import FakeCalendarProvider
 from fakes import GENERATED_REPLY, FakeLLMProvider
-from llm_provider import LLMProviderError, ToolCall
+from llm_provider import LLMHTTPError, LLMResponseError, ToolCall
 from main import (
     app,
     create_availability_provider,
@@ -500,7 +501,7 @@ class WebhookTests(unittest.TestCase):
     def test_llm_failure_sends_controlled_fallback_and_records_failure(self) -> None:
         fake_client = FakeWhatsAppClient()
         failing_provider = FakeLLMProvider(
-            error=LLMProviderError("fallo de generacion de prueba")
+            error=LLMResponseError("respuesta vacia de prueba")
         )
 
         with self.configured_runtime(fake_client, failing_provider):
@@ -521,7 +522,7 @@ class WebhookTests(unittest.TestCase):
                 "SELECT direction, status, text FROM messages ORDER BY id"
             ).fetchall()
             failures = connection.execute(
-                "SELECT error_type FROM llm_failures"
+                "SELECT error_type, http_status_code FROM llm_failures"
             ).fetchall()
 
         self.assertEqual(
@@ -531,7 +532,41 @@ class WebhookTests(unittest.TestCase):
                 ("outgoing", "sent", CONTROLLED_FALLBACK_REPLY),
             ],
         )
-        self.assertEqual(failures, [("LLMProviderError",)])
+        self.assertEqual(failures, [("LLMResponseError", None)])
+
+    def test_llm_http_failure_records_status_without_logging_patient_text(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        failing_provider = FakeLLMProvider(error=LLMHTTPError(429))
+        patient_text = "contenido privado de prueba"
+        captured_stdout = StringIO()
+
+        with self.configured_runtime(fake_client, failing_provider):
+            with TestClient(app) as client:
+                with (
+                    self.assertLogs("main", level="WARNING") as captured_logs,
+                    redirect_stdout(captured_stdout),
+                ):
+                    response = client.post(
+                        "/webhook/whatsapp",
+                        json=self.text_payload(text=patient_text),
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake_client.sent_messages,
+            [("5491100000000", CONTROLLED_FALLBACK_REPLY)],
+        )
+        self.assertTrue(
+            any("http_status_code=429" in record for record in captured_logs.output)
+        )
+        self.assertNotIn(patient_text, "\n".join(captured_logs.output))
+        self.assertNotIn(patient_text, captured_stdout.getvalue())
+        with open_database(self.database_path) as connection:
+            failure = connection.execute(
+                "SELECT error_type, http_status_code FROM llm_failures"
+            ).fetchone()
+
+        self.assertEqual(failure, ("LLMHTTPError", 429))
 
     def test_default_fake_calendar_provider_executes_tool_cycle(self) -> None:
         fake_client = FakeWhatsAppClient()
@@ -653,7 +688,10 @@ class WebhookTests(unittest.TestCase):
             with TestClient(app) as client:
                 responses = self.post_messages(
                     client,
-                    self.text_payload(message_id="wamid.create", text="Agendar"),
+                    self.text_payload(
+                        message_id="wamid.create",
+                        text="Agendar para el lunes a las 10",
+                    ),
                     self.text_payload(
                         message_id="wamid.create-name",
                         text="Ana Prueba",
