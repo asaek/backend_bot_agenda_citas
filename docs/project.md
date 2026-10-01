@@ -143,14 +143,21 @@ redaccion final sin servicios externos. La especificacion esta en
 El backend puede seleccionar un `GoogleCalendarProvider` sin cambiar el contrato
 de herramientas. El adaptador admite OAuth o cuenta de servicio, consulta
 disponibilidad mediante `freeBusy`, lista eventos paginados y administra citas de
-30 minutos identificadas por propiedades privadas. Las operaciones conservan el
+30 minutos. Las citas creadas por el bot se identifican por propiedades privadas;
+las ingresadas por el medico o secretaria se asocian por una linea exacta con el
+numero E.164 de WhatsApp en la descripcion. Las operaciones conservan el
 `PatientScope` del backend y convierten fallos externos en errores publicos. El
 fake sigue siendo el valor por defecto para pruebas y desarrollo sin credenciales.
 Los listados normales excluyen eventos cancelados que Google conserva como
 tombstones, y las mutaciones usan `sendUpdates=all` para evitar la perdida de
 eventos asociada por Google con `sendUpdates=none`.
+Un evento manual sin esa linea no se muestra ni se modifica desde el bot; los eventos
+manuales existentes requieren una actualizacion unica de su descripcion.
 La implementacion y las pruebas del mirror estan verificadas. La especificacion
 esta en `specs/009-google-calendar-adapter/`.
+La extension para citas manuales tambien esta cubierta por una regresion y la suite
+completa verificada en Raspberry Pi. La verificacion con un calendario real requiere
+credenciales externas.
 
 ### Corte verificado: persistencia de citas
 
@@ -200,9 +207,9 @@ texto generico.
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` evita que el
 LLM complete un motivo que el paciente de prueba no ha expresado. Antes de crear una
-cita, si el paciente no tiene nombre registrado, el backend lo solicita y lo conserva
-en `patients.name`; despues pregunta el motivo. El horario y el estado pendiente se
-conservan en el contexto de la conversacion. El validador local rechaza entradas
+cita, el backend siempre solicita el nombre completo, incluso si ya estaba registrado,
+lo actualiza en `patients.name` y despues pregunta el motivo. El horario y el estado
+pendiente se conservan en el contexto de la conversacion. El validador local rechaza entradas
 evidentemente ilegibles sin perder ese estado. Un evaluador estructurado clasifica la
 calidad, categoria y señales permitidas; el backend conserva los intentos y la fecha,
 pero mantiene el texto del paciente como unico motivo. Solo una evaluacion aceptable

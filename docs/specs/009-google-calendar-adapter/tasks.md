@@ -26,6 +26,16 @@
   las mutaciones.
 - [x] Ejecutar la suite completa en el mirror de Raspberry Pi.
 
+## Extension: citas creadas manualmente
+
+- [x] Buscar citas del bot por propiedades privadas y citas manuales por el numero
+  E.164 exacto en la descripcion.
+- [x] Filtrar de nuevo las coincidencias en backend, ocultar otros eventos y quitar
+  el marcador del motivo enviado al agente.
+- [x] Ejecutar la regresion y la suite completa en Raspberry Pi.
+- [ ] Actualizar las citas manuales existentes con `WhatsApp: +<E.164>`; incluir el
+  mismo marcador en nuevas citas manuales.
+
 ## Fuera de este corte
 
 - [ ] Verificar una cuenta real de Google Calendar con secretos provisionados.

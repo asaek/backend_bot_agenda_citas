@@ -77,8 +77,13 @@ proveedor principal.
 - `BUSINESS_WORKDAYS`, `BUSINESS_HOURS_START` y `BUSINESS_HOURS_END` para definir
   los dias y el horario laboral sin modificar codigo.
 
-El adaptador consulta `freeBusy`, lista eventos paginados y administra solo los
-eventos con propiedades privadas `managed_by=whatsapp_chatbot` y `patient_id`.
+El adaptador consulta `freeBusy`, sigue las paginas de eventos y lista las citas
+creadas por el bot mediante sus propiedades privadas `managed_by=whatsapp_chatbot`
+y `patient_id`. Tambien reconoce citas ingresadas manualmente por el medico o
+secretaria cuando la descripcion contiene una linea con el numero E.164 exacto:
+`WhatsApp: +<E.164>`. Los eventos manuales antiguos deben actualizarse una vez y
+las nuevas citas manuales deben conservar ese marcador; sin el no se muestran ni se
+pueden modificar desde el bot. El numero se elimina del motivo presentado al agente.
 Los listados normales excluyen eventos cancelados; las mutaciones usan
 `sendUpdates=all` para evitar la perdida de eventos advertida por Google para
 `sendUpdates=none`. Cada cita ocupa 30 minutos y conserva el `PatientScope`
@@ -99,9 +104,9 @@ fecha, el horario y el motivo de la cita sin exponer su ID interno; la operacion
 ejecuta solamente despues de recibir `Si` y expira despues de 10 minutos.
 
 Las solicitudes para crear una cita requieren el nombre del paciente y el motivo
-expresado por el paciente. Si no hay nombre registrado, el backend conserva el
-horario, solicita primero el nombre, lo guarda en `patients.name` y despues pregunta
-el motivo. La cita se crea solamente despues de un motivo legible; no usa el motivo
+expresado por el paciente. El backend conserva el horario, solicita el nombre en cada
+cita nueva, lo guarda o actualiza en `patients.name` y despues pregunta el motivo. La
+cita se crea solamente despues de un motivo legible; no usa el motivo
 sugerido por el LLM como valor predeterminado. Si el mensaje es evidentemente
 ilegible, conserva la solicitud pendiente y pide al paciente que describa nuevamente
 el motivo. El texto normalizado del paciente sigue siendo el unico valor guardado

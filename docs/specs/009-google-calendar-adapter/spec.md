@@ -2,9 +2,11 @@
 
 ## Estado
 
-Implementado y verificado con HTTP simulado en el mirror. La disponibilidad puede
-activarse de forma incremental contra Google; la verificacion real requiere
-credenciales y calendarios externos que no se guardan en el repositorio.
+Implementado y verificado en la Raspberry Pi con HTTP simulado. Los listados
+reconocen eventos manuales con el numero de WhatsApp exacto en una linea
+`WhatsApp: +<E.164>` de la descripcion. La disponibilidad puede activarse de forma
+incremental contra Google; la verificacion de una cuenta real requiere credenciales
+y calendarios externos que no se guardan en el repositorio.
 
 ## Objetivo
 
@@ -23,8 +25,9 @@ credenciales, identificadores internos ni control del paciente al LLM.
 - Consultar disponibilidad con `freeBusy.query` y generar slots de 30 minutos.
 - Crear, reprogramar y cancelar eventos en los calendarios configurados.
 - Guardar `managed_by`, `patient_id` y `conversation_id` como propiedades privadas.
-- Listar citas vigentes del paciente mediante `events.list`, filtrando propiedades
-  privadas, excluyendo eventos cancelados y siguiendo `nextPageToken`.
+- Listar citas vigentes del paciente mediante `events.list`, encontrando las citas
+  del bot por propiedades privadas y las citas manuales por un marcador exacto de
+  WhatsApp en la descripcion; excluir canceladas y seguir `nextPageToken`.
 - Traducir eventos validos al modelo `Appointment` sin sustituir el `PatientScope`
   resuelto por el backend.
 - Reprogramar debe localizar el evento administrado del paciente, comprobar el nuevo
@@ -49,11 +52,15 @@ El adaptador debe consultar todos los calendarios configurados en una sola llama
 `freeBusy.query`, tratar todos los periodos ocupados como no disponibles y devolver
 slots consecutivos de 30 minutos.
 
-### RF-903 - Alcance y propiedades privadas
+### RF-903 - Alcance e identificacion de citas
 
-Las escrituras deben usar el `PatientScope` recibido por el backend y guardar sus
-identificadores en propiedades privadas. Las lecturas y modificaciones deben exigir
-el marcador `managed_by=whatsapp_chatbot` y el `patient_id` del alcance actual.
+Las citas creadas por el bot deben usar el `PatientScope` recibido por el backend y
+guardar sus identificadores en propiedades privadas. Las lecturas y modificaciones
+deben exigir el marcador `managed_by=whatsapp_chatbot` y el `patient_id` del alcance
+actual, o una linea exacta `WhatsApp: +<E.164>` en la descripcion para una cita
+creada manualmente por el medico o su secretaria. El numero debe coincidir con el
+numero de WhatsApp resuelto por el backend. No se debe usar el nombre del paciente
+como identificador ni mostrar eventos sin una de estas dos asociaciones.
 
 ### RF-904 - Eventos y paginacion
 
@@ -75,6 +82,15 @@ Los secretos deben recibirse desde el entorno o archivos montados fuera del
 repositorio. Los detalles de Google no deben aparecer en `ToolResult` ni en el
 contexto enviado al LLM.
 
+### RF-907 - Citas creadas manualmente
+
+El adaptador debe buscar tambien eventos manuales que incluyan en su descripcion
+una linea `WhatsApp: +<E.164>` cuyo numero coincida exactamente con el del paciente
+actual. El marcador se elimina del motivo antes de entregar el evento al agente. Un
+numero parcial, una coincidencia en otro campo, un marcador de otro paciente o la
+ausencia de marcador no deben hacer visible el evento. El mismo criterio permite
+localizar el evento para una mutacion confirmada.
+
 ## Criterios de aceptacion
 
 1. `uv sync` instala la dependencia de autenticacion declarada.
@@ -87,8 +103,8 @@ contexto enviado al LLM.
 6. `BusinessHours` puede configurarse mediante `BUSINESS_WORKDAYS`,
    `BUSINESS_HOURS_START` y `BUSINESS_HOURS_END`.
 7. La creacion guarda las tres propiedades privadas y devuelve un `Appointment`.
-8. La lista sigue paginas y solo devuelve eventos vigentes administrados por este
-   sistema y pertenecientes al paciente solicitado.
+8. La lista sigue paginas y solo devuelve eventos vigentes del paciente solicitado,
+   administrados por el sistema o asociados mediante el marcador manual exacto.
 9. Reprogramar y cancelar respetan acceso, estado y conflictos; un evento cancelado
    aunque Google lo devuelva sin fechas no puede reprogramarse y una cancelacion no
    puede devolverse como activa.
@@ -98,7 +114,7 @@ contexto enviado al LLM.
 ## Fuera del alcance
 
 - Descubrir calendarios automaticamente.
-- Interpretar o modificar eventos existentes sin propiedades privadas del sistema.
+- Interpretar o modificar eventos manuales sin el marcador exacto de WhatsApp.
 - Persistir citas en SQLite ademas de Google Calendar.
 - Resolver festivos, ausencias u horario laboral dentro del adaptador; esas reglas
   siguen perteneciendo a `ToolExecutor` y `BusinessHours`.

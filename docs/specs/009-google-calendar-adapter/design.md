@@ -34,9 +34,11 @@ tokens solo se envian en el header `Authorization` de las llamadas HTTP.
 ## API utilizada
 
 - `POST /freeBusy` para consultar todos los calendarios configurados.
-- `GET /calendars/{calendarId}/events` con `singleEvents`, `showDeleted=false`, rango
-  y dos filtros `privateExtendedProperty` para el marcador y paciente. Las consultas
-  normales no exponen tombstones de eventos cancelados.
+- `GET /calendars/{calendarId}/events` con `singleEvents`, `showDeleted=false` y rango.
+  Una consulta usa dos filtros `privateExtendedProperty` para las citas creadas por
+  el bot; otra usa `q` con el numero E.164 para encontrar citas ingresadas por el
+  medico o secretaria. Todos los eventos pasan por la validacion local de alcance y
+  las consultas normales no exponen tombstones cancelados.
 - `POST /calendars/{calendarId}/events` para crear una cita.
 - `PATCH /calendars/{calendarId}/events/{eventId}` para mover o cancelar una cita.
 
@@ -56,9 +58,15 @@ la coordinacion entre procesos queda fuera de este corte.
 
 ## Traduccion y aislamiento
 
-Solo los eventos con `managed_by=whatsapp_chatbot` y el `patient_id` esperado se
-traducen a `Appointment`. La instancia conserva el `PatientScope` recibido, incluido
-el numero de WhatsApp y la conversacion, en lugar de reconstruirlo desde Google.
+Las citas creadas por el bot requieren `managed_by=whatsapp_chatbot` y el
+`patient_id` esperado. Una cita creada manualmente requiere una linea completa
+`WhatsApp: +<E.164>` en la descripcion, cuyo numero se compara exactamente con el
+`PatientScope` del webhook; los nombres no se usan para establecer propiedad. Los
+resultados de la busqueda `q` se filtran de nuevo en el backend, y el marcador se
+elimina del texto que se usa como motivo. La instancia conserva el `PatientScope`
+recibido, incluido el numero de WhatsApp y la conversacion, en lugar de reconstruirlo
+desde Google. La misma validacion permite localizar una cita manual para una
+modificacion que ya fue confirmada por el paciente.
 Los errores de red, timeout, autenticacion y respuestas invalidas se reducen a
 `CalendarProviderUnavailable` o `CalendarProviderError`; la busqueda de eventos
 ocultos conserva `AppointmentNotFound` y `AppointmentAccessDenied`, mientras que

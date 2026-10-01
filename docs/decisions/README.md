@@ -39,3 +39,5 @@ indique cual decision anterior queda obsoleta.
 - [0028 - Nombre del paciente antes de agendar](./0028-patient-name-before-booking.md)
 - [0029 - Seleccion de disponibilidad controlada por el backend](./0029-backend-owned-availability-selection.md)
 - [0030 - Continuacion de fecha de reserva controlada por el backend](./0030-backend-owned-booking-date.md)
+- [0031 - Asociacion segura de citas manuales por WhatsApp](./0031-manual-calendar-appointment-ownership.md)
+- [0032 - Solicitud del nombre en cada cita nueva](./0032-patient-name-for-every-appointment.md)

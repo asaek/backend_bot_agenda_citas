@@ -17,7 +17,7 @@ LLM solicita create_appointment
 ConversationService intercepta la mutacion
     |
     +-- guarda el horario en conversations.context_json
-    +-- si falta el nombre, lo pregunta y guarda el siguiente mensaje en patients
+    +-- pregunta el nombre en cada cita y actualiza patients.name con la respuesta
     +-- pregunta el motivo, sin tocar el calendario
     |
     v
@@ -49,23 +49,26 @@ el LLM haya enviado un valor para `reason`. Ese valor se descarta porque no es u
 prueba de que el paciente lo haya expresado.
 
 `PendingAppointmentReason` conserva el `start_at`, el ID de la llamada, los mensajes
-entrantes que iniciaron la solicitud y entregaron el nombre, y los tiempos de
-creacion y expiracion. Vincular el estado a esos mensajes evita crear la cita con el
-mismo texto si WhatsApp reintenta la entrega de una pregunta. El estado se guarda bajo
+entrantes que iniciaron la solicitud y entregaron el nombre, si la solicitud requiere
+capturar el nombre, y los tiempos de creacion y expiracion. El indicador permite que
+las solicitudes pendientes creadas antes de esta regla mantengan su comportamiento
+anterior. Vincular el estado a esos mensajes evita crear la cita con el mismo texto si
+WhatsApp reintenta la entrega de una pregunta. El estado se guarda bajo
 `pending_appointment_reason` dentro de `conversations.context_json`, junto con
 cualquier otro contexto existente. Tambien conserva `attempt_count` y
 `last_evaluation` mientras espera una respuesta.
 
 ## Resolucion
 
-Si el paciente no tiene nombre, `ConversationService` toma el siguiente mensaje,
-normaliza espacios, lo valida como nombre y lo persiste en `patients.name` junto con
-el marcador del mensaje que lo entrego. El reintento de ese mensaje solo devuelve la
-pregunta por el motivo. Despues, `ConversationService` toma el siguiente mensaje como
-motivo, lo pasa por `appointment_reason_validation.py` y normaliza espacios sin
-reemplazar el contenido del paciente. Si el texto es evidentemente ilegible, devuelve
-una solicitud de aclaracion y conserva el estado pendiente, por lo que no toca el
-calendario ni emite una notificacion.
+En cada cita nueva, aunque el paciente ya tenga un nombre registrado,
+`ConversationService` toma el siguiente mensaje, normaliza espacios, lo valida como
+nombre y lo guarda o actualiza en `patients.name` junto con el marcador del mensaje
+que lo entrego. El reintento de ese mensaje solo devuelve la pregunta por el motivo.
+Despues, `ConversationService` toma el siguiente mensaje como motivo, lo pasa por
+`appointment_reason_validation.py` y normaliza espacios sin reemplazar el contenido
+del paciente. Si el texto es evidentemente ilegible, devuelve una solicitud de
+aclaracion y conserva el estado pendiente, por lo que no toca el calendario ni emite
+una notificacion.
 
 Para texto legible, `StructuredAppointmentReasonEvaluator` solicita un unico objeto
 JSON al proveedor LLM. El backend valida enums, confianza y señales permitidas; una

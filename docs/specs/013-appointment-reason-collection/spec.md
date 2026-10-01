@@ -2,15 +2,17 @@
 
 ## Estado
 
-Verificado. El backend solicita el nombre del paciente cuando no esta registrado
-y el motivo antes de crear una cita, valida una calidad minima de legibilidad,
-evalua el texto con una respuesta estructurada y conserva la solicitud pendiente
-entre mensajes.
+Verificado. El backend solicita el nombre del paciente en cada cita nueva, aunque ya
+este registrado, y solicita el motivo antes de crearla. Valida una calidad minima de
+legibilidad, evalua el texto con una respuesta estructurada y conserva la solicitud
+pendiente entre mensajes.
 La evidencia esta en `docs/verification/2026-09-24-appointment-reason.md` y
 `docs/verification/2026-09-25-appointment-reason-validation.md`, además de
 `docs/verification/2026-09-25-structured-reason-evaluation.md` y
 `docs/verification/2026-09-25-priority-signals-and-reason-flow.md`, además de
 `docs/verification/2026-09-26-patient-name-before-booking.md`.
+La recoleccion del nombre en cada cita esta verificada en
+`docs/verification/2026-10-01-patient-name-every-booking.md`.
 
 ## Objetivo
 
@@ -22,8 +24,8 @@ el LLM cuando el paciente de prueba todavia no ha explicado la razon de su visit
 La funcionalidad cubre:
 
 - Solicitud del motivo antes de ejecutar `create_appointment`.
-- Solicitud y persistencia del nombre del paciente antes de solicitar el motivo
-  cuando el paciente aun no tiene nombre registrado.
+- Solicitud y actualizacion del nombre del paciente antes de solicitar el motivo en
+  cada cita nueva.
 - Conservacion del horario solicitado mientras se espera el siguiente mensaje.
 - Uso del texto del paciente como motivo de la cita.
 - Validacion local de calidad minima antes de usar el texto como motivo.
@@ -63,11 +65,11 @@ de ejecutar la cita.
 
 ### RF-1311 - Nombre del paciente
 
-Si el paciente no tiene un nombre registrado, el backend debe solicitar su nombre
-completo antes de solicitar el motivo. El nombre normalizado debe persistirse en el
-registro del paciente y la solicitud pendiente debe conservarse hasta recibir ambos
-datos. Un nombre no textual, vacio o fuera del limite permitido debe pedir una
-aclaracion y no debe crear la cita.
+En cada solicitud nueva de cita, incluso si `patients.name` ya contiene un nombre,
+el backend debe solicitar el nombre completo antes del motivo. El nombre normalizado
+debe guardarse o actualizarse en el registro del paciente y la solicitud pendiente
+debe conservarse hasta recibir ambos datos. Un nombre no textual, vacio o fuera del
+limite permitido debe pedir una aclaracion y no debe crear la cita.
 
 ### RF-1312 - Reintento de entrega del nombre
 
@@ -153,10 +155,11 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 13. `Lo de siempre` conserva la solicitud pendiente y pide una aclaracion.
 14. Una señal de prioridad y su notificacion no contienen diagnosticos ni cambian la
     respuesta de agendamiento.
-15. Un paciente sin nombre recibe primero la pregunta por su nombre; despues de
-    responderla recibe la pregunta por el motivo.
-16. El nombre se conserva en `patients.name`, el mismo mensaje reintentado no crea
-    una cita y un motivo posterior crea la cita con el horario original.
+15. Cada nueva cita pregunta primero el nombre, incluso si ya esta registrado; despues
+    de recibirlo pregunta el motivo.
+16. El nombre recibido reemplaza el valor de `patients.name`, el mismo mensaje
+    reintentado no crea una cita y un motivo posterior crea la cita con el horario
+    original.
 
 ## Fuera del alcance
 

@@ -2,7 +2,8 @@
 
 ## Estado
 
-Aceptada.
+Reemplazada en parte por ADR 0032. La recoleccion de nombre descrita aqui ahora se
+realiza en cada cita nueva, incluso cuando ya hay un nombre registrado.
 
 ## Contexto
 
@@ -30,6 +31,6 @@ expresado por el paciente.
 
 - Las citas nuevas pueden requerir un mensaje adicional antes del motivo.
 - El nombre queda disponible para las notificaciones internas al doctor.
-- Los pacientes con nombre ya registrado conservan el flujo de solicitar solo el
-  motivo.
+- Antes de ADR 0032, los pacientes con nombre ya registrado conservaban el flujo de
+  solicitar solo el motivo.
 - El nombre no se considera una identidad verificada durante el MVP tecnico.

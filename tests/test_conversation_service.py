@@ -9,6 +9,7 @@ from calendar_domain import PatientScope
 from calendar_domain import AppointmentStatus, ToolName
 from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from conversation_service import (
+    APPOINTMENT_NAME_REPLY,
     APPOINTMENT_REASON_REPLY,
     SYSTEM_PROMPT,
     ConversationService,
@@ -334,6 +335,21 @@ class ConversationContextTests(unittest.TestCase):
             provider_message_id="wamid.transcript-choice-reply",
         )
 
+        name_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.transcript-name",
+                message_type="text",
+                text="Ana Prueba",
+            )
+        )
+        name_reply = asyncio.run(service.build_reply(name_context))
+        service.record_reply_sent(
+            name_context,
+            body=name_reply,
+            provider_message_id="wamid.transcript-name-reply",
+        )
+
         reason_context = service.receive_message(
             IncomingTextMessage(
                 sender="5491100000000",
@@ -345,7 +361,8 @@ class ConversationContextTests(unittest.TestCase):
         reason_reply = asyncio.run(service.build_reply(reason_context))
 
         self.assertIn("horarios disponibles", date_reply.lower())
-        self.assertEqual(choice_reply, APPOINTMENT_REASON_REPLY)
+        self.assertEqual(choice_reply, APPOINTMENT_NAME_REPLY)
+        self.assertEqual(name_reply, APPOINTMENT_REASON_REPLY)
         self.assertIn("confirmada", reason_reply.lower())
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(len(provider.appointments), 1)
@@ -729,6 +746,21 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
 
+    def provide_patient_name(
+        self,
+        service: ConversationService,
+        message_id: str,
+    ) -> str:
+        context = service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id=message_id,
+                message_type="text",
+                text="Ana Prueba",
+            )
+        )
+        return asyncio.run(service.build_reply(context))
+
     def test_create_requests_and_persists_missing_patient_name(self) -> None:
         sender = "5491100000001"
         self.service.llm_provider.replies = (
@@ -802,7 +834,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(self.provider.appointments[-1].reason, "Revisión general")
 
-    def test_create_asks_for_reason_before_provider_execution(self) -> None:
+    def test_create_always_asks_for_name_before_reason(self) -> None:
         self.service.llm_provider.replies = (
             ToolCall(
                 name=ToolName.CREATE_APPOINTMENT.value,
@@ -825,35 +857,115 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         first_reply = asyncio.run(self.service.build_reply(first_context))
 
-        self.assertIn("motivo", first_reply.lower())
+        self.assertIn("nombre", first_reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
 
-        repeated_context = self.service.receive_message(
+        name_context = self.service.receive_message(
             IncomingTextMessage(
                 sender=self.scope_sender,
-                message_id="wamid.create-request",
+                message_id="wamid.create-name-existing",
+                message_type="text",
+                text="Ana Prueba",
+            )
+        )
+        name_reply = asyncio.run(self.service.build_reply(name_context))
+
+        self.assertIn("motivo", name_reply.lower())
+        with self.service.database.transaction() as connection:
+            patient = connection.execute(
+                "SELECT name FROM patients WHERE whatsapp_number = ?",
+                (self.scope_sender,),
+            ).fetchone()
+        self.assertEqual(patient[0], "Ana Prueba")
+
+        repeated_name_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.create-name-existing",
                 message_type="text",
                 text="Texto ignorado por idempotencia",
             )
         )
-        repeated_reply = asyncio.run(self.service.build_reply(repeated_context))
+        repeated_name_reply = asyncio.run(
+            self.service.build_reply(repeated_name_context)
+        )
 
-        self.assertIn("motivo", repeated_reply.lower())
+        self.assertIn("motivo", repeated_name_reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
 
         reason_context = self.service.receive_message(
             IncomingTextMessage(
                 sender=self.scope_sender,
-                message_id="wamid.create-reason",
+                message_id="wamid.create-reason-existing",
                 message_type="text",
-                text="Revision de cornea",
+                text="Revisión general",
             )
         )
+        reply = asyncio.run(self.service.build_reply(reason_context))
 
-        asyncio.run(self.service.build_reply(reason_context))
-
+        self.assertIn("confirmada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
-        self.assertEqual(self.provider.appointments[-1].reason, "Revision de cornea")
+        self.assertEqual(self.provider.appointments[-1].reason, "Revisión general")
+
+    def test_legacy_pending_request_keeps_its_existing_name_flow(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CREATE_APPOINTMENT.value,
+                arguments={
+                    "start_at": "2026-09-21T15:00:00",
+                    "reason": "Consulta general",
+                },
+                call_id="call-legacy-create",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.legacy-create-request",
+                message_type="text",
+                text="Agendame otra cita a las 15:00",
+            )
+        )
+        asyncio.run(self.service.build_reply(first_context))
+
+        with self.service.database.transaction() as connection:
+            conversation = self.service.conversations.get_by_id(
+                connection,
+                first_context.conversation_id,
+            )
+            self.assertIsNotNone(conversation)
+            stored_context = json.loads(conversation.context_json)
+            del stored_context["pending_appointment_reason"]["name_required"]
+            connection.execute(
+                "UPDATE conversations SET context_json = ? WHERE id = ?",
+                (json.dumps(stored_context), first_context.conversation_id),
+            )
+
+        repeated_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.legacy-create-request",
+                message_type="text",
+                text="Mensaje repetido",
+            )
+        )
+        repeated_reply = asyncio.run(self.service.build_reply(repeated_context))
+
+        self.assertEqual(repeated_reply, APPOINTMENT_REASON_REPLY)
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+
+        reason_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.legacy-create-reason",
+                message_type="text",
+                text="Revisión general",
+            )
+        )
+        reply = asyncio.run(self.service.build_reply(reason_context))
+
+        self.assertIn("confirmada", reply)
+        self.assertEqual(len(self.provider.appointments), 2)
 
     def test_invalid_reason_keeps_pending_request_until_valid_reason_arrives(self) -> None:
         self.service.llm_provider.replies = (
@@ -879,6 +991,10 @@ class AppointmentConfirmationTests(unittest.TestCase):
         first_reply = asyncio.run(
             self.service.build_reply(first_context, appointment_event_sink=events.append)
         )
+        name_reply = self.provide_patient_name(
+            self.service,
+            "wamid.invalid-reason-name",
+        )
 
         invalid_context = self.service.receive_message(
             IncomingTextMessage(
@@ -892,7 +1008,8 @@ class AppointmentConfirmationTests(unittest.TestCase):
             self.service.build_reply(invalid_context, appointment_event_sink=events.append)
         )
 
-        self.assertIn("motivo", first_reply.lower())
+        self.assertIn("nombre", first_reply.lower())
+        self.assertIn("motivo", name_reply.lower())
         self.assertIn("no pude identificar", invalid_reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
         self.assertEqual(events, [])
@@ -938,6 +1055,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(self.service.build_reply(first_context))
+        self.provide_patient_name(self.service, "wamid.asdf-name")
 
         reason_context = self.service.receive_message(
             IncomingTextMessage(
@@ -973,6 +1091,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(self.service.build_reply(first_context))
+        self.provide_patient_name(self.service, "wamid.blurred-name")
 
         reason_context = self.service.receive_message(
             IncomingTextMessage(
@@ -1027,6 +1146,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(service.build_reply(first_context))
+        self.provide_patient_name(service, "wamid.eye-pain-name")
 
         reason_context = service.receive_message(
             IncomingTextMessage(
@@ -1079,6 +1199,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(self.service.build_reply(first_context))
+        self.provide_patient_name(self.service, "wamid.general-review-name")
 
         reason_context = self.service.receive_message(
             IncomingTextMessage(
@@ -1114,6 +1235,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(self.service.build_reply(first_context))
+        self.provide_patient_name(self.service, "wamid.vague-name")
 
         reason_context = self.service.receive_message(
             IncomingTextMessage(
@@ -1149,6 +1271,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             )
         )
         asyncio.run(self.service.build_reply(first_context))
+        self.provide_patient_name(self.service, "wamid.invalid-then-valid-name")
 
         invalid_context = self.service.receive_message(
             IncomingTextMessage(
@@ -1214,6 +1337,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         )
 
         asyncio.run(service.build_reply(first_context))
+        self.provide_patient_name(service, "wamid.structured-reason-name")
 
         out_of_scope_context = service.receive_message(
             IncomingTextMessage(
@@ -1309,6 +1433,10 @@ class AppointmentConfirmationTests(unittest.TestCase):
             llm_provider=FakeLLMProvider(),
             tool_executor=self.service.tool_executor,
         )
+        name_reply = self.provide_patient_name(
+            restarted_service,
+            "wamid.restart-name",
+        )
         reason_context = restarted_service.receive_message(
             IncomingTextMessage(
                 sender=self.scope_sender,
@@ -1320,7 +1448,8 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         second_reply = asyncio.run(restarted_service.build_reply(reason_context))
 
-        self.assertIn("motivo", first_reply.lower())
+        self.assertIn("nombre", first_reply.lower())
+        self.assertIn("motivo", name_reply.lower())
         self.assertIn("confirmada", second_reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(

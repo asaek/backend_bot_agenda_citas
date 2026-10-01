@@ -50,11 +50,11 @@
       prioridad y ausencia de notificacion mientras el motivo sea invalido.
 - [x] Documentar que la politica clinica para pacientes reales queda pendiente.
 
-## Corte 7 - Nombre del paciente antes del motivo
+## Corte 7 - Nombre del paciente en cada cita
 
-- [x] Solicitar el nombre cuando el paciente no tenga uno registrado.
-- [x] Persistir el nombre en `patients.name` junto con el estado pendiente.
+- [x] Solicitar el nombre al iniciar cada cita nueva, incluso si ya esta registrado.
+- [x] Guardar o actualizar el nombre en `patients.name` junto con el estado pendiente.
 - [x] Evitar que un reintento del mensaje del nombre se procese como motivo.
-- [x] Cubrir el flujo nombre, motivo, cita y notificacion en pruebas.
+- [x] Cubrir el flujo para un paciente con nombre previo: nombre, motivo y cita.
 - [x] Ejecutar la suite completa y verificar health check y ambos metodos del webhook
       en el mirror de Raspberry Pi.

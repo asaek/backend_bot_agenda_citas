@@ -119,12 +119,16 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([appointment.id for appointment in appointments], ["event-early", "event-late"])
         self.assertTrue(all(appointment.patient_scope == self.patient for appointment in appointments))
-        self.assertEqual(len(self.requests), 2)
-        for request in self.requests:
+        self.assertEqual(len(self.requests), 3)
+        for request in self.requests[:2]:
             properties = request.url.params.get_list("privateExtendedProperty")
             self.assertIn(f"{MANAGED_BY_PROPERTY}={MANAGED_BY_VALUE}", properties)
             self.assertIn(f"{PATIENT_ID_PROPERTY}=7", properties)
         self.assertEqual(self.requests[1].url.params["pageToken"], "page-2")
+        self.assertEqual(
+            self.requests[2].url.params["q"],
+            f"+{self.patient.whatsapp_number}",
+        )
 
     async def test_list_omits_cancelled_events_from_current_appointments(self) -> None:
         self.mode = "list-with-cancelled"
@@ -135,6 +139,52 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([appointment.id for appointment in appointments], ["event-active"])
         self.assertEqual(self.requests[0].url.params["showDeleted"], "false")
+
+    async def test_list_includes_manual_events_with_exact_whatsapp_marker(self) -> None:
+        self.mode = "list-manual"
+
+        appointments = await self.provider_for("calendar-1").list_appointments(
+            patient_scope=self.patient,
+        )
+
+        self.assertEqual(
+            [appointment.id for appointment in appointments],
+            ["bot-event", "manual-event"],
+        )
+        self.assertEqual(len(self.requests), 2)
+        self.assertIn(
+            f"{PATIENT_ID_PROPERTY}={self.patient.patient_id}",
+            self.requests[0].url.params.get_list("privateExtendedProperty"),
+        )
+        self.assertEqual(
+            self.requests[1].url.params["q"],
+            f"+{self.patient.whatsapp_number}",
+        )
+        self.assertNotIn(
+            "privateExtendedProperty",
+            self.requests[1].url.params,
+        )
+        self.assertEqual(appointments[1].reason, "Revision corneal")
+
+    async def test_manual_event_with_exact_whatsapp_marker_can_be_cancelled(self) -> None:
+        self.mode = "cancel-manual"
+
+        cancelled = await self.provider_for("calendar-1").cancel_appointment(
+            patient_scope=self.patient,
+            appointment_id="manual-event",
+        )
+
+        self.assertEqual(cancelled.status, AppointmentStatus.CANCELLED)
+        self.assertEqual([request.method for request in self.requests], ["GET", "PATCH"])
+
+    async def test_manual_event_with_another_phone_is_not_modifiable(self) -> None:
+        self.mode = "cancel-manual-other-patient"
+
+        with self.assertRaises(AppointmentAccessDenied):
+            await self.provider_for("calendar-1").cancel_appointment(
+                patient_scope=self.patient,
+                appointment_id="other-manual-event",
+            )
 
     async def test_reschedule_and_cancel_use_event_patch(self) -> None:
         self.mode = "reschedule"
@@ -296,6 +346,8 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
             event["description"] = json.loads(request.content)["description"]
             return self._json_response(request, event)
         if self.mode == "list" and request.method == "GET":
+            if request.url.params.get("q") is not None:
+                return self._json_response(request, {"items": []})
             if request.url.params.get("pageToken") == "page-2":
                 return self._json_response(
                     request,
@@ -314,6 +366,8 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
         if self.mode == "list-with-cancelled" and request.method == "GET":
+            if request.url.params.get("q") is not None:
+                return self._json_response(request, {"items": []})
             return self._json_response(
                 request,
                 {
@@ -323,6 +377,48 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             )
+        if self.mode == "list-manual" and request.method == "GET":
+            if request.url.params.get("q") is None:
+                return self._json_response(
+                    request,
+                    {"items": [self._event("bot-event")]},
+                )
+
+            manual_event = self._event("manual-event")
+            manual_event.pop("extendedProperties")
+            manual_event["description"] = (
+                f"WhatsApp: +{self.patient.whatsapp_number}\nRevision corneal"
+            )
+            other_patient_event = self._event("other-manual-event")
+            other_patient_event.pop("extendedProperties")
+            other_patient_event["description"] = (
+                f"WhatsApp: +{self.patient.whatsapp_number}1\nNo mostrar"
+            )
+            unidentified_event = self._event("unidentified-manual-event")
+            unidentified_event.pop("extendedProperties")
+            unidentified_event["description"] = "Revision corneal"
+            return self._json_response(
+                request,
+                {
+                    "items": [
+                        manual_event,
+                        other_patient_event,
+                        unidentified_event,
+                    ]
+                },
+            )
+        if self.mode in {"cancel-manual", "cancel-manual-other-patient"}:
+            if self.mode == "cancel-manual-other-patient":
+                event_id = "other-manual-event"
+                phone_number = self.other_patient.whatsapp_number
+            else:
+                event_id = "manual-event"
+                phone_number = self.patient.whatsapp_number
+            status = "cancelled" if request.method == "PATCH" else "confirmed"
+            event = self._event(event_id, status=status)
+            event.pop("extendedProperties")
+            event["description"] = f"WhatsApp: +{phone_number}\nRevision corneal"
+            return self._json_response(request, event)
         if self.mode == "reschedule":
             if request.method == "GET":
                 return self._json_response(request, self._event("event-1"))

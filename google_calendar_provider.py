@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -44,6 +45,9 @@ MANAGED_BY_PROPERTY = "managed_by"
 MANAGED_BY_VALUE = "whatsapp_chatbot"
 PATIENT_ID_PROPERTY = "patient_id"
 CONVERSATION_ID_PROPERTY = "conversation_id"
+_WHATSAPP_MARKER_LINE = re.compile(
+    r"(?im)^[ \t]*whatsapp[ \t]*:[ \t]*(\+?[0-9][0-9(). \t-]*[0-9])[ \t]*$"
+)
 
 
 class GoogleCalendarConfigurationError(ValueError):
@@ -363,25 +367,35 @@ class GoogleCalendarProvider(CalendarProvider):
             _validate_range(start_at, end_at)
 
         # Las consultas normales representan citas vigentes, no tombstones de Google.
-        appointments: list[Appointment] = []
+        events_by_key: dict[tuple[str, str], Mapping[str, object]] = {}
+        whatsapp_query = _whatsapp_search_query(patient_scope.whatsapp_number)
         for calendar_id in self.calendar_ids:
-            events = await self._list_events(
-                calendar_id,
-                patient_scope=patient_scope,
-                start_at=start_at,
-                end_at=end_at,
-            )
-            for event in events:
-                appointment = self._translate_event(
+            searches = (None, whatsapp_query) if whatsapp_query is not None else (None,)
+            for search_query in searches:
+                events = await self._list_events(
                     calendar_id,
-                    event,
                     patient_scope=patient_scope,
+                    start_at=start_at,
+                    end_at=end_at,
+                    search_query=search_query,
                 )
-                if (
-                    appointment is not None
-                    and appointment.status is not AppointmentStatus.CANCELLED
-                ):
-                    appointments.append(appointment)
+                for event in events:
+                    event_id = event.get("id")
+                    if isinstance(event_id, str):
+                        events_by_key[(calendar_id, event_id)] = event
+
+        appointments: list[Appointment] = []
+        for (calendar_id, _), event in events_by_key.items():
+            appointment = self._translate_event(
+                calendar_id,
+                event,
+                patient_scope=patient_scope,
+            )
+            if (
+                appointment is not None
+                and appointment.status is not AppointmentStatus.CANCELLED
+            ):
+                appointments.append(appointment)
         return tuple(sorted(appointments, key=lambda item: (item.start_at, item.id)))
 
     async def reschedule_appointment(
@@ -514,6 +528,7 @@ class GoogleCalendarProvider(CalendarProvider):
         patient_scope: PatientScope,
         start_at: datetime | None,
         end_at: datetime | None,
+        search_query: str | None = None,
     ) -> tuple[Mapping[str, object], ...]:
         page_token: str | None = None
         seen_page_tokens: set[str] = set()
@@ -524,15 +539,22 @@ class GoogleCalendarProvider(CalendarProvider):
                 ("showDeleted", "false"),
                 ("orderBy", "startTime"),
                 ("maxResults", "2500"),
-                (
-                    "privateExtendedProperty",
-                    f"{MANAGED_BY_PROPERTY}={MANAGED_BY_VALUE}",
-                ),
-                (
-                    "privateExtendedProperty",
-                    f"{PATIENT_ID_PROPERTY}={patient_scope.patient_id}",
-                ),
             ]
+            if search_query is None:
+                params.extend(
+                    (
+                        (
+                            "privateExtendedProperty",
+                            f"{MANAGED_BY_PROPERTY}={MANAGED_BY_VALUE}",
+                        ),
+                        (
+                            "privateExtendedProperty",
+                            f"{PATIENT_ID_PROPERTY}={patient_scope.patient_id}",
+                        ),
+                    )
+                )
+            else:
+                params.append(("q", search_query))
             if start_at is not None and end_at is not None:
                 params.extend(
                     (
@@ -640,7 +662,12 @@ class GoogleCalendarProvider(CalendarProvider):
         }.get(event.get("status"), AppointmentStatus.SCHEDULED)
         description = event.get("description")
         summary = event.get("summary")
-        reason = description if isinstance(description, str) and description.strip() else summary
+        clean_description = (
+            _WHATSAPP_MARKER_LINE.sub("", description).strip()
+            if isinstance(description, str)
+            else ""
+        )
+        reason = clean_description or summary
         if not isinstance(reason, str) or not reason.strip():
             reason = "Cita medica"
         return Appointment(
@@ -767,15 +794,41 @@ def _private_properties(event: Mapping[str, object]) -> Mapping[str, str]:
     }
 
 
+def _whatsapp_search_query(whatsapp_number: str) -> str | None:
+    digits = _whatsapp_digits(whatsapp_number)
+    return f"+{digits}" if digits is not None else None
+
+
+def _whatsapp_digits(value: str) -> str | None:
+    digits = re.sub(r"[^0-9]", "", value)
+    return digits if 8 <= len(digits) <= 15 else None
+
+
+def _event_has_whatsapp_marker(
+    event: Mapping[str, object],
+    whatsapp_number: str,
+) -> bool:
+    description = event.get("description")
+    expected_digits = _whatsapp_digits(whatsapp_number)
+    if not isinstance(description, str) or expected_digits is None:
+        return False
+    return any(
+        _whatsapp_digits(match.group(1)) == expected_digits
+        for match in _WHATSAPP_MARKER_LINE.finditer(description)
+    )
+
+
 def _event_matches_patient(
     event: Mapping[str, object],
     patient_scope: PatientScope,
 ) -> bool:
     private = _private_properties(event)
-    return (
-        private.get(MANAGED_BY_PROPERTY) == MANAGED_BY_VALUE
-        and private.get(PATIENT_ID_PROPERTY) == str(patient_scope.patient_id)
-    )
+    if MANAGED_BY_PROPERTY in private or PATIENT_ID_PROPERTY in private:
+        return (
+            private.get(MANAGED_BY_PROPERTY) == MANAGED_BY_VALUE
+            and private.get(PATIENT_ID_PROPERTY) == str(patient_scope.patient_id)
+        )
+    return _event_has_whatsapp_marker(event, patient_scope.whatsapp_number)
 
 
 def _format_datetime(value: datetime) -> str:

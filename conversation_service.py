@@ -105,9 +105,9 @@ SYSTEM_PROMPT = "\n".join(
         "consultar primero check_availability para todo ese dia; no pedir aun la hora "
         "ni el motivo.",
         "Despues de mostrar los horarios libres, esperar a que el paciente elija uno; "
-        "solo entonces solicitar create_appointment. Si el paciente no tiene nombre "
-        "registrado, el backend lo preguntara y despues solicitara el motivo antes de "
-        "ejecutarla.",
+        "solo entonces solicitar create_appointment. Despues de que el paciente elija "
+        "un horario, el backend siempre preguntara su nombre completo y luego solicitara "
+        "el motivo antes de ejecutarla.",
         "Cuando el backend muestre horarios disponibles, no pidas directamente el nombre "
         "ni el motivo y no vuelvas a consultar disponibilidad; espera la seleccion del "
         "paciente.",
@@ -559,14 +559,21 @@ class ConversationService:
                 "Solicítala nuevamente indicando el horario."
             )
         if pending_reason.source_message_id == context.incoming_message_id:
-            return self._appointment_data_reply(context)
-
-        patient_name = self._load_patient_name(context.patient_id)
-        if pending_reason.name_message_id == context.incoming_message_id:
-            if patient_name is not None:
+            if (
+                pending_reason.name_required is None
+                and self._load_patient_name(context.patient_id) is not None
+            ):
                 return APPOINTMENT_REASON_REPLY
+            return APPOINTMENT_NAME_REPLY
 
-        if patient_name is None:
+        if pending_reason.name_message_id == context.incoming_message_id:
+            return APPOINTMENT_REASON_REPLY
+
+        name_required = pending_reason.name_required
+        if name_required is None:
+            name_required = self._load_patient_name(context.patient_id) is None
+
+        if name_required:
             normalized_name = _normalize_patient_name(context.incoming_text)
             if normalized_name is None:
                 return APPOINTMENT_NAME_CLARIFICATION_REPLY
@@ -746,6 +753,14 @@ class ConversationService:
     def _clear_pending_appointment_reason(self, conversation_id: int) -> None:
         self._update_appointment_reason_context(conversation_id, None)
 
+    def _load_patient_name(self, patient_id: int) -> str | None:
+        with self.database.transaction() as connection:
+            patient = self.patients.get_by_id(connection, patient_id)
+        if patient is None or not isinstance(patient.name, str):
+            return None
+        normalized_name = " ".join(patient.name.split())
+        return normalized_name or None
+
     def _start_pending_appointment_reason(
         self,
         context: ConversationContext,
@@ -756,7 +771,7 @@ class ConversationService:
             context.conversation_id,
             pending_reason,
         )
-        return self._appointment_data_reply(context)
+        return APPOINTMENT_NAME_REPLY
 
     def _save_pending_appointment_availability(
         self,
@@ -793,19 +808,6 @@ class ConversationService:
             PENDING_APPOINTMENT_AVAILABILITY_KEY,
             None,
         )
-
-    def _appointment_data_reply(self, context: ConversationContext) -> str:
-        if self._load_patient_name(context.patient_id) is None:
-            return APPOINTMENT_NAME_REPLY
-        return APPOINTMENT_REASON_REPLY
-
-    def _load_patient_name(self, patient_id: int) -> str | None:
-        with self.database.transaction() as connection:
-            patient = self.patients.get_by_id(connection, patient_id)
-        if patient is None or not isinstance(patient.name, str):
-            return None
-        normalized_name = " ".join(patient.name.split())
-        return normalized_name or None
 
     def _save_patient_name_and_pending_reason(
         self,

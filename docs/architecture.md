@@ -233,8 +233,9 @@ producir un evento de cita y una notificacion al doctor.
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
 `create_appointment` antes de `ToolExecutor`. `ConversationService` guarda el
-horario en `conversations.context_json`, solicita el nombre si falta en `patients`,
-y despues pregunta el motivo. El valor que el LLM haya propuesto se descarta. El
+horario en `conversations.context_json`, solicita el nombre en cada cita nueva y lo
+actualiza en `patients.name`, aunque ya existiera, y despues pregunta el motivo. El
+valor que el LLM haya propuesto se descarta. El
 mensaje que entrega el nombre queda marcado en el estado pendiente para que un
 reintento no se use como motivo. El siguiente mensaje de motivo se normaliza solo en
 espacios y se usa como `reason` para ejecutar la cita; referencias vagas como `Lo de
@@ -314,7 +315,9 @@ ni reinterpretarlos sin una regla explicita. Para calcular disponibilidad combin
 - Espacios bloqueados manualmente.
 
 Los eventos existentes sin metadatos del sistema no se consideran citas
-administradas por el chatbot; el adaptador solo puede listarlos de forma indirecta
+administradas por el chatbot; para que una cita creada manualmente sea visible al
+paciente, la descripcion debe contener una linea `WhatsApp: +<E.164>` que coincida
+exactamente con su numero. El adaptador puede listar otros eventos de forma indirecta
 como periodos ocupados para disponibilidad.
 
 La API de Google Calendar puede consultar los periodos ocupados de uno o varios
@@ -330,16 +333,18 @@ configurados y `events.list` con paginacion y `showDeleted=false` para localizar
 citas vigentes del paciente. Las mutaciones usan `sendUpdates=all`: no hay asistentes
 agregados por el adaptador, pero se evita el modo `none`, que Google advierte que
 puede perder eventos o impedir su sincronizacion.
-Los eventos creados por el chatbot llevan propiedades extendidas privadas para
-identificarlos como citas administradas por el sistema. Las operaciones de lectura
-y modificacion exigen `managed_by=whatsapp_chatbot` y el `patient_id` del alcance
-actual; los eventos existentes sin esos metadatos no se reinterpretan ni se
-modifican.
+Los eventos creados por el chatbot llevan propiedades extendidas privadas
+`managed_by=whatsapp_chatbot` y `patient_id`. Los eventos creados por el medico o su
+secretaria se asocian mediante una linea completa `WhatsApp: +<E.164>` en la
+descripcion, comparada con el numero resuelto desde el webhook. Las operaciones de
+lectura y modificacion aceptan una de esas dos asociaciones; un nombre coincidente,
+un numero parcial o un evento sin marcador no bastan. El marcador se elimina del
+motivo antes de serializar la cita al LLM.
 
 La herramienta `list_appointments` entrega a la capa conversacional las citas
-administradas del paciente, incluyendo su ID interno para futuras operaciones de
-reprogramacion o cancelacion. El serializador del agente omite el calendario y el
-`PatientScope` antes de devolver el resultado al LLM.
+administradas o asociadas por telefono al paciente, incluyendo su ID interno para
+futuras operaciones de reprogramacion o cancelacion. El serializador del agente omite
+el calendario y el `PatientScope` antes de devolver el resultado al LLM.
 
 La autenticacion admite OAuth con refresh/access token y cuentas de servicio,
 incluida delegacion de dominio opcional. `google-auth` refresca los tokens y
