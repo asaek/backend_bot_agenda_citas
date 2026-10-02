@@ -37,6 +37,12 @@ forma interna. En ambos casos el nombre debe ser texto no vacio y los argumentos
 deben ser un objeto. La capa no conoce los argumentos requeridos de cada
 herramienta; esa validacion pertenece a `parse_tool_request()`.
 
+Los argumentos opcionales `start_at` y `end_at` de `list_appointments` admiten
+`null` en el esquema enviado al proveedor. Algunos modelos compatibles, incluido
+Groq `openai/gpt-oss-20b`, devuelven esos valores nulos en vez de omitirlos. El
+parser de agenda los convierte en `None`; el contrato requiere que ambos extremos
+sean nulos/ausentes o que ambos formen un rango completo.
+
 El proveedor usa `tool_choice=auto`. Si no hay tool call, el adaptador conserva el comportamiento textual existente:
 recorta el contenido, rechaza respuestas vacias y aplica el limite configurado.
 

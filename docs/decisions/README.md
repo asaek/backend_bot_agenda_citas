@@ -41,3 +41,8 @@ indique cual decision anterior queda obsoleta.
 - [0030 - Continuacion de fecha de reserva controlada por el backend](./0030-backend-owned-booking-date.md)
 - [0031 - Asociacion segura de citas manuales por WhatsApp](./0031-manual-calendar-appointment-ownership.md)
 - [0032 - Solicitud del nombre en cada cita nueva](./0032-patient-name-for-every-appointment.md)
+- [0033 - Valores nulos para el rango opcional de citas](./0033-nullable-appointment-list-range.md)
+- [0034 - Bloques para presentar citas en WhatsApp](./0034-appointment-list-block-format.md)
+- [0035 - Negrita compatible con WhatsApp en citas](./0035-whatsapp-bold-appointment-labels.md)
+- [0036 - Normalizacion del bloque de motivo de cita](./0036-normalize-appointment-reason-line.md)
+- [0037 - Confirmacion de citas por intencion afirmativa o negativa](./0037-natural-appointment-confirmations.md)

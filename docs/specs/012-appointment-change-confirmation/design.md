@@ -2,8 +2,9 @@
 
 ## Estado
 
-Implementado. La confirmacion se aplica antes de ejecutar el proveedor de calendario
-y conserva la integracion de eventos y notificaciones existente.
+Implementado y verificado en Raspberry Pi. La confirmacion se aplica antes de
+ejecutar el proveedor de calendario y conserva la integracion de eventos y
+notificaciones existente.
 
 ## Flujo implementado
 
@@ -48,11 +49,13 @@ usa la pregunta generica.
 
 ## Resolucion
 
-En el siguiente mensaje, `ConversationService` clasifica una respuesta afirmativa,
-negativa o ambigua. Una afirmacion reconstruye la llamada almacenada y la ejecuta
-mediante `AgentOrchestrator.execute_confirmed_tool()`. Una respuesta negativa limpia
-el estado sin tocar el calendario. Una respuesta ambigua mantiene el estado y pide
-responder `Si` o `No`.
+En el siguiente mensaje, `ConversationService` clasifica la intencion de la respuesta
+normalizada como afirmativa, negativa o ambigua. Reconoce expresiones afirmativas y
+negativas claras aunque incluyan cortesia, por ejemplo `Si, por favor` o `No,
+gracias`. Si encuentra señales contradictorias o de incertidumbre, conserva la
+accion y pide aclaracion. Una afirmacion reconstruye la llamada almacenada y la
+ejecuta mediante `AgentOrchestrator.execute_confirmed_tool()`; una respuesta
+negativa limpia el estado sin tocar el calendario.
 
 La confirmacion expira a los 10 minutos. El estado se limpia antes de una ejecucion
 confirmada para evitar reutilizar la misma autorizacion.

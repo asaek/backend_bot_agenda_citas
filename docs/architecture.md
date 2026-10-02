@@ -144,6 +144,9 @@ periodos ocupados, conflictos y fallos simulables. El `ToolExecutor` se encarga
 de parsear, validar, despachar cada operacion y envolver su salida en el output
 tipado correspondiente. `list_appointments` conserva el alcance del paciente,
 acepta un rango opcional por superposicion y no restringe consultas historicas.
+En el esquema del proveedor, cada extremo opcional admite una fecha ISO o `null`;
+ambos valores nulos equivalen a omitir el rango, mientras que un rango incompleto
+sigue siendo rechazado por el contrato.
 La suite verifica esta frontera sin Google Calendar.
 
 ### Persistence y repositories
@@ -223,7 +226,10 @@ entrega mantiene ademas el aislamiento entre destinatarios.
 La funcionalidad definida en `specs/012-appointment-change-confirmation/` intercepta
 las solicitudes de cancelacion y reprogramacion antes de `ToolExecutor`. La accion
 exacta queda pendiente en `conversations.context_json` hasta que el paciente
-responde afirmativamente. Antes de preguntar, `ConversationService` usa una lectura
+responde afirmativamente. `classify_confirmation()` interpreta marcadores de
+intencion en texto normalizado y acepta cortesia alrededor de afirmaciones o
+negaciones claras; señales contradictorias o inciertas siguen siendo ambiguas.
+Antes de preguntar, `ConversationService` usa una lectura
 del `ToolExecutor` para conservar fecha, horario y motivo de la cita en el snapshot
 de la accion; esos datos se muestran sin el ID interno. Una respuesta negativa o
 vencida no llama a una mutacion del calendario. Solo la ejecucion confirmada puede
@@ -285,7 +291,11 @@ conversacionales. Los resultados enviados al siguiente turno se sanea para
 excluir identificadores internos de paciente y calendario. Conservan el ID
 interno de las citas para que el agente pueda solicitar cambios posteriores; la
 redaccion final instruida por `ConversationService` no lo presenta al paciente y
-usa listas en lugar de tablas Markdown. El limite de iteraciones se configura
+presenta cada cita listada como un bloque con las etiquetas `*Horario:*` y
+`*Motivo de consulta:*`, usando negrita compatible con WhatsApp. No usa tablas ni
+HTML. `format_whatsapp_reply()` mueve el valor del motivo a la linea siguiente si
+el LLM lo devuelve junto a la etiqueta o con lineas vacias intermedias. El limite
+de iteraciones se configura
 mediante `LLM_MAX_TOOL_ITERATIONS`. La composicion de runtime se define en
 `main.py`; `create_calendar_provider()` es el punto de seleccion del proveedor.
 

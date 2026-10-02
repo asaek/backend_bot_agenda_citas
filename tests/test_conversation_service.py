@@ -408,6 +408,35 @@ class ConversationContextTests(unittest.TestCase):
         self.assertNotIn("|", reply)
         self.assertNotIn("ID", reply)
 
+    def test_build_reply_moves_appointment_reason_below_its_label(self) -> None:
+        self.llm_provider.reply = (
+            "- *Horario:* 10:00 a 10:30\n"
+            "  *Motivo de consulta:* ojos rojos\n\n"
+            "- *Horario:* 14:00 a 14:30\n"
+            "  *Motivo de consulta:*  \n  \n"
+            "  tengo los parpados rojos"
+        )
+        context = self.service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.appointment-format",
+                message_type="text",
+                text="Que citas tengo para hoy?",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(context))
+
+        self.assertEqual(
+            reply,
+            "- *Horario:* 10:00 a 10:30\n"
+            "  *Motivo de consulta:*\n"
+            "  ojos rojos\n\n"
+            "- *Horario:* 14:00 a 14:30\n"
+            "  *Motivo de consulta:*\n"
+            "  tengo los parpados rojos",
+        )
+
     def test_build_reply_uses_the_injected_tool_executor(self) -> None:
         calendar_provider = FakeCalendarProvider()
         llm_provider = FakeLLMProvider(
@@ -612,12 +641,26 @@ class ConversationContextTests(unittest.TestCase):
         self.assertTrue(messages[0].content.startswith(SYSTEM_PROMPT))
         self.assertIn("list_appointments", messages[0].content)
         self.assertIn(
-            "Cuando muestres detalles de una cita, incluye fecha, hora y motivo, "
+            "Cuando muestres el detalle de una sola cita, incluye fecha, hora y motivo, "
             "pero nunca muestres su ID interno al paciente.",
             messages[0].content,
         )
         self.assertIn("Nunca uses tablas Markdown", messages[0].content)
-        self.assertIn("lista simple con guiones", messages[0].content)
+        self.assertIn(
+            "usa este formato, con una cita por bloque y sin combinar el horario y el motivo:\n"
+            "- *Horario:* HH:MM a HH:MM\n"
+            "  *Motivo de consulta:*\n"
+            "  <motivo de la cita>.",
+            messages[0].content,
+        )
+        self.assertIn("asteriscos simples para negrita", messages[0].content)
+        self.assertIn("conserva el texto del motivo", messages[0].content)
+        self.assertIn(
+            "Cada bloque debe ocupar exactamente tres lineas: deja *Motivo de consulta:* "
+            "sola en la segunda linea y escribe el motivo en la tercera. Nunca pongas el "
+            "motivo en la misma linea que su etiqueta.",
+            messages[0].content,
+        )
         self.assertEqual(
             [(message.role, message.content) for message in messages[1:]],
             [
@@ -1569,7 +1612,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 sender=self.scope_sender,
                 message_id="wamid.reschedule-confirm",
                 message_type="text",
-                text="Confirmo",
+                text="Sí, por favor",
             )
         )
         confirmed_reply = asyncio.run(self.service.build_reply(confirmation_context))

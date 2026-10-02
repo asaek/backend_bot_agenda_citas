@@ -13,11 +13,61 @@ from llm_provider import ToolCall
 
 PENDING_APPOINTMENT_ACTION_KEY = "pending_appointment_action"
 APPOINTMENT_CONFIRMATION_TTL = timedelta(minutes=10)
+CONFIRMATION_RESPONSE_INSTRUCTIONS = (
+    "Puedes confirmar con ‘Sí’, ‘Sí, por favor’ o ‘Claro’; "
+    "responde ‘No’ para mantener la cita."
+)
 DESTRUCTIVE_APPOINTMENT_TOOLS = frozenset(
     {
         ToolName.RESCHEDULE_APPOINTMENT,
         ToolName.CANCEL_APPOINTMENT,
     }
+)
+_AFFIRMATIVE_CONFIRMATION_PHRASES = (
+    "si",
+    "sip",
+    "simon",
+    "confirmo",
+    "confirmar",
+    "de acuerdo",
+    "adelante",
+    "ok",
+    "okay",
+    "correcto",
+    "hazlo",
+    "claro",
+    "por supuesto",
+    "esta bien",
+    "me parece bien",
+    "perfecto",
+    "va",
+    "sale",
+    "dale",
+    "no hay problema",
+    "sin problema",
+    "si quiero",
+    "si deseo",
+)
+_NEGATIVE_CONFIRMATION_PHRASES = (
+    "no",
+    "no quiero",
+    "prefiero no",
+    "mejor no",
+    "cancelar",
+    "dejala asi",
+    "mantenerla",
+    "conservarla",
+)
+_UNCERTAIN_CONFIRMATION_PHRASES = (
+    "no se",
+    "no estoy seguro",
+    "no estoy segura",
+    "no estoy convencido",
+    "no estoy convencida",
+    "tal vez",
+    "quizas",
+    "puede ser",
+    "creo que",
 )
 
 
@@ -232,19 +282,22 @@ class PendingAppointmentAction:
                     "¿Confirmas que deseas reprogramar esta cita?\n\n"
                     f"{appointment_details}\n"
                     f"Nueva fecha y hora: {requested_start}.\n\n"
-                    "Responde Sí o No."
+                    f"{CONFIRMATION_RESPONSE_INSTRUCTIONS}"
                 )
             return (
                 "¿Confirmas que deseas reprogramar la cita para "
-                f"{requested_start}? Responde Sí o No."
+                f"{requested_start}? {CONFIRMATION_RESPONSE_INSTRUCTIONS}"
             )
         if appointment_details:
             return (
                 "¿Confirmas que deseas cancelar esta cita?\n\n"
                 f"{appointment_details}\n\n"
-                "Responde Sí o No."
+                f"{CONFIRMATION_RESPONSE_INSTRUCTIONS}"
             )
-        return "¿Confirmas que deseas cancelar la cita? Responde Sí o No."
+        return (
+            "¿Confirmas que deseas cancelar la cita? "
+            f"{CONFIRMATION_RESPONSE_INSTRUCTIONS}"
+        )
 
     def _format_appointment_details(self) -> str:
         if self.appointment_details is None:
@@ -264,30 +317,29 @@ class PendingAppointmentAction:
 
 def classify_confirmation(value: str) -> ConfirmationDecision:
     normalized = _normalize(value)
-    if normalized in {
-        "si",
-        "confirmo",
-        "confirmar",
-        "de acuerdo",
-        "adelante",
-        "ok",
-        "okay",
-        "correcto",
-        "hazlo",
-        "si quiero",
-        "si deseo",
-    }:
-        return ConfirmationDecision.CONFIRMED
-    if normalized in {
-        "no",
-        "no quiero",
-        "mejor no",
-        "cancelar",
-        "dejala asi",
-        "mantenerla",
-        "conservarla",
-    }:
+    if not normalized or _contains_confirmation_phrase(
+        normalized,
+        _UNCERTAIN_CONFIRMATION_PHRASES,
+    ):
+        return ConfirmationDecision.UNKNOWN
+
+    affirmative = _contains_confirmation_phrase(
+        normalized,
+        _AFFIRMATIVE_CONFIRMATION_PHRASES,
+    )
+    # "No hay problema" is an affirmative expression, not a rejection.
+    negative_text = normalized.replace("no hay problema", " ")
+    negative = _contains_confirmation_phrase(
+        negative_text,
+        _NEGATIVE_CONFIRMATION_PHRASES,
+    )
+
+    if affirmative and negative:
+        return ConfirmationDecision.UNKNOWN
+    if negative:
         return ConfirmationDecision.REJECTED
+    if affirmative:
+        return ConfirmationDecision.CONFIRMED
     return ConfirmationDecision.UNKNOWN
 
 
@@ -305,6 +357,11 @@ def _normalize(value: str) -> str:
         if unicodedata.category(character) != "Mn"
     )
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", without_marks)).strip()
+
+
+def _contains_confirmation_phrase(value: str, phrases: tuple[str, ...]) -> bool:
+    padded_value = f" {value} "
+    return any(f" {phrase} " in padded_value for phrase in phrases)
 
 
 def _parse_timestamp(value: str) -> datetime:

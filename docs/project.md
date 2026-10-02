@@ -197,8 +197,10 @@ HTTP del health check y de ambos metodos del webhook esta en
 La funcionalidad definida en `specs/012-appointment-change-confirmation/` exige una
 confirmacion explicita antes de cancelar o reprogramar una cita. Las acciones
 pendientes se conservan por conversacion durante 10 minutos; una respuesta
-negativa, ambigua o vencida no modifica la agenda. Las notificaciones al doctor se
-emiten solo despues de una operacion confirmada y exitosa. La pregunta muestra,
+negativa, ambigua o vencida no modifica la agenda. La interpretacion acepta
+respuestas naturales claras como `Si, por favor` y `Claro`, y vuelve a preguntar
+ante respuestas contradictorias o inciertas. Las notificaciones al doctor se emiten
+solo despues de una operacion confirmada y exitosa. La pregunta muestra,
 cuando la agenda puede recuperar la cita, su fecha, horario y motivo sin exponer
 el ID interno; si esa consulta de lectura falla, conserva la confirmacion con el
 texto generico.
@@ -307,7 +309,11 @@ El agente debera poder solicitar al backend las siguientes acciones:
 
 - Consultar la disponibilidad de horarios.
 - Crear una cita.
-- Consultar las citas asociadas al paciente de prueba, con un rango opcional.
+- Consultar las citas asociadas al paciente de prueba, con un rango opcional; los
+  extremos omitidos o ambos valores `null` representan una consulta sin rango.
+- Presentar cada cita listada en WhatsApp con horario y motivo de consulta en un
+  bloque de varias lineas, con las etiquetas en negrita compatible con WhatsApp y
+  el motivo debajo de su etiqueta.
 - Reprogramar una cita.
 - Cancelar una cita.
 

@@ -25,6 +25,7 @@ elija el paciente o la conversacion.
 - Validar nombres no vacios y argumentos JSON de tipo objeto.
 - Mantener el flujo textual existente.
 - Enviar al proveedor los esquemas OpenAI-compatible de las herramientas.
+- Permitir `null` en los dos argumentos de rango opcionales de `list_appointments`.
 - Entregar tool calls al orquestador sin enviarlos como texto a WhatsApp.
 - Probar todo sin API ni proveedor externo.
 
@@ -68,7 +69,9 @@ construya el `ToolRequest` en un incremento posterior.
 El adaptador OpenAI-compatible debe enviar las cinco herramientas del backend con
 sus nombres, descripciones, argumentos requeridos y `additionalProperties=false`.
 El esquema no debe incluir campos de identidad, calendario ni duracion controlados
-por el backend.
+por el backend. Los argumentos opcionales `start_at` y `end_at` de
+`list_appointments` aceptan una fecha ISO o `null`; cuando ambos son `null` o estan
+ausentes, la consulta no tiene rango.
 
 ## Criterios de aceptacion
 
@@ -82,6 +85,8 @@ por el backend.
 8. Un webhook con `ToolCall` no envia la representacion del objeto por WhatsApp.
 9. Los identificadores de paciente no se solicitan al LLM.
 10. La suite pasa sin credenciales ni llamadas externas.
+11. El esquema de `list_appointments` acepta rangos omitidos o ambos valores en
+    `null`, y el backend los interpreta como una consulta sin rango.
 
 ## Fuera de alcance
 

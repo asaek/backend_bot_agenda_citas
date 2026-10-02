@@ -9,6 +9,7 @@
 - [x] Validar nombre, argumentos y multiplicidad de llamadas.
 - [x] Mantener el limite de longitud para respuestas textuales.
 - [x] Enviar los esquemas de las cinco herramientas al proveedor.
+- [x] Aceptar valores `null` para el rango opcional de `list_appointments`.
 - [x] Evitar enviar tool calls como texto a WhatsApp.
 
 ## Pruebas
@@ -17,6 +18,7 @@
 - [x] Probar una respuesta nativa con `function.arguments` JSON.
 - [x] Probar una respuesta interna con argumentos objeto.
 - [x] Probar argumentos invalidos y multiples tool calls.
+- [x] Probar que `null` en ambos extremos equivale a omitir el rango.
 - [x] Probar el comportamiento seguro del webhook.
 - [x] Ejecutar la suite sin servicios externos.
 

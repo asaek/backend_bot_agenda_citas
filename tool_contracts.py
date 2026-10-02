@@ -68,6 +68,14 @@ def llm_tool_definitions() -> list[dict[str, object]]:
         "format": "date-time",
         "description": "Fecha y hora ISO 8601; si no incluye zona se usa la del backend.",
     }
+    optional_date_time = {
+        "type": ["string", "null"],
+        "format": "date-time",
+        "description": (
+            "Fecha y hora ISO 8601; si no incluye zona se usa la del backend. "
+            "Usa null o no incluyas el campo para consultar sin rango."
+        ),
+    }
     return [
         {
             "type": "function",
@@ -120,8 +128,8 @@ def llm_tool_definitions() -> list[dict[str, object]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_at": date_time,
-                        "end_at": date_time,
+                        "start_at": optional_date_time,
+                        "end_at": optional_date_time,
                     },
                     "additionalProperties": False,
                 },

@@ -2,8 +2,10 @@
 
 ## Estado
 
-Implementado. La cancelacion y la reprogramacion requieren una confirmacion
-explicita antes de modificar la fuente de verdad de agenda.
+Implementado y verificado en Raspberry Pi. La cancelacion y la reprogramacion
+requieren una confirmacion explicita antes de modificar la fuente de verdad de
+agenda; la clasificacion acepta expresiones naturales claras y conserva la
+aclaracion para respuestas contradictorias o inciertas.
 
 ## Objetivo
 
@@ -46,8 +48,11 @@ modificaciones.
 
 ### RF-1204 - Confirmacion ambigua o vencida
 
-Una respuesta que no sea claramente afirmativa o negativa debe solicitar nuevamente
-`Si` o `No`. Una confirmacion vencida debe descartarse y no ejecutar la accion.
+La clasificacion debe basarse en una intencion afirmativa o negativa clara, no en la
+coincidencia exacta con `Si` o `No`. Se permiten palabras de cortesia y variantes
+afirmativas directas como `Si, por favor`, `Claro` y `Adelante`. Una respuesta
+contradictoria, incierta o sin una intencion reconocible debe solicitar aclaracion.
+Una confirmacion vencida debe descartarse y no ejecutar la accion.
 
 ### RF-1205 - Notificacion posterior
 
@@ -57,8 +62,9 @@ despues de que el proveedor confirme una cancelacion o reprogramacion exitosa.
 ## Criterios de aceptacion
 
 1. `Deseo cancelarla` solicita confirmacion y no cambia el estado de la cita.
-2. `Si` despues de una solicitud de cancelacion ejecuta una unica cancelacion.
-3. `No` conserva la cita y elimina la accion pendiente.
+2. `Si`, `Si por favor` y `Claro, adelante` despues de una solicitud de cancelacion
+   ejecutan una unica cancelacion.
+3. `No` y `No, gracias` conservan la cita y eliminan la accion pendiente.
 4. Una solicitud de reprogramacion muestra el nuevo horario y requiere confirmacion.
 5. Una confirmacion no puede reutilizarse para otra cita u operacion.
 6. Una accion vencida no modifica la agenda.
@@ -66,6 +72,8 @@ despues de que el proveedor confirme una cancelacion o reprogramacion exitosa.
 8. Una operacion confirmada genera la notificacion existente una sola vez.
 9. La confirmacion de cancelacion muestra fecha, horario y motivo de la cita sin
    exponer su ID interno.
+10. Una respuesta contradictoria como `Si, pero mejor no` o incierta como `No estoy
+    seguro` solicita aclaracion y no modifica la agenda.
 
 ## Fuera del alcance
 

@@ -82,9 +82,14 @@ despues debe solicitar una reprogramacion o cancelacion.
 
 ## Formato para WhatsApp
 
-El `SYSTEM_PROMPT` indica que WhatsApp no admite tablas Markdown y que varias citas
-deben mostrarse como una lista simple con guiones. Como garantia adicional,
+El `SYSTEM_PROMPT` limita el formato a la sintaxis que WhatsApp reconoce, sin tablas
+Markdown ni HTML, y especifica un bloque por cita: etiqueta `*Horario:*` en la
+primera linea, `*Motivo de consulta:*` y el texto del motivo en las lineas
+siguientes. Las etiquetas usan un asterisco simple para negrita. El motivo se
+conserva y la fecha se incluye cuando el listado abarca varios dias. Como garantia adicional,
 `format_whatsapp_reply()` detecta tablas con encabezado y fila
 separadora en el texto final, conserva sus filas no vacias como elementos de lista
-y omite las columnas de ID interno. La conversion ocurre antes de que `main.py`
+y omite las columnas de ID interno. Tambien normaliza la etiqueta del motivo para
+que su valor quede en la linea siguiente, incluso si el modelo lo adjunta a la
+etiqueta o intercala una linea vacia. La conversion ocurre antes de que `main.py`
 envie y persista la respuesta; un `ToolCall` no se transforma.

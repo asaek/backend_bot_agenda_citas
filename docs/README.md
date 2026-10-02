@@ -45,6 +45,7 @@ esten aprobados.
 - [Verificacion de citas ingresadas manualmente en Google Calendar](./verification/2026-09-29-manual-calendar-appointments.md)
 - [Verificacion de horarios libres antes de agendar](./verification/2026-09-24-date-only-availability.md)
 - [Verificacion de variantes de lenguaje para horarios](./verification/2026-09-25-date-only-availability-language.md)
+- [Verificacion de confirmaciones naturales de citas](./verification/2026-10-01-natural-appointment-confirmations.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -60,3 +61,4 @@ esten aprobados.
 - [ADR 0030 - Continuacion de fecha de reserva controlada por el backend](./decisions/0030-backend-owned-booking-date.md)
 - [ADR 0031 - Asociacion segura de citas manuales por WhatsApp](./decisions/0031-manual-calendar-appointment-ownership.md)
 - [ADR 0032 - Solicitud del nombre en cada cita nueva](./decisions/0032-patient-name-for-every-appointment.md)
+- [ADR 0037 - Confirmacion de citas por intencion afirmativa o negativa](./decisions/0037-natural-appointment-confirmations.md)

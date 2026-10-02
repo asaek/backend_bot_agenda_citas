@@ -25,7 +25,7 @@ al LLM la identidad del paciente ni la seleccion de calendarios.
 - Mantener los IDs internos de citas disponibles para operaciones posteriores, sin
   presentarlos al paciente al redactar detalles de una cita.
 - Formatear la respuesta final para WhatsApp sin tablas Markdown; las citas deben
-  presentarse como una lista simple.
+  presentarse en bloques legibles con horario y motivo de consulta.
 - Resolver expresiones relativas de fecha con el contexto temporal confiable del
   backend antes de consultar citas.
 
@@ -72,11 +72,18 @@ permitir una reprogramacion o cancelacion posterior.
 
 ### RF-708 - Formato compatible con WhatsApp
 
-La respuesta textual final no debe usar tablas Markdown ni separadores con barras
-verticales. Cuando se listen varias citas, debe usar una lista simple con una cita
-por linea e incluir la hora y el motivo cuando esten disponibles. Si el LLM
-devuelve una tabla, `ConversationService` debe convertir sus filas a esa lista y
-omitir columnas de ID interno.
+La respuesta textual final no debe usar tablas Markdown, HTML ni separadores con
+barras verticales. Debe limitarse a la sintaxis de formato que WhatsApp reconoce,
+como negrita con un asterisco simple. Cada cita devuelta por `list_appointments`
+debe presentarse en su propio bloque de tres lineas: `- *Horario:* HH:MM a HH:MM`,
+`  *Motivo de consulta:*` y la descripcion del motivo en la linea siguiente. El
+horario y el motivo no deben combinarse; el texto del motivo debe conservarse. Si
+el listado abarca varios dias, se debe indicar la fecha de cada cita. Si el LLM
+devuelve la etiqueta y el motivo juntos o separados por lineas vacias,
+`ConversationService` debe normalizarlos para dejar el motivo inmediatamente debajo
+de su etiqueta sin reescribirlo. Si el LLM devuelve una tabla,
+`ConversationService` debe convertir sus filas a una lista y omitir columnas de ID
+interno.
 
 ## Criterios de aceptacion
 
@@ -92,8 +99,9 @@ omitir columnas de ID interno.
 8. El limite se carga desde `LLM_MAX_TOOL_ITERATIONS` y por defecto es 3.
 9. Una respuesta de detalles de cita no presenta el ID interno al paciente.
 10. El resultado interno conserva el ID de la cita para futuras mutaciones.
-11. Una respuesta con varias citas se envia como lista y no contiene una tabla
-    Markdown ni una columna de ID interno.
+11. Una respuesta con varias citas presenta cada una en un bloque con las etiquetas
+    de horario y motivo en negrita compatible con WhatsApp, con el motivo debajo de
+    su etiqueta, sin tablas ni IDs internos.
 12. La suite funciona sin servicios externos.
 
 ## Fuera de alcance

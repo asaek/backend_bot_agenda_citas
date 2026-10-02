@@ -104,6 +104,13 @@ class ToolContractTests(unittest.TestCase):
             self.request(ToolName.LIST_APPOINTMENTS, {}),
             default_timezone="UTC",
         )
+        null_range = parse_tool_request(
+            self.request(
+                ToolName.LIST_APPOINTMENTS,
+                {"start_at": None, "end_at": None},
+            ),
+            default_timezone="UTC",
+        )
         ranged = parse_tool_request(
             self.request(
                 ToolName.LIST_APPOINTMENTS,
@@ -117,6 +124,9 @@ class ToolContractTests(unittest.TestCase):
 
         self.assertIsInstance(all_appointments, ListAppointmentsInput)
         self.assertIsNone(all_appointments.start_at)
+        self.assertIsInstance(null_range, ListAppointmentsInput)
+        self.assertIsNone(null_range.start_at)
+        self.assertIsNone(null_range.end_at)
         self.assertIsInstance(ranged, ListAppointmentsInput)
         self.assertIsNotNone(ranged.end_at)
 
@@ -129,6 +139,14 @@ class ToolContractTests(unittest.TestCase):
 
         parameters = definition["parameters"]
         self.assertEqual(set(parameters["properties"]), {"start_at", "end_at"})
+        self.assertEqual(
+            parameters["properties"]["start_at"]["type"],
+            ["string", "null"],
+        )
+        self.assertEqual(
+            parameters["properties"]["end_at"]["type"],
+            ["string", "null"],
+        )
         self.assertNotIn("required", parameters)
         self.assertFalse(parameters["additionalProperties"])
 
@@ -177,6 +195,15 @@ class ToolContractTests(unittest.TestCase):
                 self.request(
                     ToolName.LIST_APPOINTMENTS,
                     {"start_at": "2026-09-21T00:00:00"},
+                ),
+                default_timezone="UTC",
+            )
+
+        with self.assertRaises(DomainValidationError):
+            parse_tool_request(
+                self.request(
+                    ToolName.LIST_APPOINTMENTS,
+                    {"start_at": None, "end_at": "2026-09-22T00:00:00"},
                 ),
                 default_timezone="UTC",
             )

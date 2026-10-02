@@ -6,6 +6,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from appointment_confirmation import (
+    CONFIRMATION_RESPONSE_INSTRUCTIONS,
     ConfirmationDecision,
     PendingAppointmentAction,
     PENDING_APPOINTMENT_ACTION_KEY,
@@ -122,13 +123,23 @@ SYSTEM_PROMPT = "\n".join(
         "Una cita solo debe describirse como cancelada despues de ejecutar con exito cancel_appointment.",
         "Si se consulta un día, no mezclar citas de otros días en la respuesta.",
         "Usar el id devuelto por list_appointments si luego debe reprogramar o cancelar.",
-        "WhatsApp no admite tablas Markdown ni separadores con barras verticales.",
-        "Nunca uses tablas Markdown; para varias citas usa una lista simple con guiones, "
-        "una cita por linea, con hora y motivo.",
-        "Cuando muestres detalles de una cita, incluye fecha, hora y motivo, "
+        "WhatsApp admite formato limitado con asteriscos simples para negrita, "
+        "pero no admite tablas Markdown ni HTML.",
+        "Nunca uses tablas Markdown. Para cada cita devuelta por list_appointments "
+        "usa este formato, con una cita por bloque y sin combinar el horario y el motivo:\n"
+        "- *Horario:* HH:MM a HH:MM\n"
+        "  *Motivo de consulta:*\n"
+        "  <motivo de la cita>.",
+        "Cada bloque debe ocupar exactamente tres lineas: deja *Motivo de consulta:* "
+        "sola en la segunda linea y escribe el motivo en la tercera. Nunca pongas el "
+        "motivo en la misma linea que su etiqueta.",
+        "Repite el bloque por cada cita y conserva el texto del motivo. Si el listado "
+        "abarca varios dias, indica la fecha en cada bloque; si corresponde a un solo "
+        "dia, no es necesario repetirla.",
+        "Cuando muestres el detalle de una sola cita, incluye fecha, hora y motivo, "
         "pero nunca muestres su ID interno al paciente.",
         "No pedir clínica, consultorio, calendario, duración ni preferencia de turno.",
-        "Responder únicamente con texto normal.",
+        "Responder únicamente con texto plano y formato compatible con WhatsApp; no usar HTML.",
     )
 )
 
@@ -522,7 +533,7 @@ class ConversationService:
 
         decision = classify_confirmation(context.incoming_text)
         if decision is ConfirmationDecision.UNKNOWN:
-            return "Responde Sí para confirmar la operación o No para mantener la cita."
+            return CONFIRMATION_RESPONSE_INSTRUCTIONS
 
         self._clear_pending_appointment_action(context.conversation_id)
         if decision is ConfirmationDecision.REJECTED:
@@ -1063,10 +1074,62 @@ class ConversationService:
 
 
 def format_whatsapp_reply(reply: LLMResponse) -> LLMResponse:
-    """Convierte tablas Markdown del LLM en listas legibles en WhatsApp."""
+    """Adapta listas de citas y tablas Markdown a texto legible en WhatsApp."""
     if not isinstance(reply, str):
         return reply
-    return _convert_markdown_tables(reply)
+    return _split_appointment_reason_label(_convert_markdown_tables(reply))
+
+
+_INLINE_APPOINTMENT_REASON_LABEL = re.compile(
+    r"^(?P<indent>[ \t]*)\*?Motivo de consulta:\*?[ \t]+(?P<reason>\S(?:.*\S)?)\s*$",
+    flags=re.IGNORECASE,
+)
+_APPOINTMENT_REASON_LABEL = re.compile(
+    r"^(?P<indent>[ \t]*)\*?Motivo de consulta:\*?[ \t]*$",
+    flags=re.IGNORECASE,
+)
+_APPOINTMENT_LIST_ITEM = re.compile(
+    r"^[ \t]*-[ \t]+(?:\*?Horario:|\*?Fecha:)",
+    flags=re.IGNORECASE,
+)
+
+
+def _split_appointment_reason_label(text: str) -> str:
+    """Deja la etiqueta del motivo sola y mueve su valor a la linea siguiente."""
+    lines = text.splitlines()
+    formatted_lines: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        inline_match = _INLINE_APPOINTMENT_REASON_LABEL.match(lines[index])
+        if inline_match is not None:
+            indent = inline_match.group("indent")
+            reason = inline_match.group("reason").strip()
+            formatted_lines.extend(
+                (
+                    f"{indent}*Motivo de consulta:*",
+                    f"{indent}{reason}",
+                )
+            )
+            index += 1
+            continue
+
+        label_match = _APPOINTMENT_REASON_LABEL.match(lines[index])
+        if label_match is None:
+            formatted_lines.append(lines[index])
+            index += 1
+            continue
+
+        indent = label_match.group("indent")
+        formatted_lines.append(f"{indent}*Motivo de consulta:*")
+        index += 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        if index < len(lines) and not _APPOINTMENT_LIST_ITEM.match(lines[index]):
+            formatted_lines.append(f"{indent}{lines[index].strip()}")
+            index += 1
+
+    return "\n".join(formatted_lines)
 
 
 def _convert_markdown_tables(text: str) -> str:

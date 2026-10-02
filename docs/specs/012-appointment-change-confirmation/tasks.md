@@ -23,3 +23,10 @@
   el ID interno.
 - [x] Obtener los datos mostrados mediante una consulta de solo lectura antes de
   guardar la accion pendiente.
+
+## Corte 4 - Interpretacion de respuestas naturales
+
+- [x] Aceptar respuestas afirmativas y negativas claras con palabras de cortesia.
+- [x] Mantener las respuestas contradictorias o inciertas en estado ambiguo.
+- [x] Verificar `Si, por favor` de extremo a extremo en una reprogramacion.
+- [x] Ejecutar la suite completa en Raspberry Pi (210 pruebas).
