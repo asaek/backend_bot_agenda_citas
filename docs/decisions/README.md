@@ -48,3 +48,4 @@ indique cual decision anterior queda obsoleta.
 - [0037 - Confirmacion de citas por intencion afirmativa o negativa](./0037-natural-appointment-confirmations.md)
 - [0038 - Diagnostico de errores limitado por modo y remitente](./0038-debug-error-reporting.md)
 - [0039 - Resolver la cita antes de solicitar confirmacion](./0039-resolve-appointment-before-confirmation.md)
+- [0040 - Consultar disponibilidad antes de confirmar una reprogramacion](./0040-reschedule-availability-before-confirmation.md)

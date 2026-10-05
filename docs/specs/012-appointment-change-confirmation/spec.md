@@ -4,8 +4,10 @@
 
 Verificado en Raspberry Pi. La cancelacion y la reprogramacion requieren una confirmacion explicita
 antes de modificar la fuente de verdad de agenda; la cita debe resolverse antes de pedir
-confirmacion. La clasificacion acepta expresiones naturales claras y conserva la
-aclaracion para respuestas contradictorias o inciertas.
+confirmacion. Para reprogramar, el backend consulta y presenta los horarios libres del dia
+destino, y solicita elegir uno antes de pedir confirmacion. La clasificacion acepta
+expresiones naturales claras y conserva la aclaracion para respuestas contradictorias o
+inciertas.
 
 ## Objetivo
 
@@ -18,6 +20,10 @@ La funcionalidad cubre:
 
 - Confirmacion previa para cancelar una cita.
 - Confirmacion previa para reprogramar una cita a un horario concreto.
+- Consulta y presentacion de los horarios libres de todo el dia destino antes de confirmar
+  una reprogramacion.
+- Seleccion de un horario ofrecido y validacion de esa seleccion antes de crear la
+  confirmacion pendiente.
 - Respuesta negativa sin cambios en la agenda.
 - Expiracion de una confirmacion pendiente despues de 10 minutos.
 - Emision de notificaciones al doctor solamente despues de la operacion confirmada.
@@ -68,23 +74,35 @@ debe producir `appointment_not_found`; un fallo de lectura debe conservar su cat
 publica de agenda. Ninguno de esos casos debe crear una accion pendiente ni permitir una
 mutacion al recibir un `Si` posterior.
 
+### RF-1207 - Disponibilidad antes de confirmar una reprogramacion
+
+Despues de resolver la cita y antes de solicitar confirmacion, el backend debe consultar
+`check_availability` para el dia de destino completo y mostrar los horarios libres. Si el
+paciente no indico otro dia, se usa la fecha de la cita seleccionada. El paciente debe
+elegir un horario de la lista; una hora no ofrecida no puede crear una accion pendiente ni
+modificar la agenda. El horario elegido queda vinculado a la misma cita y llamada que
+originaron la consulta. La lista vence a los 10 minutos.
+
 ## Criterios de aceptacion
 
 1. `Deseo cancelarla` solicita confirmacion y no cambia el estado de la cita.
 2. `Si`, `Si por favor` y `Claro, adelante` despues de una solicitud de cancelacion
    ejecutan una unica cancelacion.
 3. `No` y `No, gracias` conservan la cita y eliminan la accion pendiente.
-4. Una solicitud de reprogramacion muestra el nuevo horario y requiere confirmacion.
-5. Una confirmacion no puede reutilizarse para otra cita u operacion.
-6. Una accion vencida no modifica la agenda.
-7. Ninguna solicitud pendiente genera una notificacion al doctor.
-8. Una operacion confirmada genera la notificacion existente una sola vez.
-9. La confirmacion de cancelacion muestra fecha, horario y motivo de la cita sin
+4. Una solicitud de reprogramacion consulta y muestra los horarios disponibles del dia
+   destino antes de pedir confirmacion.
+5. La reprogramacion solo pide confirmacion despues de que el paciente elige un horario
+   ofrecido; una hora no disponible no crea una accion pendiente.
+6. Una confirmacion no puede reutilizarse para otra cita u operacion.
+7. Una accion vencida no modifica la agenda.
+8. Ninguna solicitud pendiente genera una notificacion al doctor.
+9. Una operacion confirmada genera la notificacion existente una sola vez.
+10. La confirmacion de cancelacion muestra fecha, horario y motivo de la cita sin
    exponer su ID interno.
-10. Una respuesta contradictoria como `Si, pero mejor no` o incierta como `No estoy
-     seguro` solicita aclaracion y no modifica la agenda.
-11. Una cita no encontrada o una lectura fallida no genera una pregunta de confirmacion,
-    no crea estado pendiente y no cambia ni notifica la agenda.
+11. Una respuesta contradictoria como `Si, pero mejor no` o incierta como `No estoy
+    seguro` solicita aclaracion y no modifica la agenda.
+12. Una cita no encontrada o una lectura fallida no genera una pregunta de confirmacion,
+     no crea estado pendiente y no cambia ni notifica la agenda.
 
 ## Fuera del alcance
 

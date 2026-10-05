@@ -64,6 +64,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   espera el dia y resolver respuestas como `hoy` directamente en el backend.
 - Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes
   de iniciar la recoleccion de nombre y motivo.
+- Consultar y mostrar los horarios libres del dia destino antes de confirmar una
+  reprogramacion, y aceptar solo una seleccion de esa lista.
 - Integrar el LLM en el ciclo de respuesta y conservar en SQLite el tipo de fallo y,
   cuando exista, el codigo HTTP del proveedor sin copiar contenido sensible al log.
 - Habilitar un modo debug apagado por defecto que muestre diagnosticos seguros solo a

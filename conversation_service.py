@@ -19,7 +19,9 @@ from appointment_availability import (
     PENDING_APPOINTMENT_AVAILABILITY_KEY,
     PendingAppointmentDate,
     PendingAppointmentAvailability,
+    PendingAvailabilitySlot,
     appointment_date_is_required,
+    availability_request_for_date,
     date_only_availability_follow_up_request,
     date_only_availability_request,
     format_availability_reply,
@@ -125,6 +127,13 @@ SYSTEM_PROMPT = "\n".join(
         "paciente.",
         "Nunca inventar un motivo ni usar un motivo predeterminado.",
         "Nunca cancelar ni reprogramar una cita sin confirmación explícita del paciente.",
+        "Cuando el paciente proponga una fecha y hora para reprogramar, solicita "
+        "reschedule_appointment con la cita y el horario preferido; el backend consultara "
+        "la disponibilidad del dia y mostrara las opciones antes de pedir confirmacion. "
+        "No afirmes que el cambio esta disponible ni solicites confirmacion antes de que "
+        "el paciente elija un horario ofrecido.",
+        "Si el paciente solo quiere cambiar la hora, conservar la fecha de la cita "
+        "seleccionada como destino, salvo que indique otro día.",
         "Cuando el paciente pida horarios y dé una fecha o rango, usar check_availability.",
         "Cuando el paciente pregunte por sus citas, usar list_appointments.",
         "Para listar todas las citas no enviar argumentos; para un rango enviar start_at y end_at.",
@@ -461,7 +470,19 @@ class ConversationService:
             timezone=self._timezone,
         )
         if selected_slot is None:
+            if pending_availability.appointment_id is not None:
+                return (
+                    "Elige uno de los horarios disponibles para reprogramar tu cita, "
+                    "por ejemplo: 10:00."
+                )
             return APPOINTMENT_SLOT_SELECTION_REPLY
+
+        if pending_availability.appointment_id is not None:
+            return await self._confirm_reschedule_from_available_slot(
+                context,
+                pending_availability,
+                selected_slot,
+            )
 
         pending_reason = PendingAppointmentReason.from_start_at(
             selected_slot.start_at,
@@ -526,12 +547,138 @@ class ConversationService:
                 error_type=type(not_found).__name__,
             )
 
+        if pending_action.tool_name is ToolName.RESCHEDULE_APPOINTMENT:
+            return await self._offer_reschedule_availability(
+                context,
+                tool_call,
+                appointment,
+            )
+
         pending_action = PendingAppointmentAction.from_tool_call(
             tool_call,
             appointment=appointment,
         )
         if pending_action is None:
             return None
+        self._save_pending_appointment_action(context.conversation_id, pending_action)
+        return pending_action.confirmation_prompt()
+
+    async def _offer_reschedule_availability(
+        self,
+        context: ConversationContext,
+        tool_call: ToolCall,
+        appointment: Appointment,
+    ) -> str:
+        if self.tool_executor is None:
+            return CONTROLLED_FALLBACK_REPLY
+        self._clear_pending_appointment_action(context.conversation_id)
+        self._clear_pending_appointment_date(context.conversation_id)
+        self._clear_pending_appointment_availability(context.conversation_id)
+        try:
+            requested_start = datetime.fromisoformat(
+                tool_call.arguments["new_start_at"]
+            )
+        except (KeyError, TypeError, ValueError):
+            return "No pude identificar el día para consultar los horarios disponibles."
+        if requested_start.tzinfo is None or requested_start.utcoffset() is None:
+            requested_start = requested_start.replace(tzinfo=self._timezone)
+        else:
+            requested_start = requested_start.astimezone(self._timezone)
+
+        request = availability_request_for_date(
+            requested_start.date(),
+            now=self._current_local_time(),
+            timezone=self._timezone,
+        )
+        if request is None:
+            return (
+                f"No quedan horarios disponibles para el "
+                f"{requested_start:%d/%m/%Y}. Si quieres, reviso otro día."
+            )
+
+        result = await self.tool_executor.execute(
+            ToolRequest(
+                tool_name=ToolName.CHECK_AVAILABILITY,
+                arguments={
+                    "start_at": request.start_at.isoformat(),
+                    "end_at": request.end_at.isoformat(),
+                },
+                patient_scope=context.patient_scope,
+            )
+        )
+        if not result.ok or not isinstance(result.data, CheckAvailabilityOutput):
+            if result.error is not None:
+                return self._calendar_error_reply(
+                    context,
+                    result.error,
+                    error_type="ToolError",
+                )
+            return "No pude consultar los horarios disponibles. Intenta nuevamente."
+
+        pending_availability = PendingAppointmentAvailability.from_slots(
+            request,
+            result.data.slots,
+            timezone=self._timezone,
+            now=self._current_local_time(),
+            appointment_id=appointment.id,
+            call_id=tool_call.call_id,
+        )
+        if pending_availability is not None:
+            self._save_pending_appointment_availability(
+                context.conversation_id,
+                pending_availability,
+            )
+        return format_availability_reply(
+            result,
+            request,
+            timezone=self._timezone,
+            selection_prompt=(
+                "Elige uno de estos horarios para cambiar tu cita. "
+                "La modificación se realizará solo después de que la confirmes."
+            ),
+        )
+
+    async def _confirm_reschedule_from_available_slot(
+        self,
+        context: ConversationContext,
+        pending_availability: PendingAppointmentAvailability,
+        selected_slot: PendingAvailabilitySlot,
+    ) -> str:
+        self._clear_pending_appointment_availability(context.conversation_id)
+        try:
+            appointment = await self._find_appointment_for_confirmation(
+                context.patient_scope,
+                pending_availability.appointment_id or "",
+            )
+        except Exception as error:
+            public_error = public_error_from_exception(error)
+            return self._calendar_error_reply(
+                context,
+                public_error.to_tool_error(),
+                error_type=type(public_error).__name__,
+            )
+        if appointment is None:
+            not_found = AppointmentNotFound()
+            return self._calendar_error_reply(
+                context,
+                not_found.to_tool_error(),
+                error_type=type(not_found).__name__,
+            )
+
+        tool_call = ToolCall(
+            name=ToolName.RESCHEDULE_APPOINTMENT.value,
+            arguments={
+                "appointment_id": appointment.id,
+                "new_start_at": selected_slot.start_at,
+            },
+            call_id=pending_availability.call_id,
+        )
+        pending_action = PendingAppointmentAction.from_tool_call(
+            tool_call,
+            appointment=appointment,
+        )
+        if pending_action is None:
+            return CONTROLLED_FALLBACK_REPLY
         self._save_pending_appointment_action(context.conversation_id, pending_action)
         return pending_action.confirmation_prompt()
 

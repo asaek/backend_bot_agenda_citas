@@ -47,6 +47,8 @@ class PendingAppointmentAvailability:
     slots: Sequence[PendingAvailabilitySlot]
     created_at: str
     expires_at: str
+    appointment_id: str | None = None
+    call_id: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -59,6 +61,15 @@ class PendingAppointmentAvailability:
         if any(not isinstance(slot, PendingAvailabilitySlot) for slot in normalized_slots):
             raise ValueError("La disponibilidad pendiente contiene un slot invalido")
         object.__setattr__(self, "slots", normalized_slots)
+        if (self.appointment_id is None) != (self.call_id is None):
+            raise ValueError("La reprogramacion pendiente requiere cita y llamada")
+        if self.appointment_id is not None and (
+            not isinstance(self.appointment_id, str)
+            or not self.appointment_id.strip()
+            or not isinstance(self.call_id, str)
+            or not self.call_id.strip()
+        ):
+            raise ValueError("La reprogramacion pendiente no es valida")
         _parse_timestamp(self.created_at)
         _parse_timestamp(self.expires_at)
 
@@ -70,6 +81,8 @@ class PendingAppointmentAvailability:
         *,
         timezone: ZoneInfo,
         now: datetime | None = None,
+        appointment_id: str | None = None,
+        call_id: str | None = None,
     ) -> "PendingAppointmentAvailability | None":
         unique_slots: dict[tuple[str, str], None] = {}
         for slot in slots:
@@ -90,6 +103,8 @@ class PendingAppointmentAvailability:
             ),
             created_at=created_at.isoformat(),
             expires_at=(created_at + APPOINTMENT_AVAILABILITY_TTL).isoformat(),
+            appointment_id=appointment_id,
+            call_id=call_id,
         )
 
     @classmethod
@@ -101,6 +116,12 @@ class PendingAppointmentAvailability:
         expires_at = value.get("expires_at")
         raw_slots = value.get("slots")
         if not all(isinstance(item, str) for item in (target_date, created_at, expires_at)):
+            return None
+        appointment_id = value.get("appointment_id")
+        call_id = value.get("call_id")
+        if appointment_id is not None and not isinstance(appointment_id, str):
+            return None
+        if call_id is not None and not isinstance(call_id, str):
             return None
         if not isinstance(raw_slots, (list, tuple)):
             return None
@@ -124,6 +145,8 @@ class PendingAppointmentAvailability:
                 slots=slots,
                 created_at=created_at,
                 expires_at=expires_at,
+                appointment_id=appointment_id,
+                call_id=call_id,
             )
         except ValueError:
             return None
@@ -138,7 +161,7 @@ class PendingAppointmentAvailability:
         return _parse_timestamp(self.expires_at) <= now.astimezone(dt_timezone.utc)
 
     def to_context(self) -> dict[str, object]:
-        return {
+        context: dict[str, object] = {
             "target_date": self.target_date,
             "slots": [
                 {
@@ -150,6 +173,10 @@ class PendingAppointmentAvailability:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
         }
+        if self.appointment_id is not None and self.call_id is not None:
+            context["appointment_id"] = self.appointment_id
+            context["call_id"] = self.call_id
+        return context
 
     def matching_slot(
         self,
@@ -307,11 +334,25 @@ def _availability_request_for_date(
     return DateOnlyAvailabilityRequest(start_at=start_at, end_at=end_at)
 
 
+def availability_request_for_date(
+    requested_date: date,
+    *,
+    now: datetime,
+    timezone: ZoneInfo,
+) -> DateOnlyAvailabilityRequest | None:
+    """Construye el rango de consulta de un dia concreto en la zona de agenda."""
+    local_now = now.astimezone(timezone)
+    return _availability_request_for_date(requested_date, local_now, timezone)
+
+
 def format_availability_reply(
     result: ToolResult,
     request: DateOnlyAvailabilityRequest,
     *,
     timezone: ZoneInfo,
+    selection_prompt: str = (
+        "Elige uno de estos horarios y te preguntare el motivo de la consulta."
+    ),
 ) -> str:
     """Construye una lista de horarios sin exponer calendarios internos."""
     requested_date = request.start_at.astimezone(timezone).strftime("%d/%m/%Y")
@@ -336,7 +377,7 @@ def format_availability_reply(
     return (
         f"Horarios disponibles para el {requested_date}:\n"
         + "\n".join(lines)
-        + "\n\nElige uno de estos horarios y te preguntare el motivo de la consulta."
+        + f"\n\n{selection_prompt}"
     )
 
 

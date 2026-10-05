@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from appointment_availability import (
     PendingAppointmentAvailability,
+    availability_request_for_date,
     date_only_availability_request,
     format_availability_reply,
     parse_time_selection,
@@ -27,6 +28,17 @@ class AppointmentAvailabilityTests(unittest.TestCase):
         self.assertIsNotNone(request)
         self.assertEqual(request.start_at, datetime(2026, 9, 21, tzinfo=timezone.utc))
         self.assertEqual(request.end_at, datetime(2026, 9, 22, tzinfo=timezone.utc))
+
+    def test_builds_a_full_day_request_for_a_reschedule_target_date(self) -> None:
+        request = availability_request_for_date(
+            self.now.date(),
+            now=self.now,
+            timezone=self.timezone,
+        )
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request.start_at, datetime(2026, 9, 20, 12, 30, tzinfo=timezone.utc))
+        self.assertEqual(request.end_at, datetime(2026, 9, 21, tzinfo=timezone.utc))
 
     def test_leaves_exact_time_requests_for_the_normal_booking_flow(self) -> None:
         request = date_only_availability_request(
@@ -112,6 +124,8 @@ class AppointmentAvailabilityTests(unittest.TestCase):
             ),
             timezone=self.timezone,
             now=self.now,
+            appointment_id="appointment-1",
+            call_id="call-reschedule-1",
         )
         self.assertIsNotNone(pending)
 
@@ -119,6 +133,8 @@ class AppointmentAvailabilityTests(unittest.TestCase):
 
         self.assertIsNotNone(restored)
         self.assertEqual(restored.target_date, "2026-09-21")
+        self.assertEqual(restored.appointment_id, "appointment-1")
+        self.assertEqual(restored.call_id, "call-reschedule-1")
         self.assertIsNotNone(
             restored.matching_slot("damela a las 10 am", timezone=self.timezone)
         )

@@ -761,6 +761,10 @@ class WebhookTests(unittest.TestCase):
                     ),
                     self.text_payload(message_id="wamid.reschedule", text="Cambiar"),
                     self.text_payload(
+                        message_id="wamid.reschedule-slot",
+                        text="11:00",
+                    ),
+                    self.text_payload(
                         message_id="wamid.reschedule-confirm",
                         text="Si",
                     ),
@@ -773,7 +777,7 @@ class WebhookTests(unittest.TestCase):
 
         self.assertEqual(
             [response.status_code for response in responses],
-            [200, 200, 200, 200, 200, 200, 200],
+            [200, 200, 200, 200, 200, 200, 200, 200],
         )
         self.assertEqual(
             [recipient for recipient, _ in fake_client.sent_messages],
@@ -782,6 +786,7 @@ class WebhookTests(unittest.TestCase):
                 "5491100000000",
                 "5491100000000",
                 "5491100000001",
+                "5491100000000",
                 "5491100000000",
                 "5491100000000",
                 "5491100000001",
@@ -796,12 +801,13 @@ class WebhookTests(unittest.TestCase):
         self.assertIn("Tipo de evento: Cita modificada", doctor_bodies[1])
         self.assertIn("Hora: 11:00-11:30", doctor_bodies[1])
         self.assertIn("Tipo de evento: Cita cancelada", doctor_bodies[2])
-        self.assertIn("confirmas", fake_client.sent_messages[4][1].lower())
-        self.assertIn("confirmas", fake_client.sent_messages[7][1].lower())
-        self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[7][1])
-        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[7][1])
-        self.assertIn("Motivo: Revision", fake_client.sent_messages[7][1])
-        self.assertNotIn("appointment-1", fake_client.sent_messages[7][1])
+        self.assertIn("horarios disponibles", fake_client.sent_messages[4][1].lower())
+        self.assertIn("confirmas", fake_client.sent_messages[5][1].lower())
+        self.assertIn("confirmas", fake_client.sent_messages[8][1].lower())
+        self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[8][1])
+        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[8][1])
+        self.assertIn("Motivo: Revision", fake_client.sent_messages[8][1])
+        self.assertNotIn("appointment-1", fake_client.sent_messages[8][1])
         with open_database(self.database_path) as connection:
             notification_rows = connection.execute(
                 """

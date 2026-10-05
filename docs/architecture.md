@@ -241,6 +241,12 @@ lectura falla, devuelve el error publico de agenda y no guarda accion pendiente.
 respuesta negativa o vencida no llama a una mutacion del calendario. Solo la ejecucion
 confirmada puede producir un evento de cita y una notificacion al doctor.
 
+Antes de crear una confirmacion de reprogramacion, `ConversationService` consulta la
+disponibilidad del dia de destino completo. La respuesta conserva los slots ofrecidos,
+el ID de la cita y el ID de llamada en el contexto por 10 minutos. Solo una seleccion
+coincidente produce una accion pendiente de confirmacion; el intento de seleccionar una
+hora fuera de la lista no genera una mutacion.
+
 ### Motivo antes de crear una cita
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta

@@ -48,6 +48,7 @@ esten aprobados.
 - [Verificacion de confirmaciones naturales de citas](./verification/2026-10-01-natural-appointment-confirmations.md)
 - [Verificacion del diagnostico debug limitado](./verification/2026-10-03-debug-error-reporting.md)
 - [Verificacion de resolucion previa a confirmar una reprogramacion](./verification/2026-10-04-reschedule-appointment-lookup.md)
+- [Verificacion de horarios disponibles para reprogramar](./verification/2026-10-05-reschedule-availability.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -67,3 +68,4 @@ esten aprobados.
 - [ADR 0037 - Confirmacion de citas por intencion afirmativa o negativa](./decisions/0037-natural-appointment-confirmations.md)
 - [ADR 0038 - Diagnostico de errores limitado por modo y remitente](./decisions/0038-debug-error-reporting.md)
 - [ADR 0039 - Resolver la cita antes de solicitar confirmacion](./decisions/0039-resolve-appointment-before-confirmation.md)
+- [ADR 0040 - Consultar disponibilidad antes de confirmar una reprogramacion](./decisions/0040-reschedule-availability-before-confirmation.md)

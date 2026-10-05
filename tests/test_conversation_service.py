@@ -1692,7 +1692,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         self.assertIn("no se realizó", rejection_reply.lower())
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.SCHEDULED)
 
-    def test_reschedule_requires_confirmation_for_the_requested_new_time(self) -> None:
+    def test_reschedule_lists_day_slots_before_selection_and_confirmation(self) -> None:
         self.service.llm_provider.replies = (
             ToolCall(
                 name=ToolName.RESCHEDULE_APPOINTMENT.value,
@@ -1714,7 +1714,42 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         first_reply = asyncio.run(self.service.build_reply(first_context))
 
-        self.assertIn("reprogramar", first_reply.lower())
+        self.assertIn("horarios disponibles", first_reply.lower())
+        self.assertIn("09:00 a 09:30", first_reply)
+        self.assertIn("15:00 a 15:30", first_reply)
+        self.assertIn("elige uno", first_reply.lower())
+        self.assertNotIn("¿Confirmas", first_reply)
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(first_context.conversation_id)
+        )
+
+        unavailable_selection_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-unavailable-selection",
+                message_type="text",
+                text="A las 18:00",
+            )
+        )
+        unavailable_selection_reply = asyncio.run(
+            self.service.build_reply(unavailable_selection_context)
+        )
+        self.assertIn("elige uno", unavailable_selection_reply.lower())
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+
+        selection_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-slot-selection",
+                message_type="text",
+                text="A las 15:00",
+            )
+        )
+        selection_reply = asyncio.run(self.service.build_reply(selection_context))
+
+        self.assertIn("reprogramar", selection_reply.lower())
+        self.assertIn("15:00", selection_reply)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
 
         confirmation_context = self.service.receive_message(

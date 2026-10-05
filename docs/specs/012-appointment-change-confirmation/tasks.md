@@ -37,3 +37,8 @@
 - [x] Distinguir una cita ausente de un fallo temporal al leer la agenda.
 - [x] Mostrar el codigo de agenda solo al remitente autorizado en modo debug.
 - [x] Verificar que los fallos de lectura no dejan una accion pendiente ni modifican citas.
+- [x] Consultar y mostrar todos los horarios libres del dia destino antes de confirmar
+      una reprogramacion.
+- [x] Persistir los slots de reprogramacion y limitar la seleccion a horarios ofrecidos.
+- [x] Confirmar unicamente la cita y el horario seleccionados por el paciente.
+- [x] Verificar la seleccion y la reprogramacion en Raspberry Pi.

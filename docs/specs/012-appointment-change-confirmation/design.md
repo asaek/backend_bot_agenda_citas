@@ -22,9 +22,13 @@ ConversationService
 AgentOrchestrator
     |
     +-- cancel/reschedule -> resolver cita en alcance
-    |                        |-- ausente/fallo -> error publico, sin estado pendiente
-    |                        +-- encontrada -> guardar accion y pedir Si/No
-    |                                          sin modificar el calendario
+     |                        |-- ausente/fallo -> error publico, sin estado pendiente
+     |                        +-- encontrada -> consultar disponibilidad del dia destino
+     |                                             |
+     |                                             +-- mostrar slots y esperar seleccion
+     |                                                   |
+     |                                                   +-- guardar accion exacta y pedir Si/No
+     |                                                         sin modificar el calendario
     |
     +-- confirmacion afirmativa -> ToolExecutor -> CalendarProvider
                                              |
@@ -48,6 +52,14 @@ el ID de la llamada, los tiempos de creacion y expiracion y los datos recuperado
 cita. Se almacena dentro de `conversations.context_json`, preservando cualquier otro
 contexto existente. No existe una accion pendiente si la consulta no recupera una cita.
 
+Para una reprogramacion, `ConversationService` consulta `check_availability` para el dia
+local de `new_start_at` (o el dia de la cita si el paciente solo solicita cambiar la
+hora). `PendingAppointmentAvailability` conserva los slots ofrecidos junto con el ID de
+la cita y la llamada de origen durante 10 minutos. Una seleccion valida vuelve a resolver
+la cita y crea la accion de reprogramacion con el inicio elegido; una seleccion que no
+coincide con la lista solo pide elegir un horario ofrecido. La confirmacion vinculada a
+esa accion es la unica que puede ejecutar la mutacion.
+
 ## Resolucion
 
 En el siguiente mensaje, `ConversationService` clasifica la intencion de la respuesta
@@ -63,7 +75,8 @@ confirmada para evitar reutilizar la misma autorizacion.
 
 ## Integracion con notificaciones
 
-La primera solicitud devuelve solamente la pregunta de confirmacion con los datos
-publicables de la cita y no emite un `AppointmentNotificationEvent`. El evento se
-crea unicamente cuando la operacion confirmada devuelve un resultado exitoso, por
-lo que el flujo existente de entrega al doctor permanece aislado y con idempotencia.
+La consulta inicial de disponibilidad y la seleccion del horario no emiten un
+`AppointmentNotificationEvent`. La confirmacion muestra los datos publicables de la cita
+y el horario destino sin el ID interno. El evento se crea unicamente cuando la operacion
+confirmada devuelve un resultado exitoso, por lo que el flujo existente de entrega al
+doctor permanece aislado y con idempotencia.
