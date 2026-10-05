@@ -82,6 +82,11 @@ demas tipos guardan `NULL`. El log no copia el texto entrante, el cuerpo HTTP ni
 credenciales. La inicializacion de SQLite agrega la columna de forma compatible a
 bases ya existentes.
 
+Cuando `DEBUG_MODE` esta habilitado, `debug_reporting.py` permite sustituir la respuesta
+controlada por un diagnostico de proveedor, tipo de error y codigo HTTP, unicamente para
+los numeros E.164 configurados en `DEBUG_WHATSAPP_NUMBERS`. El adaptador no expone cuerpos
+HTTP, texto de excepciones, prompts ni credenciales.
+
 ## Construccion del contexto
 
 `ConversationService.build_chat_messages(context)` llama a
@@ -121,6 +126,10 @@ WhatsApp esta disponible, la respuesta controlada se registra como `sent`; si ta
 falla, queda como `failed`. Como las respuestas fallidas no forman parte del contexto, el
 siguiente webhook puede reintentar la generacion sin presentar una respuesta no
 entregada al modelo.
+
+Para el remitente autorizado por el modo debug, la respuesta controlada puede incluir el
+diagnostico sanitizado definido en la especificacion 015. La logica no cambia el registro
+persistente ni el comportamiento para otros remitentes.
 
 Cuando la respuesta ya fue registrada como `sent`, `main.py` omite la
 generacion y el envio para un webhook duplicado del mismo mensaje entrante.

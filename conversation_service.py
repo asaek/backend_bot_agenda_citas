@@ -39,7 +39,17 @@ from appointment_scheduling import (
     PendingAppointmentReason,
 )
 from agent_orchestrator import AgentOrchestrator
-from calendar_domain import Appointment, PatientScope, ToolName, ToolRequest, ToolResult
+from calendar_domain import (
+    Appointment,
+    AppointmentNotFound,
+    CalendarProviderUnavailable,
+    PatientScope,
+    ToolError,
+    ToolName,
+    ToolRequest,
+    ToolResult,
+)
+from debug_reporting import format_debug_fallback_reply
 from llm_provider import (
     ChatMessage,
     DEFAULT_LLM_MAX_HISTORY_MESSAGES,
@@ -61,6 +71,7 @@ from repositories import (
 )
 from tool_contracts import CheckAvailabilityOutput, CreateAppointmentOutput
 from tool_executor import ToolExecutor
+from tool_results import public_error_from_exception
 
 
 CONTROLLED_FALLBACK_REPLY = (
@@ -485,10 +496,36 @@ class ConversationService:
         tool_call: ToolCall,
         patient_scope: PatientScope,
     ) -> str | None:
-        appointment = await self._find_appointment_for_confirmation(
-            patient_scope,
-            tool_call,
-        )
+        pending_action = PendingAppointmentAction.from_tool_call(tool_call)
+        if pending_action is None:
+            return None
+        if self.tool_executor is None:
+            return self._calendar_error_reply(
+                context,
+                CalendarProviderUnavailable().to_tool_error(),
+                error_type="CalendarProviderUnavailable",
+            )
+
+        try:
+            appointment = await self._find_appointment_for_confirmation(
+                patient_scope,
+                pending_action.arguments["appointment_id"],
+            )
+        except Exception as error:
+            public_error = public_error_from_exception(error)
+            return self._calendar_error_reply(
+                context,
+                public_error.to_tool_error(),
+                error_type=type(public_error).__name__,
+            )
+        if appointment is None:
+            not_found = AppointmentNotFound()
+            return self._calendar_error_reply(
+                context,
+                not_found.to_tool_error(),
+                error_type=type(not_found).__name__,
+            )
+
         pending_action = PendingAppointmentAction.from_tool_call(
             tool_call,
             appointment=appointment,
@@ -501,20 +538,29 @@ class ConversationService:
     async def _find_appointment_for_confirmation(
         self,
         patient_scope: PatientScope,
-        tool_call: ToolCall,
+        appointment_id: str,
     ) -> Appointment | None:
         if self.tool_executor is None:
             return None
-        appointment_id = tool_call.arguments.get("appointment_id")
-        if not isinstance(appointment_id, str) or not appointment_id.strip():
-            return None
-        try:
-            return await self.tool_executor.find_appointment(
-                patient_scope=patient_scope,
-                appointment_id=appointment_id,
-            )
-        except Exception:
-            return None
+        return await self.tool_executor.find_appointment(
+            patient_scope=patient_scope,
+            appointment_id=appointment_id,
+        )
+
+    @staticmethod
+    def _calendar_error_reply(
+        context: ConversationContext,
+        error: ToolError,
+        *,
+        error_type: str,
+    ) -> str:
+        diagnostic_reply = format_debug_fallback_reply(
+            context.patient_scope.whatsapp_number,
+            error_type=error_type,
+            provider_name="calendar",
+            diagnostic_code=error.code.value,
+        )
+        return diagnostic_reply or error.message
 
     async def _resolve_pending_appointment_action(
         self,
@@ -550,7 +596,11 @@ class ConversationService:
         if result.ok:
             return confirmation_reply(pending_action.tool_name)
         if result.error is not None:
-            return result.error.message
+            return self._calendar_error_reply(
+                context,
+                result.error,
+                error_type="ToolError",
+            )
         return CONTROLLED_FALLBACK_REPLY
 
     async def _resolve_pending_appointment_reason(

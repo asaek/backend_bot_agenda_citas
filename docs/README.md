@@ -46,6 +46,8 @@ esten aprobados.
 - [Verificacion de horarios libres antes de agendar](./verification/2026-09-24-date-only-availability.md)
 - [Verificacion de variantes de lenguaje para horarios](./verification/2026-09-25-date-only-availability-language.md)
 - [Verificacion de confirmaciones naturales de citas](./verification/2026-10-01-natural-appointment-confirmations.md)
+- [Verificacion del diagnostico debug limitado](./verification/2026-10-03-debug-error-reporting.md)
+- [Verificacion de resolucion previa a confirmar una reprogramacion](./verification/2026-10-04-reschedule-appointment-lookup.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -53,6 +55,7 @@ esten aprobados.
 - [012 - Confirmacion de cambios de citas](./specs/012-appointment-change-confirmation/spec.md)
 - [013 - Motivo antes de crear una cita](./specs/013-appointment-reason-collection/spec.md)
 - [014 - Horarios libres antes de elegir una cita](./specs/014-date-only-availability/spec.md)
+- [015 - Diagnostico seguro de errores en modo debug](./specs/015-debug-error-reporting/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
@@ -62,3 +65,5 @@ esten aprobados.
 - [ADR 0031 - Asociacion segura de citas manuales por WhatsApp](./decisions/0031-manual-calendar-appointment-ownership.md)
 - [ADR 0032 - Solicitud del nombre en cada cita nueva](./decisions/0032-patient-name-for-every-appointment.md)
 - [ADR 0037 - Confirmacion de citas por intencion afirmativa o negativa](./decisions/0037-natural-appointment-confirmations.md)
+- [ADR 0038 - Diagnostico de errores limitado por modo y remitente](./decisions/0038-debug-error-reporting.md)
+- [ADR 0039 - Resolver la cita antes de solicitar confirmacion](./decisions/0039-resolve-appointment-before-confirmation.md)

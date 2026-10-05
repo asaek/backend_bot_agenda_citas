@@ -158,6 +158,11 @@ La tabla `llm_failures` conserva el tipo de excepcion y un codigo HTTP nullable 
 los errores del proveedor; las bases existentes reciben esa columna mediante una
 migracion aditiva. El log registra solo esos campos y omite el texto entrante, el cuerpo
 del proveedor y las credenciales.
+El modo debug opcional usa `DEBUG_MODE` y `DEBUG_WHATSAPP_NUMBERS`: solo un remitente
+permitido recibe el nombre seguro del proveedor, el tipo de error y el codigo HTTP, o un
+codigo publico de agenda, junto con la respuesta. Sin ambas condiciones, todos reciben la
+respuesta controlada/publica normal. El modo no expone mensajes de excepcion, prompts,
+cuerpos ni encabezados HTTP.
 La tabla `appointments` conserva el ID interno de la cita, el calendario y evento
 de Google, el paciente, el estado, el intervalo, el motivo y las fechas de
 sincronizacion. `PersistentCalendarProvider` traduce el ID interno expuesto a las
@@ -231,9 +236,10 @@ intencion en texto normalizado y acepta cortesia alrededor de afirmaciones o
 negaciones claras; señales contradictorias o inciertas siguen siendo ambiguas.
 Antes de preguntar, `ConversationService` usa una lectura
 del `ToolExecutor` para conservar fecha, horario y motivo de la cita en el snapshot
-de la accion; esos datos se muestran sin el ID interno. Una respuesta negativa o
-vencida no llama a una mutacion del calendario. Solo la ejecucion confirmada puede
-producir un evento de cita y una notificacion al doctor.
+de la accion; esos datos se muestran sin el ID interno. Si no recupera la cita o la
+lectura falla, devuelve el error publico de agenda y no guarda accion pendiente. Una
+respuesta negativa o vencida no llama a una mutacion del calendario. Solo la ejecucion
+confirmada puede producir un evento de cita y una notificacion al doctor.
 
 ### Motivo antes de crear una cita
 

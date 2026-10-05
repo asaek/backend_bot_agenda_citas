@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, time, timezone
 
-from calendar_domain import PatientScope
+from calendar_domain import CalendarProviderUnavailable, PatientScope
 from calendar_domain import AppointmentStatus, ToolName
 from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from conversation_service import (
@@ -22,6 +22,7 @@ from notification_domain import AppointmentNotificationType
 from persistence import SQLiteDatabase
 from tool_executor import ToolExecutor
 from tool_validation import BusinessHours, TimeWindow
+from unittest.mock import patch
 
 
 class ConversationContextTests(unittest.TestCase):
@@ -737,6 +738,12 @@ class ConversationContextTests(unittest.TestCase):
 
 class AppointmentConfirmationTests(unittest.TestCase):
     def setUp(self) -> None:
+        debug_environment = patch.dict(
+            os.environ,
+            {"DEBUG_MODE": "false", "DEBUG_WHATSAPP_NUMBERS": ""},
+        )
+        debug_environment.start()
+        self.addCleanup(debug_environment.stop)
         self.database_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.database_directory.cleanup)
         database_path = os.path.join(
@@ -1498,6 +1505,109 @@ class AppointmentConfirmationTests(unittest.TestCase):
         self.assertEqual(
             self.provider.appointments[-1].reason,
             "Seguimiento de queratocono",
+        )
+
+    def test_missing_appointment_does_not_create_confirmation_or_mutate(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": "9999",
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-missing",
+            ),
+        )
+        context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-missing",
+                message_type="text",
+                text="Quiero cambiar mi cita de las 11",
+            )
+        )
+        events = []
+
+        reply = asyncio.run(
+            self.service.build_reply(context, appointment_event_sink=events.append)
+        )
+
+        self.assertEqual(reply, "No se encontro la cita solicitada.")
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(context.conversation_id)
+        )
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+        self.assertEqual(events, [])
+
+    def test_calendar_lookup_failure_does_not_become_not_found_or_pending(self) -> None:
+        self.provider.simulate_error(
+            ToolName.LIST_APPOINTMENTS,
+            CalendarProviderUnavailable,
+            once=True,
+        )
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": self.appointment.id,
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-unavailable",
+            ),
+        )
+        context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-lookup-unavailable",
+                message_type="text",
+                text="Quiero cambiar mi cita de las 11",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(context))
+
+        self.assertEqual(reply, CalendarProviderUnavailable.default_message)
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(context.conversation_id)
+        )
+        self.assertEqual(self.provider.appointments, (self.appointment,))
+
+    def test_debug_mode_shows_calendar_error_code_only_to_allowlisted_sender(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": "9999",
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-debug-missing",
+            ),
+        )
+        context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-debug-missing",
+                message_type="text",
+                text="Quiero cambiar mi cita de las 11",
+            )
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "DEBUG_MODE": "true",
+                "DEBUG_WHATSAPP_NUMBERS": self.scope_sender,
+            },
+        ):
+            reply = asyncio.run(self.service.build_reply(context))
+
+        self.assertEqual(
+            reply,
+            "Diagnóstico debug: proveedor=calendar; "
+            "error=AppointmentNotFound; code=appointment_not_found.",
+        )
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(context.conversation_id)
         )
 
     def test_cancel_requires_confirmation_before_provider_and_notification(self) -> None:

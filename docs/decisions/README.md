@@ -46,3 +46,5 @@ indique cual decision anterior queda obsoleta.
 - [0035 - Negrita compatible con WhatsApp en citas](./0035-whatsapp-bold-appointment-labels.md)
 - [0036 - Normalizacion del bloque de motivo de cita](./0036-normalize-appointment-reason-line.md)
 - [0037 - Confirmacion de citas por intencion afirmativa o negativa](./0037-natural-appointment-confirmations.md)
+- [0038 - Diagnostico de errores limitado por modo y remitente](./0038-debug-error-reporting.md)
+- [0039 - Resolver la cita antes de solicitar confirmacion](./0039-resolve-appointment-before-confirmation.md)

@@ -40,6 +40,7 @@ from notification_delivery import (
     DoctorNotificationDeliveryService,
     create_doctor_notification_delivery,
 )
+from debug_reporting import format_debug_fallback_reply
 from notification_domain import AppointmentNotificationEvent
 from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
 from persistent_calendar_provider import PersistentCalendarProvider
@@ -360,6 +361,24 @@ def normalize_recipient_number(phone_number: str) -> str:
     return phone_number
 
 
+def _fallback_reply_for_error(
+    recipient_number: str,
+    *,
+    error_type: str,
+    http_status_code: int | None,
+    llm_provider: LLMProvider | None,
+) -> str:
+    settings = getattr(llm_provider, "settings", None)
+    provider_name = getattr(settings, "provider", None)
+    diagnostic_reply = format_debug_fallback_reply(
+        recipient_number,
+        error_type=error_type,
+        provider_name=provider_name,
+        http_status_code=http_status_code,
+    )
+    return diagnostic_reply or CONTROLLED_FALLBACK_REPLY
+
+
 def extract_text_messages(payload: Any) -> list[IncomingTextMessage]:
     """Extrae mensajes de texto del formato de eventos de WhatsApp Cloud API."""
     if not isinstance(payload, dict):
@@ -474,13 +493,23 @@ async def receive_webhook(request: Request) -> dict[str, str]:
                 error_type=type(error).__name__,
                 http_status_code=http_status_code,
             )
-            reply = CONTROLLED_FALLBACK_REPLY
+            reply = _fallback_reply_for_error(
+                message.sender,
+                error_type=type(error).__name__,
+                http_status_code=http_status_code,
+                llm_provider=conversation_service.llm_provider,
+            )
         if isinstance(reply, ToolCall):
             conversation_service.record_llm_failure(
                 context,
                 error_type="UnsupportedToolCall",
             )
-            reply = CONTROLLED_FALLBACK_REPLY
+            reply = _fallback_reply_for_error(
+                message.sender,
+                error_type="UnsupportedToolCall",
+                http_status_code=None,
+                llm_provider=conversation_service.llm_provider,
+            )
         try:
             result = await whatsapp_client.send_text(
                 to=normalize_recipient_number(message.sender),

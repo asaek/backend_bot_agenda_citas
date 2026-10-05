@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
 from datetime import datetime, time, timezone
 from io import StringIO
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -266,6 +267,8 @@ class WebhookTests(unittest.TestCase):
             "LLM_API_KEY": "test-key",
             "LLM_MODEL": "test-model",
             "LLM_REASON_EVALUATION_ENABLED": "false",
+            "DEBUG_MODE": "false",
+            "DEBUG_WHATSAPP_NUMBERS": "",
         }
         if environment is not None:
             runtime_environment.update(environment)
@@ -567,6 +570,62 @@ class WebhookTests(unittest.TestCase):
             ).fetchone()
 
         self.assertEqual(failure, ("LLMHTTPError", 429))
+
+    def test_debug_mode_shows_safe_llm_diagnostic_to_allowlisted_sender(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        failing_provider = FakeLLMProvider(error=LLMHTTPError(429))
+        failing_provider.settings = SimpleNamespace(provider="groq")
+        patient_text = "mensaje privado que no debe aparecer"
+
+        with self.configured_runtime(
+            fake_client,
+            failing_provider,
+            {
+                "DEBUG_MODE": "true",
+                "DEBUG_WHATSAPP_NUMBERS": "+5491100000000",
+            },
+        ):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(text=patient_text),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake_client.sent_messages,
+            [
+                (
+                    "5491100000000",
+                    "Diagnóstico debug: proveedor=groq; error=LLMHTTPError; HTTP=429.",
+                )
+            ],
+        )
+        self.assertNotIn(patient_text, fake_client.sent_messages[0][1])
+
+    def test_debug_mode_keeps_generic_fallback_for_non_allowlisted_sender(self) -> None:
+        fake_client = FakeWhatsAppClient()
+        failing_provider = FakeLLMProvider(error=LLMHTTPError(429))
+
+        with self.configured_runtime(
+            fake_client,
+            failing_provider,
+            {
+                "DEBUG_MODE": "true",
+                "DEBUG_WHATSAPP_NUMBERS": "5491100000001",
+            },
+        ):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/webhook/whatsapp",
+                    json=self.text_payload(sender="5491100000000"),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake_client.sent_messages,
+            [("5491100000000", CONTROLLED_FALLBACK_REPLY)],
+        )
 
     def test_default_fake_calendar_provider_executes_tool_cycle(self) -> None:
         fake_client = FakeWhatsAppClient()

@@ -2,9 +2,8 @@
 
 ## Estado
 
-Implementado y verificado en Raspberry Pi. La confirmacion se aplica antes de
-ejecutar el proveedor de calendario y conserva la integracion de eventos y
-notificaciones existente.
+Verificado en Raspberry Pi. La confirmacion se aplica antes de ejecutar el proveedor de calendario y
+conserva la integracion de eventos y notificaciones existente.
 
 ## Flujo implementado
 
@@ -22,8 +21,10 @@ ConversationService
     v
 AgentOrchestrator
     |
-    +-- cancel/reschedule -> leer datos de la cita, guardar accion y pedir Si/No
-    |                        sin modificar el calendario
+    +-- cancel/reschedule -> resolver cita en alcance
+    |                        |-- ausente/fallo -> error publico, sin estado pendiente
+    |                        +-- encontrada -> guardar accion y pedir Si/No
+    |                                          sin modificar el calendario
     |
     +-- confirmacion afirmativa -> ToolExecutor -> CalendarProvider
                                              |
@@ -35,17 +36,17 @@ AgentOrchestrator
 
 `AgentOrchestrator` recibe un manejador previo a la ejecucion de herramientas.
 `ConversationService` intercepta solo `cancel_appointment` y
-`reschedule_appointment`, valida la forma basica de sus argumentos y persiste la
-accion pendiente. Antes de construir la pregunta, obtiene mediante `ToolExecutor`
-un snapshot de solo lectura de la cita para mostrar fecha, horario y motivo. El
-proveedor no se modifica en ese primer paso.
+`reschedule_appointment` y valida la forma basica de sus argumentos. Antes de persistir
+la accion o construir la pregunta, obtiene mediante `ToolExecutor` una cita del alcance
+del paciente. Si el ID no aparece, devuelve `appointment_not_found`; si falla la lectura,
+normaliza la excepcion a su error publico de agenda. En ambos casos termina el turno sin
+accion pendiente, confirmacion ni mutacion. Solo una cita recuperada permite mostrar
+fecha, horario y motivo y guardar la operacion exacta.
 
 La accion pendiente conserva el nombre de la herramienta, sus argumentos permitidos,
-el ID de la llamada y sus tiempos de creacion y expiracion y, cuando la consulta fue
-exitosa, los datos mostrados de la cita. Se almacena dentro de
-`conversations.context_json`, preservando cualquier otro contexto existente. Si la
-consulta de lectura no esta disponible, la accion sigue requiriendo confirmacion y
-usa la pregunta generica.
+el ID de la llamada, los tiempos de creacion y expiracion y los datos recuperados de la
+cita. Se almacena dentro de `conversations.context_json`, preservando cualquier otro
+contexto existente. No existe una accion pendiente si la consulta no recupera una cita.
 
 ## Resolucion
 

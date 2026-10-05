@@ -106,8 +106,9 @@ contener reglas de conversacion.
 ### RF-309 - Fallos de generacion
 
 Si el LLM no genera una respuesta, el backend debe registrar el fallo y enviar
-la respuesta controlada. Si WhatsApp tambien falla, debe registrar esa salida
-como `failed` y permitir reintentar el mensaje entrante posteriormente.
+la respuesta controlada, excepto para remitentes de depuracion autorizados segun
+la especificacion 015. Si WhatsApp tambien falla, debe registrar esa salida como
+`failed` y permitir reintentar el mensaje entrante posteriormente.
 
 ### RF-316 - Diagnostico seguro de errores HTTP
 
@@ -119,8 +120,9 @@ debe agregarse de forma compatible a las bases existentes.
 
 ### RF-310 - Respuesta controlada
 
-La respuesta controlada debe ser: `En este momento no pude procesar tu mensaje.
-Intenta nuevamente en unos minutos.`
+La respuesta controlada predeterminada debe ser: `En este momento no pude procesar tu
+mensaje. Intenta nuevamente en unos minutos.` El modo de depuracion autorizado y su
+diagnostico limitado se definen en la especificacion 015.
 
 ### RF-311 - Pruebas sin API
 
@@ -164,8 +166,8 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
     WhatsApp y la registra como `sent`.
 15. Una API key ausente, un timeout, un error HTTP, una respuesta vacia o una
     respuesta demasiado larga registran el tipo de fallo en SQLite.
-16. Un fallo del LLM envia la respuesta controlada y la registra como `sent` si
-    WhatsApp esta disponible.
+16. Un fallo del LLM envia la respuesta controlada, salvo el diagnostico autorizado de
+    la especificacion 015, y la registra como `sent` si WhatsApp esta disponible.
 17. El `FakeLLMProvider` recibe el historial convertido y el mensaje actual como
     el ultimo mensaje `user`.
 18. Una respuesta generada por el fake se envia por WhatsApp y queda guardada
@@ -178,6 +180,8 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
     incluir el texto entrante; otros errores LLM mantienen el codigo HTTP en `NULL`.
 22. La inicializacion agrega la columna nullable a una base existente sin perder sus
     fallos LLM ya guardados.
+23. El diagnostico de errores de depuracion sigue el modo y la lista de remitentes de la
+    especificacion 015 y no registra el contenido del proveedor.
 
 ## Fuera de alcance
 

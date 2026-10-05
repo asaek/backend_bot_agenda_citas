@@ -2,9 +2,9 @@
 
 ## Estado
 
-Implementado y verificado en Raspberry Pi. La cancelacion y la reprogramacion
-requieren una confirmacion explicita antes de modificar la fuente de verdad de
-agenda; la clasificacion acepta expresiones naturales claras y conserva la
+Verificado en Raspberry Pi. La cancelacion y la reprogramacion requieren una confirmacion explicita
+antes de modificar la fuente de verdad de agenda; la cita debe resolverse antes de pedir
+confirmacion. La clasificacion acepta expresiones naturales claras y conserva la
 aclaracion para respuestas contradictorias o inciertas.
 
 ## Objetivo
@@ -30,8 +30,10 @@ La creacion de una cita no requiere esta confirmacion dentro de este alcance.
 
 Una solicitud de `cancel_appointment` o `reschedule_appointment` no debe ejecutar
 la mutacion del proveedor de calendario hasta recibir una confirmacion afirmativa
-del paciente. Puede realizar una lectura de la cita para mostrar sus datos antes de
-formular la pregunta.
+del paciente. Antes de formular la pregunta, el backend debe resolver la cita dentro
+del alcance del paciente. Si no existe, debe devolver el error publico correspondiente
+sin guardar una accion pendiente. Si la lectura falla, debe devolver el error publico
+del proveedor sin presentar una confirmacion.
 
 ### RF-1202 - Operacion exacta
 
@@ -59,6 +61,13 @@ Una confirmacion vencida debe descartarse y no ejecutar la accion.
 La notificacion al doctor y cualquier evento de cita deben producirse solamente
 despues de que el proveedor confirme una cancelacion o reprogramacion exitosa.
 
+### RF-1206 - Cita resuelta antes de confirmar
+
+El backend no debe pedir confirmacion si la cita no se pudo recuperar. Una cita ausente
+debe producir `appointment_not_found`; un fallo de lectura debe conservar su categoria
+publica de agenda. Ninguno de esos casos debe crear una accion pendiente ni permitir una
+mutacion al recibir un `Si` posterior.
+
 ## Criterios de aceptacion
 
 1. `Deseo cancelarla` solicita confirmacion y no cambia el estado de la cita.
@@ -73,7 +82,9 @@ despues de que el proveedor confirme una cancelacion o reprogramacion exitosa.
 9. La confirmacion de cancelacion muestra fecha, horario y motivo de la cita sin
    exponer su ID interno.
 10. Una respuesta contradictoria como `Si, pero mejor no` o incierta como `No estoy
-    seguro` solicita aclaracion y no modifica la agenda.
+     seguro` solicita aclaracion y no modifica la agenda.
+11. Una cita no encontrada o una lectura fallida no genera una pregunta de confirmacion,
+    no crea estado pendiente y no cambia ni notifica la agenda.
 
 ## Fuera del alcance
 

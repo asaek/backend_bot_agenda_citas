@@ -66,6 +66,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   de iniciar la recoleccion de nombre y motivo.
 - Integrar el LLM en el ciclo de respuesta y conservar en SQLite el tipo de fallo y,
   cuando exista, el codigo HTTP del proveedor sin copiar contenido sensible al log.
+- Habilitar un modo debug apagado por defecto que muestre diagnosticos seguros solo a
+  remitentes de WhatsApp explicitamente autorizados.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 
 ## Estrategia de implementacion por cortes
@@ -192,7 +194,7 @@ La suite local y la del mirror de Raspberry Pi pasan con 151 pruebas; la evidenc
 HTTP del health check y de ambos metodos del webhook esta en
 `docs/verification/2026-09-22-doctor-notifications-webhook.md`.
 
-### Corte implementado: confirmacion de cambios de citas
+### Corte verificado: confirmacion de cambios de citas
 
 La funcionalidad definida en `specs/012-appointment-change-confirmation/` exige una
 confirmacion explicita antes de cancelar o reprogramar una cita. Las acciones
@@ -200,10 +202,10 @@ pendientes se conservan por conversacion durante 10 minutos; una respuesta
 negativa, ambigua o vencida no modifica la agenda. La interpretacion acepta
 respuestas naturales claras como `Si, por favor` y `Claro`, y vuelve a preguntar
 ante respuestas contradictorias o inciertas. Las notificaciones al doctor se emiten
-solo despues de una operacion confirmada y exitosa. La pregunta muestra,
-cuando la agenda puede recuperar la cita, su fecha, horario y motivo sin exponer
-el ID interno; si esa consulta de lectura falla, conserva la confirmacion con el
-texto generico.
+solo despues de una operacion confirmada y exitosa. La pregunta muestra la fecha,
+horario y motivo recuperados sin exponer el ID interno. Si no se encuentra la cita o
+falla la lectura de agenda, no crea una confirmacion pendiente ni permite ejecutar la
+mutacion.
 
 ### Corte implementado: motivo antes de crear una cita
 
@@ -232,6 +234,14 @@ conversacion y valida la seleccion del paciente antes de iniciar la recoleccion 
 nombre y motivo. Si primero falta el dia y no se indico una hora exacta, conserva la
 solicitud y procesa una respuesta relativa posterior, como `hoy`, sin depender del LLM.
 Una solicitud con hora exacta continua hacia la recoleccion del motivo.
+
+### Corte verificado: diagnostico seguro durante depuracion
+
+La funcionalidad definida en `specs/015-debug-error-reporting/` permite mostrar el
+proveedor, el tipo de error y el codigo HTTP en la respuesta al paciente de prueba solo
+cuando `DEBUG_MODE` esta activo y su numero aparece en `DEBUG_WHATSAPP_NUMBERS`. El modo
+puede mostrar tambien codigos publicos de agenda. Permanece desactivado por defecto y
+nunca expone excepciones crudas, prompts, mensajes, cuerpos HTTP ni credenciales.
 
 ### Fase incremental: disponibilidad real
 

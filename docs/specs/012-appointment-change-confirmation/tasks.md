@@ -30,3 +30,10 @@
 - [x] Mantener las respuestas contradictorias o inciertas en estado ambiguo.
 - [x] Verificar `Si, por favor` de extremo a extremo en una reprogramacion.
 - [x] Ejecutar la suite completa en Raspberry Pi (210 pruebas).
+
+## Corte 5 - Resolucion previa de la cita
+
+- [x] No pedir confirmacion si la cita no se encuentra en el alcance del paciente.
+- [x] Distinguir una cita ausente de un fallo temporal al leer la agenda.
+- [x] Mostrar el codigo de agenda solo al remitente autorizado en modo debug.
+- [x] Verificar que los fallos de lectura no dejan una accion pendiente ni modifican citas.

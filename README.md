@@ -148,6 +148,11 @@ generacion o envio queda marcado como `failed` para permitir un reintento.
 Los fallos de generacion guardan el tipo de excepcion y el codigo HTTP cuando aplica;
 el log operativo no registra el texto del paciente ni la respuesta completa del proveedor.
 
+Para depurar, `DEBUG_MODE=true` puede mostrar el nombre del proveedor, el tipo de error y
+el codigo HTTP o codigo seguro de agenda, pero solo a los numeros listados en
+`DEBUG_WHATSAPP_NUMBERS` (separados por comas). El modo esta apagado por defecto y no
+muestra excepciones crudas, prompts, contenido de mensajes, cuerpos HTTP ni credenciales.
+
 Los cortes de eventos, persistencia, composicion, entrega e integracion del webhook
 ya estan implementados.
 SQLite
