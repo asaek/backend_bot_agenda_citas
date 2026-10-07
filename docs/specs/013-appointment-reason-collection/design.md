@@ -83,12 +83,15 @@ señales permitidas del LLM, sin aceptar diagnosticos ni texto libre. Los codigo
 convierten mediante un catalogo compartido en mensajes operativos, por ejemplo
 `El paciente refiere dolor ocular que podria requerir atencion prioritaria.`
 
-El codigo `eye_redness` se detecta localmente a partir de expresiones como `ojos rojos`
-en el motivo actual de la cita y usa el mensaje operativo `El paciente refiere ojos rojos
-que podrían requerir atención prioritaria.`. El compositor deriva las señales del motivo
-de `event.appointment`, no de todo el historial; solo conserva codigos o mensajes del
-catalogo respaldados por ese motivo y descarta texto libre producido por el modelo,
-incluidos estados como `cita confirmada`.
+El codigo `eye_redness` se detecta localmente a partir de expresiones como `ojos rojos`,
+y `ocular_discharge` a partir de secrecion amarillenta, verdosa o abundante, incluso
+`laga;as`. El prompt obtiene tambien `priority_signal_evidence` con objetos
+`{signal, quote}`. El backend conserva interpretaciones semanticas con evidencia literal
+del motivo sin exigir ademas una coincidencia con las reglas; las respuestas antiguas
+sin evidencia mantienen solamente las señales locales. Las negaciones explicitas se
+excluyen del respaldo local. El compositor incorpora tambien mensajes del paciente de
+la gestion actual, separados de citas anteriores, y descarta texto libre del modelo,
+incluidos estados como `cita confirmada`. La evidencia no se muestra al doctor.
 
 Cada intento actualiza el estado pendiente antes de responder. Un resultado
 `needs_clarification` o `out_of_scope` lo conserva. Un resultado `valid` con

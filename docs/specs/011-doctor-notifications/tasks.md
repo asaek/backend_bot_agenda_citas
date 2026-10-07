@@ -65,6 +65,20 @@ La evidencia de cierre esta en
 `docs/verification/2026-09-22-doctor-notifications-webhook.md` e incluye la suite
 local, la suite del mirror de Raspberry Pi y la verificacion HTTP operativa.
 
+## Ampliacion - Señales razonadas del motivo e historial actual
+
+- [x] Reproducir en Raspberry Pi la ausencia de señal con lagañas amarillentas y grandes.
+- [x] Compartir catalogo e instrucciones semanticas entre evaluador y resumidor.
+- [x] Añadir `ocular_discharge` y reconocer `laga;as` sin modificar el motivo.
+- [x] Conservar interpretaciones del LLM con evidencia literal sin exigir palabras clave.
+- [x] Incorporar sintomas del historial actual y separar citas anteriores y mensajes futuros.
+- [x] Rechazar evidencia inventada o del asistente y excluir negaciones explicitas.
+- [x] Ejecutar suite completa, reiniciar backend y verificar health check y ambos webhooks
+      en Raspberry Pi; registrar evidencia.
+
+Evidencia de la ampliacion:
+`docs/verification/2026-10-07-semantic-priority-signals.md`.
+
 ## Fuera de este corte
 
 - [ ] Agregar un worker o una cola distribuida para notificaciones.

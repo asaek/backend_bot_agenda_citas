@@ -93,6 +93,27 @@ El telefono del paciente se muestra con sus ultimos 10 digitos, sin el prefijo
 internacional.
 El nombre ausente se muestra como `No informado` sin inventar uno.
 
+### Ampliacion - Prioridad semantica con evidencia (7 de octubre de 2026)
+
+La llamada de resumen genera `summary`, `priority_signals` y
+`priority_signal_evidence` (`{signal, quote}`). Comparte las instrucciones y el
+catalogo de `appointment_reason_evaluation.py`, incluido `ocular_discharge`, con el
+evaluador previo a crear la cita. El modelo interpreta significado y contexto; el
+backend valida codigos y citas literales encontradas en el motivo o mensajes del
+paciente, normalizando espacios, mayusculas y acentos. Las señales interpretadas no
+se intersectan con las detectadas por expresiones regulares. Una respuesta sin
+evidencia solo aporta el respaldo local, que se conserva aunque el modelo devuelva
+una lista vacia. La evidencia no se renderiza como texto libre.
+
+Antes de limitar a los ultimos mensajes, `DoctorNotificationService` separa el historial
+con el ultimo evento anterior persistido de esa conversacion usando su `event_key`,
+incluso si la entrega quedo pendiente o fallo. El compositor reconoce tambien las
+respuestas fijas de exito enviadas por el backend como cierre de gestiones anteriores,
+filtra por conversacion y excluye mensajes futuros. La respuesta del evento actual
+permanece en el contexto del resumen. Los textos del asistente no son evidencia de
+sintomas. El respaldo local procesa los mensajes entrantes en orden y despues el
+motivo: una negacion posterior del mismo sintoma reemplaza la mencion anterior.
+
 ## Implementacion del corte 4
 
 `notification_delivery.py` define `DoctorNotificationSettings` y carga la bandera

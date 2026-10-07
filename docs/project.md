@@ -60,6 +60,10 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   cambiar el flujo de agendamiento.
 - Detectar ojos rojos como señal operativa y llevarla a la notificacion mediante el
   catalogo seguro, sin permitir señales de texto libre del LLM.
+- Analizar semanticamente el motivo y los mensajes del paciente de la gestion actual
+  para las señales de prioridad, con evidencia literal y sin heredar sintomas de citas
+  anteriores; reconocer secrecion ocular amarillenta, verdosa o abundante, incluidos
+  errores de escritura como `laga;as`, mediante respaldo local.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
 - Conservar durante 10 minutos la intencion de agendar sin hora exacta mientras se

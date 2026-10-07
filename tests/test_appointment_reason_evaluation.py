@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from appointment_reason_evaluation import (
@@ -172,6 +173,64 @@ class AppointmentReasonEvaluationTests(unittest.IsolatedAsyncioTestCase):
         for text, expected_signal in cases:
             with self.subTest(text=text):
                 self.assertIn(expected_signal, priority_signals_for_text(text))
+
+    async def test_eye_discharge_variants_are_detected_even_when_the_llm_omits_them(self) -> None:
+        cases = (
+            "Tengo laga;as muy amarillentas y grandes en los ojos",
+            "Tengo legañas amarillas",
+            "Tengo lagañas muy abundantes",
+            "Tengo secreción ocular verdosa",
+        )
+        for reason in cases:
+            with self.subTest(reason=reason):
+                provider = FakeLLMProvider(
+                    reply='{"quality":"valid","category":"visual_symptom",'
+                    '"priority_signals":[],"confidence":0.94}'
+                )
+                result = await StructuredAppointmentReasonEvaluator(provider).evaluate(
+                    reason, evaluated_at=self.evaluated_at
+                )
+                self.assertEqual(result.priority_signals, ("ocular_discharge",))
+                self.assertTrue(result.accepted)
+
+    async def test_semantic_reason_signal_is_kept_with_literal_evidence(self) -> None:
+        reason = "Desde hace una hora todo se volvió negro y apenas distingo las cosas"
+        provider = FakeLLMProvider(
+            reply=json.dumps(
+                {
+                    "quality": "valid",
+                    "category": "visual_symptom",
+                    "priority_signals": ["sudden_vision_loss"],
+                    "priority_signal_evidence": [
+                        {"signal": "sudden_vision_loss", "quote": reason}
+                    ],
+                    "confidence": 0.94,
+                }
+            )
+        )
+        result = await StructuredAppointmentReasonEvaluator(provider).evaluate(
+            reason, evaluated_at=self.evaluated_at
+        )
+
+        self.assertEqual(result.priority_signals, ("sudden_vision_loss",))
+
+    def test_denied_and_unqualified_symptoms_do_not_raise_priority(self) -> None:
+        for text in (
+            "No tengo dolor ocular",
+            "Sin ojos rojos ni sangrado ocular",
+            "Tengo pocas lagañas al despertar",
+            "No tengo secreción ocular amarillenta",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(priority_signals_for_text(text), ())
+        self.assertEqual(
+            priority_signals_for_text("No tengo dolor, pero tengo los ojos rojos"),
+            ("eye_redness",),
+        )
+        self.assertIn("sudden_vision_loss", priority_signals_for_text("No puedo ver"))
+        self.assertEqual(
+            priority_signals_for_text("Tengo dolor ocular sin sangrado"), ("eye_pain",)
+        )
 
     async def test_low_confidence_result_does_not_authorize_creation(self) -> None:
         provider = FakeLLMProvider(

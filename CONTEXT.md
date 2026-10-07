@@ -89,10 +89,17 @@ resumen de la conversacion relacionado con ese evento.
 _Evitar_: Respuesta al paciente, alerta de diagnostico
 
 **Señal de prioridad**:
-Indicador interno derivado del mensaje que advierte que una solicitud podria
+Indicador interno derivado del motivo y de lo expresado por el paciente durante la
+gestion de la cita actual que advierte que una solicitud podria
 requerir atencion prioritaria. Se expresa con lenguaje operativo seguro y no
 incluye nombres de enfermedades, diagnosticos ni instrucciones clinicas.
 _Evitar_: Diagnostico, estado de la cita
+
+**Evidencia de prioridad**:
+Fragmento literal de lo expresado por el paciente que respalda una señal de
+prioridad de la cita actual. No es un sintoma sugerido por el asistente ni un dato
+heredado de otra cita.
+_Evitar_: Diagnostico, justificacion inventada
 
 **Resumen conversacional**:
 Sintesis interna de la conversacion que conserva la informacion relevante para

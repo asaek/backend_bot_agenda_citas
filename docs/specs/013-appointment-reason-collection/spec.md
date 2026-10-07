@@ -91,7 +91,8 @@ el motivo con sus propias palabras.
 ### RF-1308 - Evaluacion estructurada
 
 Cuando el texto supera las reglas locales, el evaluador puede solicitar al LLM una
-respuesta JSON con `quality`, `category`, `priority_signals` y `confidence`. El
+respuesta JSON con `quality`, `category`, `priority_signals`, `priority_signal_evidence`
+y `confidence`. El
 backend solo acepta `valid` con una categoria soportada distinta de `unknown` o
 `out_of_scope` y una confianza minima de `0.75`. Una respuesta invalida, ausente o
 con baja confianza se trata como `needs_clarification`.
@@ -100,6 +101,10 @@ El LLM no puede devolver el motivo de la cita, diagnosticar ni crear la cita. La
 señales se limitan a una lista de codigos soportados y solo se conservan cuando el
 texto del paciente contiene evidencia compatible. Una señal de prioridad no bloquea
 la cita durante este MVP, pero se registra en el contexto de la conversacion.
+Cada interpretacion semantica requiere una cita literal del motivo bajo
+`priority_signal_evidence` (`{signal, quote}`), sin exigir que coincida con palabras
+clave. Las reglas locales siguen aportando señales aunque el LLM las omita o no
+devuelva evidencia; no se modifica el texto persistido del motivo.
 
 ### RF-1309 - Estado de evaluacion
 
@@ -111,14 +116,17 @@ y elimina solamente el estado pendiente.
 ### RF-1310 - Señal de prioridad sin diagnostico
 
 Para el motivo actual que refiera ojos rojos, perdida repentina de vision, dolor ocular,
-golpe o trauma, contacto con sustancias quimicas, sangrado, destellos u otra alteracion
+golpe o trauma, contacto con sustancias quimicas, sangrado, destellos, secrecion ocular
+amarillenta, verdosa o abundante u otra alteracion
 visual importante, el backend debe conservar una señal de prioridad operativa. La señal debe
 usar un codigo soportado y una descripcion como `El paciente refiere ojos rojos que
 podrian requerir atencion prioritaria.`; no debe nombrar glaucoma, desprendimiento ni
 otra enfermedad.
 
-Las señales notificadas deben estar respaldadas por el motivo de la cita actual; no se
-deben heredar de mensajes o citas anteriores de la misma conversacion.
+Las señales del evaluador previo a agendar deben estar respaldadas por el motivo.
+La notificacion incorpora tambien mensajes del paciente de la gestion actual, sin
+heredar sintomas de citas anteriores ni usar palabras del asistente como evidencia.
+Pocas lagañas al despertar y sintomas negados no fuerzan una señal.
 
 La señal puede incluirse en la notificacion interna al doctor despues de crear la cita,
 pero no cambia el flujo ni activa triage automatico. Antes de usarla con pacientes
@@ -173,6 +181,10 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
     seccion de señales.
 18. Una cita actual con motivo `Tengo lagañas en los ojos` no hereda `eye_redness` de
     una cita anterior por ojos rojos en la misma conversacion.
+19. `Tengo laga;as muy amarillentas y grandes en los ojos` registra `ocular_discharge`
+    aunque el LLM omita la señal, sin cambiar el motivo del paciente.
+20. Una perdida visual expresada sin las palabras clave locales puede registrar un
+    codigo soportado cuando el modelo aporta evidencia literal del motivo.
 
 ## Fuera del alcance
 

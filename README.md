@@ -80,7 +80,7 @@ de enviarse.
 
 Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
 objeto JSON estructurado antes de crear la cita. La respuesta debe contener
-`quality`, `category`, `priority_signals` y `confidence`; el backend valida esos
+`quality`, `category`, `priority_signals`, `priority_signal_evidence` y `confidence`; el backend valida esos
 campos y exige una confianza minima de `0.75`. El LLM no proporciona el motivo ni
 ejecuta la cita. Si la evaluacion no es valida, la solicitud permanece pendiente y
 se pide una aclaracion. Las señales de prioridad se registran como metadata y no
@@ -192,7 +192,15 @@ crea la tabla `doctor_notifications` con una entrega por
 `failed`, errores, intentos e IDs devueltos por WhatsApp. El compositor carga el
 historial persistido, genera un resumen en una solicitud sin herramientas y
 construye un formato fijo sin diagnosticos, transcripciones completas ni IDs
-internos. `DoctorNotificationDeliveryService` reutiliza `WhatsAppClient`, intenta
+internos. Analiza semanticamente el motivo y los mensajes del paciente de la gestion
+actual, con evidencia literal para las señales interpretadas por el LLM; no exige
+que una interpretacion coincida ademas con palabras clave. Las reglas locales
+aportan un respaldo, incluido `ocular_discharge` para secrecion amarillenta, verdosa
+o abundante y variantes como `laga;as`. El historial se separa de citas anteriores
+mediante eventos persistidos y respuestas de exito del backend; se excluyen mensajes
+posteriores al evento y sintomas sugeridos por el asistente. Pocas lagañas al
+despertar o sintomas negados no fuerzan una señal.
+`DoctorNotificationDeliveryService` reutiliza `WhatsAppClient`, intenta
 cada destinatario de forma independiente y normaliza los errores antes de
 persistirlos. `main.py` conecta el compositor y el entregador al ciclo del webhook;
 los errores del doctor se registran sin cambiar la respuesta ya enviada al paciente.

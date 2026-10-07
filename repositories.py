@@ -450,6 +450,30 @@ class LLMFailureRepository:
 
 
 class DoctorNotificationRepository:
+    def previous_event_message_id(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        event: AppointmentNotificationEvent,
+    ) -> int:
+        """Encuentra la ultima gestion notificada anterior, incluso si el envio fallo."""
+        rows = connection.execute(
+            """
+            SELECT DISTINCT event_key FROM doctor_notifications
+            WHERE patient_id = ? AND conversation_id = ?
+            """,
+            (event.patient_scope.patient_id, event.patient_scope.conversation_id),
+        ).fetchall()
+        previous_id = 0
+        for row in rows:
+            parts = row["event_key"].split(":", 2)
+            if len(parts) != 3 or parts[0] != "appointment" or not parts[1].isdigit():
+                continue
+            message_id = int(parts[1])
+            if previous_id < message_id < event.incoming_message_id:
+                previous_id = message_id
+        return previous_id
+
     def get_by_id(
         self,
         connection: sqlite3.Connection,

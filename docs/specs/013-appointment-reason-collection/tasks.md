@@ -60,3 +60,13 @@
 - [x] Cubrir el flujo para un paciente con nombre previo: nombre, motivo y cita.
 - [x] Ejecutar la suite completa y verificar health check y ambos metodos del webhook
       en el mirror de Raspberry Pi.
+
+## Corte 8 - Evaluacion semantica y secrecion ocular
+
+- [x] Añadir secrecion ocular amarillenta, verdosa o abundante y variantes de escritura.
+- [x] Unificar catalogo e instrucciones semanticas con el resumidor de notificaciones.
+- [x] Aceptar señales interpretadas con evidencia literal del motivo, sin exigir regex.
+- [x] Mantener compatibilidad con respuestas sin evidencia mediante el respaldo local.
+- [x] Excluir negaciones explicitas y no forzar prioridad ante pocas lagañas al despertar.
+- [x] Ejecutar la suite completa en Raspberry Pi y registrar la verificacion en
+      `docs/verification/2026-10-07-semantic-priority-signals.md`.

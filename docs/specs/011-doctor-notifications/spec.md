@@ -86,6 +86,27 @@ El resumen se genera como parte de la notificacion del evento de cita. No se env
 un resumen despues de cada mensaje ni se crea una notificacion independiente de
 resumen.
 
+### RF-1110 - Prioridad razonada con evidencia de la gestion actual
+
+La composicion debe interpretar el motivo y los mensajes del paciente de la gestion
+actual, incluyendo sinonimos, errores de escritura, intensidad e inicio de los sintomas.
+El motivo final no tiene que repetir todos los sintomas del historial. La interpretacion
+del LLM usa codigos del catalogo compartido y `priority_signal_evidence` con objetos
+`{signal, quote}`; el backend exige evidencia literal del paciente sin exigir ademas
+coincidencia con palabras clave. El respaldo local se conserva si el modelo omite señales.
+
+La secrecion ocular amarillenta, verdosa o abundante, incluido el motivo
+`Tengo laga;as muy amarillentas y grandes en los ojos`, debe producir `ocular_discharge`
+y su descripcion aprobada. Pocas lagañas al despertar, una revision rutinaria o sintomas
+negados no deben forzar una señal. Una negacion posterior explicita del mismo sintoma
+debe actualizar el respaldo local.
+
+El historial se acota al evento actual y se separa en el ultimo evento anterior
+persistido o respuesta fija de exito del backend. No se heredan sintomas de citas
+anteriores, ni se acepta como evidencia texto del asistente, de otro paciente o de
+mensajes posteriores al evento. Las citas literales son datos de validacion, no una
+transcripcion agregada a la notificacion.
+
 ### RF-1106 - Aislamiento de la respuesta al paciente
 
 Un fallo al construir, persistir o enviar una notificacion no debe convertir en
@@ -132,6 +153,12 @@ y no debe guardar credenciales en la base ni en el repositorio.
 10. Las pruebas usan dobles locales y no requieren enviar mensajes reales.
 11. La suite completa se ejecuta en el mirror de Raspberry Pi despues de
     sincronizar los cambios locales.
+12. El ejemplo de lagañas amarillentas y grandes incluye la descripcion aprobada de
+    secrecion ocular y no muestra `Ninguna detectada` aunque el LLM omita la señal.
+13. Una dificultad visual descrita sin las palabras clave de las reglas puede conservar
+    `sudden_vision_loss` cuando el LLM aporta evidencia literal del motivo o historial actual.
+14. Un motivo rutinario puede incorporar un sintoma del historial actual; evidencia
+    inventada, negada, de una cita anterior, del asistente o posterior al evento se descarta.
 
 ## Fuera del alcance
 

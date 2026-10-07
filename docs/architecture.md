@@ -197,6 +197,17 @@ resultado del LLM se valida y se limita; los diagnosticos, recomendaciones,
 transcripciones completas y valores internos conocidos se descartan o sustituyen
 por contenido seguro antes de formar el cuerpo.
 
+La misma llamada analiza semanticamente el motivo y el historial de la gestion actual.
+Las señales del modelo requieren `priority_signal_evidence` con codigo soportado y
+cita literal encontrada en el motivo o en mensajes entrantes; no requieren una segunda
+coincidencia con palabras clave. El respaldo local se combina con ese resultado,
+incluyendo secrecion ocular amarillenta, verdosa o abundante como `ocular_discharge`.
+El repositorio de notificaciones marca el limite con el ultimo evento anterior de esa
+conversacion, independientemente del estado de entrega, y el compositor reconoce
+ademas respuestas fijas de exito del backend. El limite de historial se aplica despues
+de separar gestiones. Se excluyen mensajes futuros y se conserva la respuesta enviada
+del evento actual; los mensajes del asistente no son evidencia de sintomas.
+
 `DoctorNotificationDeliveryService` carga la configuracion de destinatarios,
 reutiliza `WhatsAppClient` y procesa cada fila mediante una reclamacion atomica.
 Los envios exitosos quedan en `sent` con el ID de Meta; los fallos se normalizan y
@@ -284,10 +295,14 @@ evaluacion y se convierten en lenguaje operativo sin diagnosticos antes de la
 notificacion. Una solicitud vencida despues de 10 minutos se limpia sin tocar el
 proveedor. La politica clinica para pacientes reales permanece fuera del alcance.
 
-El catalogo detecta `eye_redness` en frases como `Tengo los ojos rojos`. Las señales
-de cada notificacion se calculan usando el motivo de la cita correspondiente, no todos
-los mensajes del paciente. Las sugeridas por el LLM solo se aceptan si son un codigo o
-mensaje aprobado y estan respaldadas por ese motivo.
+El catalogo detecta `eye_redness` en frases como `Tengo los ojos rojos` y
+`ocular_discharge` en `Tengo laga;as muy amarillentas y grandes en los ojos`.
+El evaluador previo a agendar analiza el motivo, mientras que la notificacion incorpora
+ademas los mensajes del paciente de la gestion actual. Los prompts comparten catalogo
+e instrucciones semanticas; las sugerencias del modelo requieren evidencia literal.
+Las reglas locales excluyen negaciones explicitas y una negacion posterior del mismo
+sintoma puede reemplazar su mencion anterior. No se fuerza prioridad para pocas lagañas
+al despertar o una revision rutinaria.
 
 ### LLMProvider y agente LLM basico
 

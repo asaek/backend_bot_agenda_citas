@@ -53,6 +53,7 @@ esten aprobados.
 - [Verificacion de señales de ojos rojos](./verification/2026-10-05-red-eye-priority-signals.md)
 - [Verificacion de disponibilidad antes de pedir hora para reprogramar](./verification/2026-10-05-reschedule-before-time-selection.md)
 - [Verificacion de seleccion del proveedor LLM](./verification/2026-10-06-llm-provider-selection.md)
+- [Verificacion de prioridad semantica del motivo e historial actual](./verification/2026-10-07-semantic-priority-signals.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
