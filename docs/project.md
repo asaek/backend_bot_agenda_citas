@@ -58,6 +58,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   de continuar con el motivo.
 - Separar señales operativas de prioridad de cualquier diagnostico y conservarlas sin
   cambiar el flujo de agendamiento.
+- Detectar ojos rojos como señal operativa y llevarla a la notificacion mediante el
+  catalogo seguro, sin permitir señales de texto libre del LLM.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
 - Conservar durante 10 minutos la intencion de agendar sin hora exacta mientras se
@@ -66,8 +68,16 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   de iniciar la recoleccion de nombre y motivo.
 - Consultar y mostrar los horarios libres del dia destino antes de confirmar una
   reprogramacion, y aceptar solo una seleccion de esa lista.
+- Mostrar la disponibilidad del dia de una cita identificada antes de preguntar por una
+  hora destino para reprogramarla.
+- Clasificar la intencion nueva antes de continuar un flujo pendiente, permitiendo
+  abandonarlo o cambiar de tarea sin mutaciones accidentales.
 - Integrar el LLM en el ciclo de respuesta y conservar en SQLite el tipo de fallo y,
   cuando exista, el codigo HTTP del proveedor sin copiar contenido sensible al log.
+- Alternar entre Groq y OpenAI mediante `LLM_PROVIDER`, con credenciales y modelos
+  preconfigurados por proveedor y sin cambiar el flujo conversacional.
+- Usar Responses API para OpenAI y Chat Completions para Groq/OpenRouter con un
+  contrato compartido de respuestas y llamadas a herramientas.
 - Habilitar un modo debug apagado por defecto que muestre diagnosticos seguros solo a
   remitentes de WhatsApp explicitamente autorizados.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
@@ -94,9 +104,11 @@ solicitudes o de un reinicio. Las tareas de este corte estan en
 ### Corte verificado: ciclo integrado de LLM y WhatsApp
 
 Los tres primeros incrementos de la etapa 4 definen una frontera independiente
-del proveedor, preparan un adaptador compatible con OpenAI para Groq y
+del proveedor, preparan un adaptador compatible con OpenAI para Groq, OpenAI y
 OpenRouter, construyen el contexto desde el historial reciente e integran el
-ciclo de generacion y envio. Las tareas estan en
+ciclo de generacion y envio. `LLM_PROVIDER` permite cambiar entre Groq y OpenAI
+sin editar sus claves ni modelos, siempre que ambas configuraciones esten
+preparadas en `.env`. Las tareas estan en
 `specs/003-basic-llm-agent/tasks.md`.
 
 ### Incremento de verificacion: pruebas del ciclo sin API
@@ -244,6 +256,13 @@ proveedor, el tipo de error y el codigo HTTP en la respuesta al paciente de prue
 cuando `DEBUG_MODE` esta activo y su numero aparece en `DEBUG_WHATSAPP_NUMBERS`. El modo
 puede mostrar tambien codigos publicos de agenda. Permanece desactivado por defecto y
 nunca expone excepciones crudas, prompts, mensajes, cuerpos HTTP ni credenciales.
+
+### Corte verificado: enrutamiento de intencion con flujos pendientes
+
+La funcionalidad definida en `specs/016-conversation-intent-routing/` permite que el
+mensaje mas reciente del paciente abandone o reemplace una seleccion, una reserva
+pendiente o una confirmacion. Las expresiones ambiguas solicitan aclaracion y no alteran
+el calendario. Las confirmaciones descartadas no pueden reutilizarse posteriormente.
 
 ### Fase incremental: disponibilidad real
 

@@ -3,8 +3,9 @@
 ## Estado
 
 Verificado para el agente LLM basico, el adaptador compatible con OpenAI, la
-construccion del contexto y el ciclo integrado de generacion y envio. Groq es el
-proveedor predeterminado y OpenRouter usa el mismo adaptador.
+construccion del contexto, el ciclo integrado de generacion y envio y la seleccion
+de Groq, OpenAI u OpenRouter mediante variables de entorno. OpenAI usa Responses
+API y Groq/OpenRouter usan Chat Completions. Groq es el proveedor predeterminado.
 
 ## Problema
 
@@ -49,18 +50,25 @@ clase especifica de Groq.
 
 ### RF-302 - Configuracion externa
 
-El adaptador debe leer `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`,
-`LLM_BASE_URL`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES`,
-`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RESPONSE_CHARACTERS` y
-`LLM_MAX_TOOL_ITERATIONS` desde el entorno, con
-valores predeterminados solamente para limites tecnicos y las URLs de los
-proveedores compatibles soportados.
+El adaptador debe leer `LLM_PROVIDER`, las credenciales y los modelos del proveedor
+seleccionado (`GROQ_API_KEY`/`GROQ_MODEL`, `OPENAI_API_KEY`/`OPENAI_MODEL` o
+`OPENROUTER_API_KEY`/`OPENROUTER_MODEL`), sus URLs opcionales y
+`LLM_TIMEOUT_SECONDS`, `LLM_MAX_HISTORY_MESSAGES`, `LLM_MAX_OUTPUT_TOKENS`,
+`LLM_MAX_RESPONSE_CHARACTERS` y `LLM_MAX_TOOL_ITERATIONS`. Las URLs oficiales se
+usan por defecto. Las variables genericas `LLM_API_KEY`, `LLM_MODEL` y
+`LLM_BASE_URL` se admiten como fallback para el proveedor activo; la URL generica
+se aplica a Groq y OpenRouter, mientras OpenAI usa su URL oficial o
+`OPENAI_BASE_URL`. Si se configuran variables por proveedor, estas tienen
+precedencia sobre `LLM_API_KEY` y `LLM_MODEL`.
 
 ### RF-303 - Solicitud al proveedor
 
-El adaptador debe enviar los mensajes al endpoint `/chat/completions` del
-proveedor configurado, con autenticacion Bearer, el modelo configurado y el
-limite de salida configurado.
+El adaptador debe enviar los mensajes al endpoint seleccionado: OpenAI usa
+`/responses` y Groq/OpenRouter usan `/chat/completions`. Las solicitudes usan
+autenticacion Bearer, el modelo configurado y el limite de salida. OpenAI usa
+`max_output_tokens`; Groq y OpenRouter usan `max_tokens`. El ID del modelo se
+envia sin transformacion y debe admitir el endpoint y las herramientas de llamada
+a funciones que usa el adaptador.
 
 ### RF-304 - Respuesta de texto
 
@@ -149,9 +157,10 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
 ## Criterios de aceptacion
 
 1. Una configuracion valida crea el adaptador para Groq.
-2. Una configuracion sin API key o modelo es rechazada.
+2. Una configuracion sin la API key o el modelo del proveedor seleccionado es rechazada.
 3. Los limites opcionales usan los valores definidos para esta etapa.
-4. El request contiene el modelo, los mensajes y `max_tokens`.
+4. Los requests incluyen modelo, mensajes y el parametro de limite de salida
+   propio del proveedor.
 5. La respuesta del proveedor se devuelve como texto limpio.
 6. Un error HTTP se expone como `LLMProviderError`.
 7. Las pruebas usan un transporte HTTP simulado y no requieren API key real.
@@ -182,6 +191,17 @@ normalizacion y el limite de este contrato se detallan en la especificacion 006.
     fallos LLM ya guardados.
 23. El diagnostico de errores de depuracion sigue el modo y la lista de remitentes de la
     especificacion 015 y no registra el contenido del proveedor.
+24. Con las credenciales y modelos de Groq y OpenAI configurados, cambiar solo
+    `LLM_PROVIDER` selecciona el par correspondiente.
+25. OpenAI usa su URL oficial por defecto y no toma por error el endpoint generico
+    configurado para Groq.
+26. OpenAI usa Responses API, `max_output_tokens` y normaliza tool calls nativos.
+27. Sin variables especificas, OpenAI acepta `LLM_API_KEY` y `LLM_MODEL` como los
+    valores del proveedor activo.
+28. La configuracion documenta los endpoints y los IDs admitidos por cada proveedor;
+    el adaptador no transforma nombres especificos de otro proveedor.
+29. Las llamadas de herramientas de Responses API conservan los elementos de salida
+    necesarios, incluidos los de razonamiento, al enviar el resultado de la herramienta.
 
 ## Fuera de alcance
 

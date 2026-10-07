@@ -41,3 +41,4 @@ NNN-nombre-de-la-funcionalidad/
 - [013 - Motivo antes de crear una cita](./013-appointment-reason-collection/spec.md)
 - [014 - Horarios libres antes de elegir una cita](./014-date-only-availability/spec.md)
 - [015 - Diagnostico seguro de errores en modo debug](./015-debug-error-reporting/spec.md)
+- [016 - Enrutamiento de intencion con flujos pendientes](./016-conversation-intent-routing/spec.md)

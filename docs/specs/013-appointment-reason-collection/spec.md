@@ -13,6 +13,10 @@ La evidencia esta en `docs/verification/2026-09-24-appointment-reason.md` y
 `docs/verification/2026-09-26-patient-name-before-booking.md`.
 La recoleccion del nombre en cada cita esta verificada en
 `docs/verification/2026-10-01-patient-name-every-booking.md`.
+La señal `eye_redness` y el filtrado de señales libres del resumen se verificaron en
+`docs/verification/2026-10-05-red-eye-priority-signals.md`.
+Los abandonos y cambios de intencion mientras se espera el nombre o motivo se definen en
+`specs/016-conversation-intent-routing/`.
 
 ## Objetivo
 
@@ -33,6 +37,7 @@ La funcionalidad cubre:
 - Evaluacion estructurada opcional con `quality`, `category`, `priority_signals` y
   `confidence` validados por el backend.
 - Señales de prioridad expresadas con descripciones operativas sin diagnosticos.
+- Deteccion de ojos rojos como señal de prioridad e inclusion en notificaciones al doctor.
 - Solicitud de aclaracion para referencias vagas como `Lo de siempre`.
 - Persistencia de intentos, resultado, categoria, señales y fecha de evaluacion.
 - Persistencia del estado pendiente en `conversations.context_json`.
@@ -105,12 +110,15 @@ y elimina solamente el estado pendiente.
 
 ### RF-1310 - Señal de prioridad sin diagnostico
 
-Para mensajes que refieran perdida repentina de vision, dolor ocular, golpe o trauma,
-contacto con sustancias quimicas, sangrado, destellos u otra alteracion visual
-importante, el backend debe conservar una señal de prioridad operativa. La señal debe
-usar un codigo soportado y una descripcion como `El paciente refiere una alteracion
-visual que podria requerir atencion prioritaria.`; no debe nombrar glaucoma,
-desprendimiento ni otra enfermedad.
+Para el motivo actual que refiera ojos rojos, perdida repentina de vision, dolor ocular,
+golpe o trauma, contacto con sustancias quimicas, sangrado, destellos u otra alteracion
+visual importante, el backend debe conservar una señal de prioridad operativa. La señal debe
+usar un codigo soportado y una descripcion como `El paciente refiere ojos rojos que
+podrian requerir atencion prioritaria.`; no debe nombrar glaucoma, desprendimiento ni
+otra enfermedad.
+
+Las señales notificadas deben estar respaldadas por el motivo de la cita actual; no se
+deben heredar de mensajes o citas anteriores de la misma conversacion.
 
 La señal puede incluirse en la notificacion interna al doctor despues de crear la cita,
 pero no cambia el flujo ni activa triage automatico. Antes de usarla con pacientes
@@ -160,6 +168,11 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 16. El nombre recibido reemplaza el valor de `patients.name`, el mismo mensaje
     reintentado no crea una cita y un motivo posterior crea la cita con el horario
     original.
+17. `Tengo los ojos rojos` registra `eye_redness` y la notificacion incluye la
+    descripcion aprobada, sin aceptar texto arbitrario como `cita confirmada` en la
+    seccion de señales.
+18. Una cita actual con motivo `Tengo lagañas en los ojos` no hereda `eye_redness` de
+    una cita anterior por ojos rojos en la misma conversacion.
 
 ## Fuera del alcance
 

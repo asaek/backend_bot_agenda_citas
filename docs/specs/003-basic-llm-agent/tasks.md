@@ -11,10 +11,19 @@
 - [x] Normalizar tool calls nativos y argumentos JSON de objeto.
 - [x] Permitir inyeccion de transporte HTTP para pruebas.
 - [x] Definir el agente basico mediante `ConversationService` y `LLMProvider`.
+- [x] Seleccionar claves, modelos y URLs por proveedor para Groq, OpenAI y OpenRouter.
+- [x] Usar Responses API y `max_output_tokens` para OpenAI; preservar Chat
+  Completions para Groq y OpenRouter.
+- [x] Documentar que el ID de modelo se pasa directamente y debe admitir el endpoint
+  y las herramientas soportados por el adaptador.
 
 ## Verificacion
 
-- [x] Probar la construccion del request de Groq y OpenRouter sin Internet.
+- [x] Probar requests de Groq, OpenAI Responses y OpenRouter sin Internet.
+- [x] Probar tool calling de Responses y reproducir sus elementos de razonamiento
+  junto con la salida de herramienta.
+- [x] Verificar que el selector elige las credenciales y el modelo del proveedor
+  configurado y acepta `LLM_API_KEY`/`LLM_MODEL` como fallback del proveedor activo.
 - [x] Probar configuracion incompleta e invalida.
 - [x] Probar respuestas HTTP fallidas y sin contenido.
 - [x] Ejecutar la suite para confirmar el ciclo integrado con el proveedor

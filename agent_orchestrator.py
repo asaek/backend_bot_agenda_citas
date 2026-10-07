@@ -204,6 +204,7 @@ def _with_call_id(tool_call: ToolCall, iteration: int) -> ToolCall:
         name=tool_call.name,
         arguments=tool_call.arguments,
         call_id=f"agent-tool-call-{iteration + 1}",
+        provider_response_items=tool_call.provider_response_items,
     )
 
 

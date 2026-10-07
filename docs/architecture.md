@@ -247,6 +247,24 @@ el ID de la cita y el ID de llamada en el contexto por 10 minutos. Solo una sele
 coincidente produce una accion pendiente de confirmacion; el intento de seleccionar una
 hora fuera de la lista no genera una mutacion.
 
+Si el paciente solicita cambiar solo la hora, `ConversationService` identifica la cita
+en el ultimo listado persistido y presenta la disponibilidad de ese dia antes de pedir
+una hora preferida. Si no consigue resolver una unica cita, solicita que el paciente
+precise cual desea modificar.
+
+### Enrutamiento de intencion durante flujos pendientes
+
+La funcionalidad definida en `specs/016-conversation-intent-routing/` consulta el
+mensaje mas reciente antes de resolver fechas, selecciones, datos de reserva o
+confirmaciones pendientes. `conversation_intent.py` identifica continuacion, abandono,
+aclaracion y cambio explicito de tarea. Abandonar o cambiar de tarea limpia los estados
+de agenda en una sola actualizacion de contexto; una intencion nueva vuelve al flujo
+normal y conserva las confirmaciones de seguridad existentes. Una expresion ambigua
+como `cancela` solicita aclaracion y no borra estado ni ejecuta una mutacion. Una
+confirmacion descartada no puede ejecutarse con un `Si` posterior.
+Los saludos comunes y las instrucciones de olvidar la actividad actual tambien se
+clasifican como cambios de intencion para que el agente responda al mensaje nuevo.
+
 ### Motivo antes de crear una cita
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
@@ -266,13 +284,25 @@ evaluacion y se convierten en lenguaje operativo sin diagnosticos antes de la
 notificacion. Una solicitud vencida despues de 10 minutos se limpia sin tocar el
 proveedor. La politica clinica para pacientes reales permanece fuera del alcance.
 
+El catalogo detecta `eye_redness` en frases como `Tengo los ojos rojos`. Las señales
+de cada notificacion se calculan usando el motivo de la cita correspondiente, no todos
+los mensajes del paciente. Las sugeridas por el LLM solo se aceptan si son un codigo o
+mensaje aprobado y estan respaldadas por ese motivo.
+
 ### LLMProvider y agente LLM basico
 
 Define el contrato asincrono `generate(messages)` para que el agente basico y la
 logica conversacional no dependan de un proveedor concreto. El adaptador
-`OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq u
-OpenRouter. Cada solicitud incluye los cinco esquemas OpenAI-compatible de las
-herramientas; el proveedor puede devolver texto o un `ToolCall` estructurado.
+`OpenAICompatibleLLMProvider` usa `httpx` y variables de entorno para Groq,
+OpenAI u OpenRouter. `LLM_PROVIDER` selecciona el proveedor; las claves y los
+modelos se pueden configurar por proveedor para que alternar entre Groq y OpenAI
+solo requiera cambiar ese selector. `LLM_API_KEY` y `LLM_MODEL` tambien pueden
+contener los valores del proveedor activo; en ese caso se actualizan al cambiar
+de proveedor. El ID de `LLM_MODEL` se envia sin transformacion y debe admitir
+la ruta y function calling del proveedor. OpenAI utiliza `/responses`; Groq y
+OpenRouter utilizan `/chat/completions`. El adaptador transforma los cinco
+esquemas compartidos al formato de cada endpoint y normaliza texto/tool calls a
+`LLMResponse`.
 
 El adaptador participa en el flujo del webhook mediante la inyeccion de
 `LLMProvider` en `ConversationService`. `generate()` devuelve texto o un

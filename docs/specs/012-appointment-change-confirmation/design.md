@@ -52,6 +52,13 @@ el ID de la llamada, los tiempos de creacion y expiracion y los datos recuperado
 cita. Se almacena dentro de `conversations.context_json`, preservando cualquier otro
 contexto existente. No existe una accion pendiente si la consulta no recupera una cita.
 
+Cuando el paciente solicita cambiar la hora sin dar un destino, `ConversationService`
+recupera las citas vigentes y resuelve la referencia usando primero la lista de citas
+recientemente mostrada y la hora mencionada. Si queda una unica cita, consulta de
+inmediato todos los horarios disponibles de su fecha, sin pedir primero una hora libre.
+Si la referencia sigue ambigua, muestra las citas candidatas y pregunta cual quiere
+cambiar; no modifica ninguna.
+
 Para una reprogramacion, `ConversationService` consulta `check_availability` para el dia
 local de `new_start_at` (o el dia de la cita si el paciente solo solicita cambiar la
 hora). `PendingAppointmentAvailability` conserva los slots ofrecidos junto con el ID de
@@ -69,6 +76,11 @@ gracias`. Si encuentra señales contradictorias o de incertidumbre, conserva la
 accion y pide aclaracion. Una afirmacion reconstruye la llamada almacenada y la
 ejecuta mediante `AgentOrchestrator.execute_confirmed_tool()`; una respuesta
 negativa limpia el estado sin tocar el calendario.
+
+Antes de esta resolucion, el router transversal de
+`specs/016-conversation-intent-routing/` permite descartar una confirmacion si el paciente
+cambia explicitamente de tarea. La nueva solicitud se atiende sin dejar una mutacion
+antigua esperando un `Si` posterior.
 
 La confirmacion expira a los 10 minutos. El estado se limpia antes de una ejecucion
 confirmada para evitar reutilizar la misma autorizacion.

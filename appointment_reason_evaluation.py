@@ -366,6 +366,7 @@ SUPPORTED_PRIORITY_SIGNALS = frozenset(
         "urgent_request",
         "sudden_vision_loss",
         "eye_pain",
+        "eye_redness",
         "ocular_trauma",
         "chemical_exposure",
         "ocular_bleeding",
@@ -382,6 +383,9 @@ PRIORITY_SIGNAL_MESSAGES: Mapping[str, str] = {
     ),
     "eye_pain": (
         "El paciente refiere dolor ocular que podría requerir atención prioritaria."
+    ),
+    "eye_redness": (
+        "El paciente refiere ojos rojos que podrían requerir atención prioritaria."
     ),
     "ocular_trauma": (
         "El paciente refiere un golpe o trauma ocular que podría requerir atención "
@@ -412,6 +416,9 @@ _PRIORITY_PATTERNS: Mapping[str, tuple[str, ...]] = {
         r"vision muy reducida)\b",
     ),
     "eye_pain": (r"\b(?:dolor|duele|ardor)\b",),
+    "eye_redness": (
+        r"\b(?:ojos?\s+rojos?|ojos?\s+enrojecidos?|enrojecimiento\s+ocular)\b",
+    ),
     "ocular_trauma": (r"\b(?:golpe|trauma|traumatismo)\b",),
     "chemical_exposure": (
         r"\b(?:quimic\w*|cloro|acido|sustancia)\b",

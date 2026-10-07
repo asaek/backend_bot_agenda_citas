@@ -49,6 +49,10 @@ esten aprobados.
 - [Verificacion del diagnostico debug limitado](./verification/2026-10-03-debug-error-reporting.md)
 - [Verificacion de resolucion previa a confirmar una reprogramacion](./verification/2026-10-04-reschedule-appointment-lookup.md)
 - [Verificacion de horarios disponibles para reprogramar](./verification/2026-10-05-reschedule-availability.md)
+- [Verificacion de enrutamiento entre flujos pendientes](./verification/2026-10-05-conversation-intent-routing.md)
+- [Verificacion de señales de ojos rojos](./verification/2026-10-05-red-eye-priority-signals.md)
+- [Verificacion de disponibilidad antes de pedir hora para reprogramar](./verification/2026-10-05-reschedule-before-time-selection.md)
+- [Verificacion de seleccion del proveedor LLM](./verification/2026-10-06-llm-provider-selection.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -57,6 +61,7 @@ esten aprobados.
 - [013 - Motivo antes de crear una cita](./specs/013-appointment-reason-collection/spec.md)
 - [014 - Horarios libres antes de elegir una cita](./specs/014-date-only-availability/spec.md)
 - [015 - Diagnostico seguro de errores en modo debug](./specs/015-debug-error-reporting/spec.md)
+- [016 - Enrutamiento de intencion con flujos pendientes](./specs/016-conversation-intent-routing/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
@@ -69,3 +74,6 @@ esten aprobados.
 - [ADR 0038 - Diagnostico de errores limitado por modo y remitente](./decisions/0038-debug-error-reporting.md)
 - [ADR 0039 - Resolver la cita antes de solicitar confirmacion](./decisions/0039-resolve-appointment-before-confirmation.md)
 - [ADR 0040 - Consultar disponibilidad antes de confirmar una reprogramacion](./decisions/0040-reschedule-availability-before-confirmation.md)
+- [ADR 0041 - Priorizar la intencion mas reciente sobre flujos pendientes](./decisions/0041-prioritize-current-intent.md)
+- [ADR 0042 - Mostrar disponibilidad al solicitar cambiar la hora](./decisions/0042-show-availability-before-reschedule-time.md)
+- [ADR 0043 - Seleccion del proveedor OpenAI-compatible por entorno](./decisions/0043-openai-compatible-provider-selection.md)

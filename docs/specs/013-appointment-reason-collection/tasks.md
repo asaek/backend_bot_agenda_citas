@@ -42,13 +42,15 @@
 ## Corte 6 - Señales de prioridad sin diagnostico
 
 - [x] Definir codigos y descripciones operativas para perdida visual, dolor, trauma,
-      exposicion quimica, sangrado, destellos y alteraciones visuales importantes.
+      exposicion quimica, sangrado, destellos, ojos rojos y alteraciones visuales importantes.
 - [x] Filtrar señales no soportadas o diagnosticos enviados por el LLM.
 - [x] Reutilizar las descripciones seguras al componer la notificacion al doctor.
 - [x] Rechazar referencias vagas como `Lo de siempre` sin perder el horario pendiente.
 - [x] Cubrir entradas invalidas, motivos validos, horario de la 1 pm, una señal de
       prioridad y ausencia de notificacion mientras el motivo sea invalido.
 - [x] Documentar que la politica clinica para pacientes reales queda pendiente.
+- [x] Detectar ojos rojos aunque el LLM omita la señal y filtrar señales libres del resumen.
+- [x] Verificar `eye_redness` y su inclusion en la notificacion en Raspberry Pi.
 
 ## Corte 7 - Nombre del paciente en cada cita
 

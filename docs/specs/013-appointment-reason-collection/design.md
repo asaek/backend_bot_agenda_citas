@@ -60,6 +60,11 @@ cualquier otro contexto existente. Tambien conserva `attempt_count` y
 
 ## Resolucion
 
+Antes de tomar el siguiente mensaje como nombre o motivo, `ConversationService` consulta
+el router de `specs/016-conversation-intent-routing/`. Una peticion nueva explicita
+limpia la solicitud de creacion pendiente y se atiende sin ejecutar `create_appointment`;
+una pregunta ambigua se aclara en vez de convertirla en nombre o motivo.
+
 En cada cita nueva, aunque el paciente ya tenga un nombre registrado,
 `ConversationService` toma el siguiente mensaje, normaliza espacios, lo valida como
 nombre y lo guarda o actualiza en `patients.name` junto con el marcador del mensaje
@@ -77,6 +82,13 @@ proporciona el `reason`. Las señales detectadas localmente se combinan con las
 señales permitidas del LLM, sin aceptar diagnosticos ni texto libre. Los codigos se
 convierten mediante un catalogo compartido en mensajes operativos, por ejemplo
 `El paciente refiere dolor ocular que podria requerir atencion prioritaria.`
+
+El codigo `eye_redness` se detecta localmente a partir de expresiones como `ojos rojos`
+en el motivo actual de la cita y usa el mensaje operativo `El paciente refiere ojos rojos
+que podrían requerir atención prioritaria.`. El compositor deriva las señales del motivo
+de `event.appointment`, no de todo el historial; solo conserva codigos o mensajes del
+catalogo respaldados por ese motivo y descarta texto libre producido por el modelo,
+incluidos estados como `cita confirmada`.
 
 Cada intento actualiza el estado pendiente antes de responder. Un resultado
 `needs_clarification` o `out_of_scope` lo conserva. Un resultado `valid` con

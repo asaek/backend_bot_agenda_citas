@@ -116,6 +116,30 @@ class AppointmentReasonEvaluationTests(unittest.IsolatedAsyncioTestCase):
             priority_signal_messages(result.priority_signals)[0].lower(),
         )
 
+    async def test_detects_red_eyes_even_if_the_llm_omits_the_signal(self) -> None:
+        evaluator = StructuredAppointmentReasonEvaluator(
+            FakeLLMProvider(
+                reply=(
+                    '{"quality":"valid","category":"visual_symptom",'
+                    '"priority_signals":[],"confidence":0.94}'
+                )
+            )
+        )
+
+        result = await evaluator.evaluate(
+            "Tengo los ojos rojos",
+            evaluated_at=self.evaluated_at,
+        )
+
+        self.assertEqual(result.priority_signals, ("eye_redness",))
+        self.assertEqual(
+            priority_signal_messages(result.priority_signals),
+            (
+                "El paciente refiere ojos rojos que podrían requerir atención "
+                "prioritaria.",
+            ),
+        )
+
     async def test_diagnostic_words_from_the_llm_are_not_priority_signals(self) -> None:
         provider = FakeLLMProvider(
             reply=(
@@ -137,6 +161,7 @@ class AppointmentReasonEvaluationTests(unittest.IsolatedAsyncioTestCase):
         cases = (
             ("Perdí repentinamente la visión.", "sudden_vision_loss"),
             ("Tengo dolor ocular intenso.", "eye_pain"),
+            ("Tengo los ojos rojos.", "eye_redness"),
             ("Recibí un golpe en el ojo.", "ocular_trauma"),
             ("Me cayó cloro en el ojo.", "chemical_exposure"),
             ("Tengo sangrado en el ojo.", "ocular_bleeding"),

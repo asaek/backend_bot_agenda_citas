@@ -8,16 +8,19 @@ Aceptada para el MVP tecnico.
 
 Algunos mensajes del paciente pueden indicar que la solicitud merece una revision
 prioritaria: perdida repentina de vision, dolor ocular, golpe o trauma, contacto con
-sustancias quimicas, sangrado, destellos u otra alteracion visual importante. El
+sustancias quimicas, sangrado, destellos, ojos rojos u otra alteracion visual importante. El
 backend necesita conservar esa informacion para el doctor sin convertir el texto en
 un diagnostico ni bloquear el flujo de creacion de citas.
 
 ## Decision
 
 El evaluador mantiene una lista cerrada de codigos de señales de prioridad. Las
-reglas locales detectan evidencia textual y el resultado del LLM solo puede conservar
-codigos soportados y evidenciados por el texto del paciente. Cada codigo se convierte
-en una descripcion operativa segura, por ejemplo:
+reglas locales detectan evidencia textual, incluyendo ojos rojos como `eye_redness`, y
+el resultado del LLM solo puede conservar codigos soportados y evidenciados por el motivo
+actual de la cita. El compositor de notificaciones acepta codigos o descripciones exactas
+del catalogo y solo cuando coinciden con una señal detectada en ese motivo; no hereda
+señales de mensajes de citas anteriores ni acepta texto arbitrario como estados de cita.
+Cada codigo se convierte en una descripcion operativa segura, por ejemplo:
 
 > El paciente refiere alteracion visual que podria requerir atencion prioritaria.
 
@@ -36,6 +39,7 @@ este MVP. La validacion de calidad minima tambien rechaza referencias vagas como
 - La prioridad queda separada de la categoria operativa y del motivo persistido.
 - Un resultado del LLM no puede introducir diagnosticos como señales.
 - Las notificaciones al doctor reciben lenguaje descriptivo y acotado.
+- Los estados o confirmaciones de una cita no se pueden incluir como señales de prioridad.
 - El flujo de agendamiento no cambia por detectar una señal.
 - Antes de usar el sistema con pacientes reales se necesita una politica clinica
   explicita que defina umbrales, responsables, respuesta y seguimiento.

@@ -46,13 +46,32 @@ class NotificationCompositionTests(unittest.TestCase):
             tool_call_id="tool-call-internal-1",
         )
 
+    def event_with_reason(self, reason: str) -> AppointmentNotificationEvent:
+        appointment = Appointment(
+            id=self.appointment.id,
+            patient_scope=self.scope,
+            calendar_id=self.appointment.calendar_id,
+            start_at=self.appointment.start_at,
+            end_at=self.appointment.end_at,
+            reason=reason,
+            status=self.appointment.status,
+        )
+        return AppointmentNotificationEvent(
+            notification_type=self.event.notification_type,
+            tool_name=self.event.tool_name,
+            appointment=appointment,
+            patient_scope=self.scope,
+            incoming_message_id=self.event.incoming_message_id,
+            tool_call_id=self.event.tool_call_id,
+        )
+
     def test_renders_one_format_with_appointment_patient_summary_and_priority(self) -> None:
         message = render_doctor_notification(
             self.event,
             patient_name="Ana Prueba",
             summary=NotificationSummary(
                 summary="El paciente solicito una revision y confirmo el horario.",
-                priority_signals=("Solicitud de atencion prioritaria.",),
+                priority_signals=("El paciente solicita atención prioritaria.",),
             ),
         )
 
@@ -68,7 +87,7 @@ class NotificationCompositionTests(unittest.TestCase):
         self.assertIn("Telefono: 7531363338", message.body)
         self.assertNotIn("Telefono: 5217531363338", message.body)
         self.assertIn(message.summary, message.body)
-        self.assertIn("Solicitud de atencion prioritaria.", message.body)
+        self.assertIn("El paciente solicita atención prioritaria.", message.body)
 
     def test_format_changes_only_event_label_for_the_three_mutations(self) -> None:
         cases = (
@@ -171,18 +190,22 @@ class NotificationCompositionTests(unittest.TestCase):
             reply=json.dumps(
                 {
                     "summary": "El paciente solicito gestionar una cita.",
-                    "priority_signals": ["Solicitud prioritaria referida."],
+                    "priority_signals": ["urgent_request"],
                 }
             )
         )
         service = DoctorNotificationService(database, provider)
 
-        message = asyncio.run(service.compose(self.event))
+        message = asyncio.run(
+            service.compose(
+                self.event_with_reason("Necesito una cita y es urgente.")
+            )
+        )
 
         self.assertIn("Nombre: Ana Prueba", message.body)
         self.assertIn("Telefono: 7531363338", message.body)
         self.assertIn("El paciente solicito gestionar una cita.", message.body)
-        self.assertIn("Solicitud prioritaria referida.", message.body)
+        self.assertIn("El paciente solicita atención prioritaria.", message.body)
         self.assertNotIn(self.appointment.id, message.body)
         self.assertNotIn(self.appointment.calendar_id, message.body)
         self.assertNotIn(self.event.event_key, message.body)
@@ -251,7 +274,7 @@ class NotificationCompositionTests(unittest.TestCase):
 
         message = asyncio.run(
             composer.compose(
-                self.event,
+                self.event_with_reason("Tuve contacto con una sustancia química en el ojo."),
                 patient_name=None,
                 history=history,
             )
@@ -264,6 +287,106 @@ class NotificationCompositionTests(unittest.TestCase):
         )
         self.assertNotIn("glaucoma", message.body.lower())
         self.assertNotIn("desprendimiento", message.body.lower())
+
+    def test_red_eyes_are_reported_as_priority_and_model_status_noise_is_rejected(self) -> None:
+        expected_signal = (
+            "El paciente refiere ojos rojos que podrían requerir atención prioritaria."
+        )
+        provider = FakeLLMProvider(
+            reply=json.dumps(
+                {
+                    "summary": "El paciente refiere ojos rojos.",
+                    "priority_signals": ["cita confirmada"],
+                }
+            )
+        )
+        history = (
+            MessageRecord(
+                id=1,
+                conversation_id=self.scope.conversation_id,
+                direction="incoming",
+                provider_message_id="wamid.red-eyes",
+                text="Tengo los ojos rojos",
+                message_type="text",
+                status="received",
+                reply_to_message_id=None,
+                created_at="2026-10-05T13:36:00+00:00",
+            ),
+        )
+        composer = DoctorNotificationComposer(provider)
+
+        message = asyncio.run(
+            composer.compose(
+                self.event_with_reason("Tengo los ojos rojos"),
+                patient_name="Asael Ponce Silva",
+                history=history,
+            )
+        )
+
+        self.assertEqual(message.priority_signals, (expected_signal,))
+        self.assertIn(expected_signal, message.body)
+
+    def test_previous_appointment_signal_is_not_reused_for_the_current_reason(self) -> None:
+        current_appointment = Appointment(
+            id="appointment-current",
+            patient_scope=self.scope,
+            calendar_id="calendar-current",
+            start_at=datetime(2026, 10, 6, 9, tzinfo=timezone.utc),
+            end_at=datetime(2026, 10, 6, 9, 30, tzinfo=timezone.utc),
+            reason="Tengo lagañas en los ojos",
+            status=AppointmentStatus.CONFIRMED,
+        )
+        current_event = AppointmentNotificationEvent(
+            notification_type=AppointmentNotificationType.SCHEDULED,
+            tool_name=ToolName.CREATE_APPOINTMENT,
+            appointment=current_appointment,
+            patient_scope=self.scope,
+            incoming_message_id=1001,
+            tool_call_id="tool-call-current",
+        )
+        provider = FakeLLMProvider(
+            reply=json.dumps(
+                {
+                    "summary": "El paciente refiere lagañas en los ojos.",
+                    "priority_signals": [],
+                }
+            )
+        )
+        history = (
+            MessageRecord(
+                id=1,
+                conversation_id=self.scope.conversation_id,
+                direction="incoming",
+                provider_message_id="wamid.previous-red-eyes",
+                text="Tengo los ojos rojos",
+                message_type="text",
+                status="received",
+                reply_to_message_id=None,
+                created_at="2026-10-05T13:00:00+00:00",
+            ),
+            MessageRecord(
+                id=2,
+                conversation_id=self.scope.conversation_id,
+                direction="incoming",
+                provider_message_id="wamid.current-lagañas",
+                text="Tengo lagañas en los ojos",
+                message_type="text",
+                status="received",
+                reply_to_message_id=None,
+                created_at="2026-10-05T14:22:00+00:00",
+            ),
+        )
+
+        message = asyncio.run(
+            DoctorNotificationComposer(provider).compose(
+                current_event,
+                patient_name="Ana Prueba",
+                history=history,
+            )
+        )
+
+        self.assertEqual(message.priority_signals, ())
+        self.assertIn("- Ninguna detectada.", message.body)
 
     def test_renderer_sanitizes_untrusted_summary_values(self) -> None:
         message = render_doctor_notification(

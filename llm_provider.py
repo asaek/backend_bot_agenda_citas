@@ -11,6 +11,7 @@ from tool_contracts import llm_tool_definitions
 
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_LLM_PROVIDER = "groq"
 DEFAULT_LLM_TIMEOUT_SECONDS = 20.0
@@ -18,9 +19,16 @@ DEFAULT_LLM_MAX_HISTORY_MESSAGES = 30
 DEFAULT_LLM_MAX_OUTPUT_TOKENS = 500
 DEFAULT_LLM_MAX_RESPONSE_CHARACTERS = 4000
 DEFAULT_LLM_MAX_TOOL_ITERATIONS = 3
-SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "openrouter"})
+SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "openai", "openrouter"})
+PROVIDER_ENVIRONMENT_PREFIXES = {
+    "groq": "GROQ",
+    "openai": "OPENAI",
+    "openrouter": "OPENROUTER",
+}
+LEGACY_GENERIC_BASE_URL_PROVIDERS = frozenset({"groq", "openrouter"})
 DEFAULT_BASE_URLS = {
     "groq": DEFAULT_GROQ_BASE_URL,
+    "openai": DEFAULT_OPENAI_BASE_URL,
     "openrouter": DEFAULT_OPENROUTER_BASE_URL,
 }
 
@@ -32,6 +40,7 @@ class ToolCall:
     name: str
     arguments: Mapping[str, object]
     call_id: str | None = None
+    provider_response_items: Sequence[Mapping[str, object]] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -46,6 +55,17 @@ class ToolCall:
         object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
         if self.call_id is not None:
             object.__setattr__(self, "call_id", self.call_id.strip())
+        if isinstance(self.provider_response_items, (str, bytes)) or any(
+            not isinstance(item, Mapping) for item in self.provider_response_items
+        ):
+            raise ValueError("Los elementos de respuesta del proveedor no son validos")
+        object.__setattr__(
+            self,
+            "provider_response_items",
+            tuple(
+                MappingProxyType(dict(item)) for item in self.provider_response_items
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,19 +136,36 @@ def load_llm_settings(environment: Mapping[str, str] | None = None) -> LLMSettin
     values = os.environ if environment is None else environment
 
     provider = values.get("LLM_PROVIDER", DEFAULT_LLM_PROVIDER).strip().lower()
-    api_key = values.get("LLM_API_KEY", "").strip()
-    model = values.get("LLM_MODEL", "").strip()
-    base_url = values.get(
-        "LLM_BASE_URL",
-        DEFAULT_BASE_URLS.get(provider, DEFAULT_GROQ_BASE_URL),
-    ).strip()
+    if provider not in SUPPORTED_LLM_PROVIDERS:
+        raise LLMConfigurationError(f"LLM_PROVIDER no soportado: {provider}")
+
+    environment_prefix = PROVIDER_ENVIRONMENT_PREFIXES[provider]
+    api_key_variable = f"{environment_prefix}_API_KEY"
+    model_variable = f"{environment_prefix}_MODEL"
+    api_key = values.get(api_key_variable, "").strip()
+    model = values.get(model_variable, "").strip()
+    api_key = api_key or values.get("LLM_API_KEY", "").strip()
+    model = model or values.get("LLM_MODEL", "").strip()
+
+    base_url_variable = f"{environment_prefix}_BASE_URL"
+    base_url_value = values.get(base_url_variable)
+    configured_base_url_variable = base_url_variable
+    if base_url_value is None and provider in LEGACY_GENERIC_BASE_URL_PROVIDERS:
+        base_url_value = values.get("LLM_BASE_URL")
+        if base_url_value is not None:
+            configured_base_url_variable = "LLM_BASE_URL"
+    if base_url_value is None:
+        base_url_value = DEFAULT_BASE_URLS[provider]
+    base_url = base_url_value.strip()
 
     if not api_key:
-        raise LLMConfigurationError("LLM_API_KEY no esta configurado")
+        raise LLMConfigurationError(f"{api_key_variable} no esta configurado")
     if not model:
-        raise LLMConfigurationError("LLM_MODEL no esta configurado")
+        raise LLMConfigurationError(f"{model_variable} no esta configurado")
     if not base_url:
-        raise LLMConfigurationError("LLM_BASE_URL no puede estar vacio")
+        raise LLMConfigurationError(
+            f"{configured_base_url_variable} no puede estar vacio"
+        )
 
     timeout_seconds = _positive_float(
         values.get("LLM_TIMEOUT_SECONDS"),
@@ -206,40 +243,20 @@ class OpenAICompatibleLLMProvider:
         if not messages:
             raise LLMProviderError("El LLM requiere al menos un mensaje")
 
-        request_messages: list[dict[str, object]] = []
-        for index, message in enumerate(messages, start=1):
-            request_message: dict[str, object] = {
-                "role": message.role,
-                "content": message.content,
-            }
-            if message.tool_calls:
-                request_message["tool_calls"] = [
-                    {
-                        "id": tool_call.call_id or f"tool-call-{index}",
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": json.dumps(
-                                dict(tool_call.arguments),
-                                ensure_ascii=False,
-                            ),
-                        },
-                    }
-                    for tool_call in message.tool_calls
-                ]
-            if message.tool_call_id is not None:
-                request_message["tool_call_id"] = message.tool_call_id
-            request_messages.append(request_message)
-
-        payload = {
-            "model": self.settings.model,
-            "messages": request_messages,
-            "max_tokens": self.settings.max_output_tokens,
-            "temperature": 0,
-        }
-        if allow_tools:
-            payload["tools"] = llm_tool_definitions()
-            payload["tool_choice"] = "auto"
+        if self.settings.provider == "openai":
+            endpoint = "responses"
+            payload = _responses_payload(
+                self.settings,
+                messages,
+                allow_tools=allow_tools,
+            )
+        else:
+            endpoint = "chat/completions"
+            payload = _chat_completions_payload(
+                self.settings,
+                messages,
+                allow_tools=allow_tools,
+            )
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
@@ -248,7 +265,7 @@ class OpenAICompatibleLLMProvider:
         try:
             if self.http_client is not None:
                 response = await self.http_client.post(
-                    f"{self.settings.base_url}/chat/completions",
+                    f"{self.settings.base_url}/{endpoint}",
                     headers=headers,
                     json=payload,
                 )
@@ -259,7 +276,7 @@ class OpenAICompatibleLLMProvider:
                     timeout=self.settings.timeout_seconds
                 ) as client:
                     response = await client.post(
-                        f"{self.settings.base_url}/chat/completions",
+                        f"{self.settings.base_url}/{endpoint}",
                         headers=headers,
                         json=payload,
                     )
@@ -284,7 +301,64 @@ class OpenAICompatibleLLMProvider:
                 f"{self.settings.provider} devolvio una respuesta invalida"
             ) from error
 
+        if self.settings.provider == "openai":
+            return self._parse_responses_api_response(data, allow_tools=allow_tools)
         return self._parse_response(data, allow_tools=allow_tools)
+
+    def _parse_responses_api_response(
+        self,
+        data: object,
+        *,
+        allow_tools: bool,
+    ) -> LLMResponse:
+        if not isinstance(data, Mapping):
+            raise LLMResponseError("openai devolvio una respuesta invalida")
+        output = data.get("output")
+        if not isinstance(output, list) or any(
+            not isinstance(item, Mapping) for item in output
+        ):
+            raise LLMResponseError("openai devolvio una respuesta sin contenido")
+
+        function_calls = [
+            item for item in output if item.get("type") == "function_call"
+        ]
+        if function_calls:
+            if not allow_tools:
+                raise LLMResponseError(
+                    "openai devolvio una herramienta en modo texto"
+                )
+            if len(function_calls) > 1:
+                raise LLMResponseError("openai devolvio mas de una herramienta")
+            return _parse_responses_tool_call(function_calls[0], output)
+
+        direct_text = data.get("output_text")
+        if isinstance(direct_text, str):
+            content = direct_text
+        else:
+            text_parts: list[str] = []
+            for item in output:
+                if item.get("type") != "message":
+                    continue
+                message_content = item.get("content")
+                if not isinstance(message_content, list):
+                    continue
+                for part in message_content:
+                    if (
+                        isinstance(part, Mapping)
+                        and part.get("type") == "output_text"
+                        and isinstance(part.get("text"), str)
+                    ):
+                        text_parts.append(part["text"])
+            content = "".join(text_parts)
+
+        if not content.strip():
+            raise LLMResponseError("openai devolvio una respuesta vacia")
+        content = content.strip()
+        if len(content) > self.settings.max_response_characters:
+            raise LLMResponseTooLongError(
+                "openai devolvio una respuesta demasiado larga"
+            )
+        return content
 
     def _parse_response(self, data: object, *, allow_tools: bool = True) -> LLMResponse:
         try:
@@ -340,6 +414,156 @@ class OpenAICompatibleLLMProvider:
 
 
 GroqLLMProvider = OpenAICompatibleLLMProvider
+
+
+def _chat_completions_payload(
+    settings: LLMSettings,
+    messages: Sequence[ChatMessage],
+    *,
+    allow_tools: bool,
+) -> dict[str, object]:
+    request_messages: list[dict[str, object]] = []
+    for index, message in enumerate(messages, start=1):
+        request_message: dict[str, object] = {
+            "role": message.role,
+            "content": message.content,
+        }
+        if message.tool_calls:
+            request_message["tool_calls"] = [
+                {
+                    "id": tool_call.call_id or f"tool-call-{index}",
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(
+                            dict(tool_call.arguments),
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+                for tool_call in message.tool_calls
+            ]
+        if message.tool_call_id is not None:
+            request_message["tool_call_id"] = message.tool_call_id
+        request_messages.append(request_message)
+
+    payload: dict[str, object] = {
+        "model": settings.model,
+        "messages": request_messages,
+        "max_tokens": settings.max_output_tokens,
+        "temperature": 0,
+    }
+    if allow_tools:
+        payload["tools"] = llm_tool_definitions()
+        payload["tool_choice"] = "auto"
+    return payload
+
+
+def _responses_payload(
+    settings: LLMSettings,
+    messages: Sequence[ChatMessage],
+    *,
+    allow_tools: bool,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "model": settings.model,
+        "input": _responses_input_items(messages),
+        "max_output_tokens": settings.max_output_tokens,
+        "store": False,
+    }
+    if allow_tools:
+        payload["tools"] = _responses_tool_definitions()
+        payload["tool_choice"] = "auto"
+        payload["parallel_tool_calls"] = False
+    return payload
+
+
+def _responses_input_items(
+    messages: Sequence[ChatMessage],
+) -> list[dict[str, object]]:
+    input_items: list[dict[str, object]] = []
+    for index, message in enumerate(messages, start=1):
+        if message.role == "tool":
+            if message.tool_call_id is None:
+                raise LLMProviderError(
+                    "La salida de herramienta de OpenAI requiere tool_call_id"
+                )
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id,
+                    "output": message.content or "",
+                }
+            )
+            continue
+
+        if message.tool_calls:
+            if message.content:
+                input_items.append(
+                    {"role": message.role, "content": message.content}
+                )
+            for tool_call in message.tool_calls:
+                if tool_call.provider_response_items:
+                    input_items.extend(
+                        dict(item) for item in tool_call.provider_response_items
+                    )
+                    continue
+                input_items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": tool_call.call_id or f"tool-call-{index}",
+                        "name": tool_call.name,
+                        "arguments": json.dumps(
+                            dict(tool_call.arguments),
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+            continue
+
+        if message.content is not None:
+            input_items.append({"role": message.role, "content": message.content})
+    return input_items
+
+
+def _responses_tool_definitions() -> list[dict[str, object]]:
+    definitions: list[dict[str, object]] = []
+    for definition in llm_tool_definitions():
+        function = definition.get("function")
+        if not isinstance(function, Mapping):
+            raise LLMConfigurationError("El esquema de herramienta OpenAI no es valido")
+        response_definition: dict[str, object] = {
+            "type": "function",
+            "name": function["name"],
+            "parameters": function["parameters"],
+            "strict": False,
+        }
+        description = function.get("description")
+        if isinstance(description, str):
+            response_definition["description"] = description
+        definitions.append(response_definition)
+    return definitions
+
+
+def _parse_responses_tool_call(
+    value: Mapping[str, object],
+    response_items: Sequence[Mapping[str, object]],
+) -> ToolCall:
+    if value.get("type") != "function_call":
+        raise LLMResponseError("El tipo de llamada de herramienta no es valido")
+    parsed_call = _parse_tool_call(
+        {
+            "name": value.get("name"),
+            "arguments": value.get("arguments"),
+            "call_id": value.get("call_id"),
+        }
+    )
+    return ToolCall(
+        name=parsed_call.name,
+        arguments=parsed_call.arguments,
+        call_id=parsed_call.call_id,
+        provider_response_items=response_items,
+    )
 
 
 def _parse_tool_call(value: object, *, native: bool = False) -> ToolCall:

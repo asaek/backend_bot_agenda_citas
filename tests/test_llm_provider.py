@@ -66,6 +66,63 @@ class LLMSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.base_url, "https://openrouter.ai/api/v1")
 
+    def test_provider_selector_uses_selected_credentials_and_model(self) -> None:
+        environment = {
+            "LLM_API_KEY": "legacy-active-provider-key",
+            "LLM_MODEL": "legacy-active-provider-model",
+            "LLM_BASE_URL": "https://legacy-groq.test/openai/v1",
+            "GROQ_API_KEY": "groq-key",
+            "GROQ_MODEL": "groq-model",
+            "OPENAI_API_KEY": "openai-key",
+            "OPENAI_MODEL": "gpt-4.1-mini",
+        }
+
+        groq_settings = load_llm_settings(
+            {**environment, "LLM_PROVIDER": "groq"}
+        )
+        openai_settings = load_llm_settings(
+            {**environment, "LLM_PROVIDER": "openai"}
+        )
+
+        self.assertEqual(
+            (groq_settings.api_key, groq_settings.model),
+            ("groq-key", "groq-model"),
+        )
+        self.assertEqual(
+            (openai_settings.api_key, openai_settings.model),
+            ("openai-key", "gpt-4.1-mini"),
+        )
+        self.assertEqual(
+            openai_settings.base_url,
+            "https://api.openai.com/v1",
+        )
+
+    def test_openai_uses_generic_credentials_for_the_selected_provider(self) -> None:
+        settings = load_llm_settings(
+            {
+                "LLM_PROVIDER": "openai",
+                "LLM_API_KEY": "openai-key",
+                "LLM_MODEL": "gpt-4.1-mini",
+                "LLM_BASE_URL": "https://legacy-groq.test/openai/v1",
+            }
+        )
+
+        self.assertEqual(settings.api_key, "openai-key")
+        self.assertEqual(settings.model, "gpt-4.1-mini")
+        self.assertEqual(settings.base_url, "https://api.openai.com/v1")
+
+    def test_uses_provider_specific_openai_base_url_when_configured(self) -> None:
+        settings = load_llm_settings(
+            {
+                "LLM_PROVIDER": "openai",
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_MODEL": "gpt-4.1-mini",
+                "OPENAI_BASE_URL": "https://openai-proxy.test/v1/",
+            }
+        )
+
+        self.assertEqual(settings.base_url, "https://openai-proxy.test/v1")
+
     def test_requires_api_key_and_model(self) -> None:
         with self.assertRaises(LLMConfigurationError):
             load_llm_settings({"LLM_MODEL": "test-model"})
@@ -91,7 +148,7 @@ class LLMSettingsTests(unittest.TestCase):
             )
 
     def test_factory_creates_the_same_adapter_for_supported_providers(self) -> None:
-        for provider in ("groq", "openrouter"):
+        for provider in ("groq", "openai", "openrouter"):
             settings = LLMSettings(
                 provider=provider,
                 api_key="test-key",
@@ -269,6 +326,205 @@ class OpenAICompatibleLLMProviderTests(unittest.TestCase):
             str(requests[0].url),
             "https://openrouter.test/api/v1/chat/completions",
         )
+
+    def test_openai_uses_responses_api_and_parses_text_output(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "id": "msg-openai-1",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "  Hola desde OpenAI  ",
+                                    "annotations": [],
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                settings = load_llm_settings(
+                    {
+                        "LLM_PROVIDER": "openai",
+                        "OPENAI_API_KEY": "openai-key",
+                        "OPENAI_MODEL": "gpt-oss-20b",
+                    }
+                )
+                provider = OpenAICompatibleLLMProvider(
+                    settings,
+                    http_client=http_client,
+                )
+                return await provider.generate(
+                    [
+                        ChatMessage(role="system", content="Responde en espanol."),
+                        ChatMessage(role="user", content="Hola"),
+                    ]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Hola desde OpenAI")
+        self.assertEqual(
+            str(requests[0].url),
+            "https://api.openai.com/v1/responses",
+        )
+        self.assertEqual(requests[0].headers["Authorization"], "Bearer openai-key")
+        payload = json.loads(requests[0].content)
+        self.assertEqual(payload["model"], "gpt-oss-20b")
+        self.assertEqual(
+            payload["input"],
+            [
+                {"role": "system", "content": "Responde en espanol."},
+                {"role": "user", "content": "Hola"},
+            ],
+        )
+        self.assertEqual(payload["max_output_tokens"], 500)
+        self.assertFalse(payload["store"])
+        self.assertNotIn("temperature", payload)
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertFalse(payload["parallel_tool_calls"])
+        self.assertEqual(payload["tools"][0]["type"], "function")
+        self.assertEqual(payload["tools"][0]["name"], "check_availability")
+        self.assertNotIn("function", payload["tools"][0])
+
+    def test_responses_tool_call_replays_reasoning_and_function_output(self) -> None:
+        requests: list[httpx.Request] = []
+        response_items = [
+            {"id": "rs_1", "type": "reasoning", "summary": []},
+            {
+                "id": "fc_1",
+                "call_id": "call_1",
+                "type": "function_call",
+                "name": "check_availability",
+                "arguments": json.dumps(
+                    {
+                        "start_at": "2026-10-06T09:00:00",
+                        "end_at": "2026-10-06T17:00:00",
+                    }
+                ),
+            },
+        ]
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if len(requests) == 1:
+                return httpx.Response(200, json={"output": response_items})
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "id": "msg_2",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "Hay horarios."}
+                            ],
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    load_llm_settings(
+                        {
+                            "LLM_PROVIDER": "openai",
+                            "OPENAI_API_KEY": "openai-key",
+                            "OPENAI_MODEL": "gpt-oss-20b",
+                        }
+                    ),
+                    http_client=http_client,
+                )
+                tool_call = await provider.generate(
+                    [ChatMessage(role="user", content="Que horarios hay?")]
+                )
+                self.assertIsInstance(tool_call, ToolCall)
+                return await provider.generate(
+                    [
+                        ChatMessage(role="user", content="Que horarios hay?"),
+                        ChatMessage(
+                            role="assistant",
+                            content=None,
+                            tool_calls=(tool_call,),
+                        ),
+                        ChatMessage(
+                            role="tool",
+                            content='{"ok":true}',
+                            tool_call_id=tool_call.call_id,
+                        ),
+                    ]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Hay horarios.")
+        follow_up_payload = json.loads(requests[1].content)
+        self.assertEqual(
+            follow_up_payload["input"],
+            [
+                {"role": "user", "content": "Que horarios hay?"},
+                *response_items,
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": '{"ok":true}',
+                },
+            ],
+        )
+
+    def test_openai_generate_text_does_not_publish_tools(self) -> None:
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "id": "msg_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "Resumen"}
+                            ],
+                        }
+                    ]
+                },
+            )
+
+        async def run_test() -> str:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                provider = OpenAICompatibleLLMProvider(
+                    load_llm_settings(
+                        {
+                            "LLM_PROVIDER": "openai",
+                            "OPENAI_API_KEY": "openai-key",
+                            "OPENAI_MODEL": "gpt-oss-20b",
+                        }
+                    ),
+                    http_client=http_client,
+                )
+                return await provider.generate_text(
+                    [ChatMessage(role="user", content="Resume")]
+                )
+
+        self.assertEqual(asyncio.run(run_test()), "Resumen")
+        payload = json.loads(requests[0].content)
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("tool_choice", payload)
 
     def test_parses_native_openai_tool_call_response(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

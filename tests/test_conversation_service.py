@@ -39,6 +39,32 @@ class ConversationContextTests(unittest.TestCase):
             llm_provider=self.llm_provider,
         )
 
+    def create_availability_service(
+        self,
+        llm_provider: FakeLLMProvider,
+    ) -> tuple[ConversationService, FakeCalendarProvider]:
+        fixed_now = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+        provider = FakeCalendarProvider()
+        service = ConversationService(
+            SQLiteDatabase(self.database_path),
+            llm_provider=llm_provider,
+            timezone_name="UTC",
+            now=fixed_now,
+            tool_executor=ToolExecutor(
+                provider=provider,
+                business_hours=BusinessHours(
+                    timezone_name="UTC",
+                    windows_by_weekday={
+                        weekday: (TimeWindow(time(9), time(17)),)
+                        for weekday in range(5)
+                    },
+                ),
+                default_timezone="UTC",
+                now=fixed_now,
+            ),
+        )
+        return service, provider
+
     def test_build_reply_generates_from_the_conversation_context(self) -> None:
         first_context = self.service.receive_message(
             IncomingTextMessage(
@@ -159,6 +185,181 @@ class ConversationContextTests(unittest.TestCase):
         self.assertNotIn("Antes de agendar tu cita", reply)
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(provider.appointments, ())
+
+    def test_clear_abandons_pending_booking_without_creating_an_appointment(self) -> None:
+        llm_provider = FakeLLMProvider(reply="El LLM no debe recibir esta interrupcion")
+        service, provider = self.create_availability_service(llm_provider)
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-interruption-start",
+                message_type="text",
+                text="Quisiera agendar una cita",
+            )
+        )
+        asyncio.run(service.build_reply(date_context))
+        tomorrow_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-interruption-date",
+                message_type="text",
+                text="mañana",
+            )
+        )
+        availability_reply = asyncio.run(service.build_reply(tomorrow_context))
+
+        abandon_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-interruption-abandon",
+                message_type="text",
+                text="no cancela mejor déjala así",
+            )
+        )
+        abandon_reply = asyncio.run(service.build_reply(abandon_context))
+
+        self.assertIn("horarios disponibles", availability_reply.lower())
+        self.assertIn("no se creó ninguna cita", abandon_reply.lower())
+        self.assertIsNone(
+            service._load_pending_appointment_availability(
+                abandon_context.conversation_id
+            )
+        )
+        self.assertIsNone(
+            service._load_pending_appointment_date(abandon_context.conversation_id)
+        )
+        self.assertEqual(provider.appointments, ())
+        self.assertEqual(llm_provider.call_count, 0)
+
+    def test_new_appointment_query_replaces_pending_slot_selection(self) -> None:
+        llm_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name=ToolName.LIST_APPOINTMENTS.value,
+                    arguments={},
+                    call_id="call-list-after-interruption",
+                ),
+                "No encontré citas para hoy.",
+            )
+        )
+        service, provider = self.create_availability_service(llm_provider)
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-query-start",
+                message_type="text",
+                text="Quisiera agendar una cita",
+            )
+        )
+        asyncio.run(service.build_reply(date_context))
+        tomorrow_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-query-date",
+                message_type="text",
+                text="mañana",
+            )
+        )
+        asyncio.run(service.build_reply(tomorrow_context))
+
+        query_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.booking-query-interrupt",
+                message_type="text",
+                text="¿Qué citas tengo para hoy?",
+            )
+        )
+        query_reply = asyncio.run(service.build_reply(query_context))
+
+        self.assertEqual(query_reply, "No encontré citas para hoy.")
+        self.assertEqual(llm_provider.call_count, 2)
+        self.assertIsNone(
+            service._load_pending_appointment_availability(
+                query_context.conversation_id
+            )
+        )
+        self.assertEqual(provider.appointments, ())
+
+    def test_greeting_interrupts_pending_slot_selection(self) -> None:
+        greeting_reply = "¡Hola! ¿En qué puedo ayudarte?"
+        llm_provider = FakeLLMProvider(reply=greeting_reply)
+        service, _ = self.create_availability_service(llm_provider)
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.greeting-interruption-start",
+                message_type="text",
+                text="Quisiera agendar una cita",
+            )
+        )
+        asyncio.run(service.build_reply(date_context))
+        tomorrow_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.greeting-interruption-date",
+                message_type="text",
+                text="mañana",
+            )
+        )
+        asyncio.run(service.build_reply(tomorrow_context))
+
+        greeting_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.greeting-interruption-message",
+                message_type="text",
+                text="Hola",
+            )
+        )
+        reply = asyncio.run(service.build_reply(greeting_context))
+
+        self.assertEqual(reply, greeting_reply)
+        self.assertIsNone(
+            service._load_pending_appointment_availability(
+                greeting_context.conversation_id
+            )
+        )
+
+    def test_explicit_forget_interrupts_pending_slot_selection(self) -> None:
+        greeting_reply = "¡Hola! ¿En qué puedo ayudarte?"
+        llm_provider = FakeLLMProvider(reply=greeting_reply)
+        service, _ = self.create_availability_service(llm_provider)
+        date_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.forget-interruption-start",
+                message_type="text",
+                text="Quisiera agendar una cita",
+            )
+        )
+        asyncio.run(service.build_reply(date_context))
+        tomorrow_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.forget-interruption-date",
+                message_type="text",
+                text="mañana",
+            )
+        )
+        asyncio.run(service.build_reply(tomorrow_context))
+
+        forget_context = service.receive_message(
+            IncomingTextMessage(
+                sender="5491100000000",
+                message_id="wamid.forget-interruption-message",
+                message_type="text",
+                text="Olvida lo que estás haciendo, te estoy saludando",
+            )
+        )
+        reply = asyncio.run(service.build_reply(forget_context))
+
+        self.assertEqual(reply, greeting_reply)
+        self.assertIsNone(
+            service._load_pending_appointment_availability(
+                forget_context.conversation_id
+            )
+        )
 
     def test_sacar_cita_phrase_uses_date_only_availability_before_the_llm(self) -> None:
         provider = FakeCalendarProvider()
@@ -1523,7 +1724,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 sender=self.scope_sender,
                 message_id="wamid.reschedule-missing",
                 message_type="text",
-                text="Quiero cambiar mi cita de las 11",
+                text="Quiero cambiar mi cita de las 11 a las 15",
             )
         )
         events = []
@@ -1560,7 +1761,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 sender=self.scope_sender,
                 message_id="wamid.reschedule-lookup-unavailable",
                 message_type="text",
-                text="Quiero cambiar mi cita de las 11",
+                text="Quiero cambiar mi cita de las 11 a las 15",
             )
         )
 
@@ -1588,7 +1789,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
                 sender=self.scope_sender,
                 message_id="wamid.reschedule-debug-missing",
                 message_type="text",
-                text="Quiero cambiar mi cita de las 11",
+                text="Quiero cambiar mi cita de las 11 a las 15",
             )
         )
 
@@ -1764,3 +1965,278 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         self.assertIn("modificada", confirmed_reply.lower())
         self.assertEqual(self.provider.appointments[0].start_at.hour, 15)
+
+    def test_reschedule_without_a_target_time_shows_slots_before_asking_for_a_time(self) -> None:
+        self.service._now = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+        asyncio.run(
+            self.provider.create_appointment(
+                patient_scope=self.scope,
+                start_at=datetime(2026, 9, 22, 10, tzinfo=timezone.utc),
+                reason="Dolor ocular",
+            )
+        )
+        list_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-availability-list-request",
+                message_type="text",
+                text="¿Qué citas tengo para mañana?",
+            )
+        )
+        self.service.record_reply_sent(
+            list_context,
+            body=(
+                "- *Horario:* 11:00 a 11:30\n"
+                "  *Motivo de consulta:*\n"
+                "  Revision de cornea"
+            ),
+            provider_message_id="wamid.reschedule-availability-list-reply",
+        )
+        reschedule_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-availability-no-target-time",
+                message_type="text",
+                text="Quisiera modificar esa cita y cambiar su hora",
+            )
+        )
+
+        reply = asyncio.run(self.service.build_reply(reschedule_context))
+
+        self.assertIn("horarios disponibles para el 21/09/2026", reply.lower())
+        self.assertIn("09:00 a 09:30", reply)
+        self.assertIn("elige uno de estos horarios", reply.lower())
+        self.assertNotIn("dime a qué hora", reply.lower())
+        self.assertEqual(self.service.llm_provider.call_count, 0)
+        pending = self.service._load_pending_appointment_availability(
+            reschedule_context.conversation_id
+        )
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.appointment_id, self.appointment.id)
+
+        selection_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-availability-select",
+                message_type="text",
+                text="10:00",
+            )
+        )
+        selection_reply = asyncio.run(self.service.build_reply(selection_context))
+        pending_action = self.service._load_pending_appointment_action(
+            selection_context.conversation_id
+        )
+        self.assertIn("confirmas", selection_reply.lower())
+        self.assertIsNotNone(pending_action)
+        self.assertEqual(pending_action.arguments["appointment_id"], self.appointment.id)
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+
+        confirmation_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-availability-confirm",
+                message_type="text",
+                text="Sí",
+            )
+        )
+        confirmation_reply = asyncio.run(self.service.build_reply(confirmation_context))
+
+        self.assertIn("modificada", confirmation_reply.lower())
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 10)
+        self.assertEqual(self.service.llm_provider.call_count, 0)
+
+    def test_reschedule_selection_can_be_interrupted_and_ambiguous_cancel_clarifies(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": self.appointment.id,
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-interruption",
+            ),
+        )
+        first_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-interruption-start",
+                message_type="text",
+                text="Quiero cambiarla para las 3",
+            )
+        )
+        first_reply = asyncio.run(self.service.build_reply(first_context))
+        ambiguous_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-interruption-ambiguous",
+                message_type="text",
+                text="cancela",
+            )
+        )
+
+        clarification_reply = asyncio.run(
+            self.service.build_reply(ambiguous_context)
+        )
+
+        self.assertIn("horarios disponibles", first_reply.lower())
+        self.assertIn("cancelar la cita", clarification_reply.lower())
+        self.assertIsNotNone(
+            self.service._load_pending_appointment_availability(
+                ambiguous_context.conversation_id
+            )
+        )
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(
+                ambiguous_context.conversation_id
+            )
+        )
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+
+        abandon_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-interruption-abandon",
+                message_type="text",
+                text="No, mejor déjala así",
+            )
+        )
+        abandon_reply = asyncio.run(self.service.build_reply(abandon_context))
+
+        self.assertIn("no la he modificado", abandon_reply.lower())
+        self.assertIsNone(
+            self.service._load_pending_appointment_availability(
+                abandon_context.conversation_id
+            )
+        )
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+
+    def test_explicit_cancel_switches_from_reschedule_availability_to_cancel_flow(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": self.appointment.id,
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-before-cancel",
+            ),
+        )
+        reschedule_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.switch-reschedule",
+                message_type="text",
+                text="Quiero cambiarla para las 3",
+            )
+        )
+        asyncio.run(self.service.build_reply(reschedule_context))
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.CANCEL_APPOINTMENT.value,
+                arguments={"appointment_id": self.appointment.id},
+                call_id="call-cancel-after-switch",
+            ),
+        )
+
+        cancel_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.switch-cancel",
+                message_type="text",
+                text="Cancela mi cita de las 11",
+            )
+        )
+        cancel_reply = asyncio.run(self.service.build_reply(cancel_context))
+
+        pending_action = self.service._load_pending_appointment_action(
+            cancel_context.conversation_id
+        )
+        self.assertIsNotNone(pending_action)
+        self.assertEqual(pending_action.tool_name, ToolName.CANCEL_APPOINTMENT)
+        self.assertIn("confirmas", cancel_reply.lower())
+        self.assertIsNone(
+            self.service._load_pending_appointment_availability(
+                cancel_context.conversation_id
+            )
+        )
+        self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.SCHEDULED)
+
+        confirmation_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.switch-cancel-confirm",
+                message_type="text",
+                text="Sí",
+            )
+        )
+        confirmation_reply = asyncio.run(self.service.build_reply(confirmation_context))
+
+        self.assertIn("cancelada", confirmation_reply.lower())
+        self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
+
+    def test_new_query_discards_pending_reschedule_confirmation(self) -> None:
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": self.appointment.id,
+                    "new_start_at": "2026-09-21T15:00:00",
+                },
+                call_id="call-reschedule-before-list",
+            ),
+        )
+        reschedule_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-before-list",
+                message_type="text",
+                text="Quiero cambiarla para las 3",
+            )
+        )
+        asyncio.run(self.service.build_reply(reschedule_context))
+        selection_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-before-list-selection",
+                message_type="text",
+                text="15:00",
+            )
+        )
+        confirmation_prompt = asyncio.run(self.service.build_reply(selection_context))
+        self.assertIn("confirmas", confirmation_prompt.lower())
+        self.service.llm_provider.replies = (
+            ToolCall(
+                name=ToolName.LIST_APPOINTMENTS.value,
+                arguments={},
+                call_id="call-list-interrupts-confirmation",
+            ),
+            "Tu cita sigue para las 11:00.",
+        )
+
+        list_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-before-list-query",
+                message_type="text",
+                text="¿Qué citas tengo?",
+            )
+        )
+        list_reply = asyncio.run(self.service.build_reply(list_context))
+
+        self.assertEqual(list_reply, "Tu cita sigue para las 11:00.")
+        self.assertIsNone(
+            self.service._load_pending_appointment_action(list_context.conversation_id)
+        )
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+
+        late_confirmation_context = self.service.receive_message(
+            IncomingTextMessage(
+                sender=self.scope_sender,
+                message_id="wamid.reschedule-before-list-late-confirmation",
+                message_type="text",
+                text="Sí",
+            )
+        )
+        asyncio.run(self.service.build_reply(late_confirmation_context))
+
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)

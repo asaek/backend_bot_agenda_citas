@@ -42,3 +42,6 @@
 - [x] Persistir los slots de reprogramacion y limitar la seleccion a horarios ofrecidos.
 - [x] Confirmar unicamente la cita y el horario seleccionados por el paciente.
 - [x] Verificar la seleccion y la reprogramacion en Raspberry Pi.
+- [x] Mostrar disponibilidad del dia de la cita antes de preguntar por una hora destino.
+- [x] Resolver la cita desde la lista recientemente mostrada y aclarar si hay varias.
+- [x] Ejecutar la suite completa y verificar los endpoints en Raspberry Pi.

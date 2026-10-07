@@ -21,21 +21,52 @@ Las variables exportadas en la shell tienen prioridad sobre `.env`.
 `DATABASE_PATH` define la ruta de la base SQLite. Si no se configura, se usa
 `data/chatbot.sqlite3`. La carpeta `data/` esta excluida de Git.
 
-El adaptador compatible con OpenAI usa estas variables adicionales:
+El adaptador compatible con OpenAI usa `LLM_PROVIDER` para seleccionar `groq`,
+`openai` u `openrouter`. Configura las credenciales y modelos por separado:
+
+- `GROQ_API_KEY` y `GROQ_MODEL`
+- `OPENAI_API_KEY` y `OPENAI_MODEL`
+- `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` (opcional)
+
+Las URLs oficiales se seleccionan automaticamente. Groq y OpenRouter usan
+`/v1/chat/completions`; OpenAI usa `/v1/responses`. Los endpoints se pueden
+reemplazar con `GROQ_BASE_URL`, `OPENAI_BASE_URL` o `OPENROUTER_BASE_URL`.
+Para cambiar entre Groq y OpenAI, configura ambos pares de credenciales y modelos,
+cambia solamente `LLM_PROVIDER` y reinicia el backend. La clave y el consumo de la API
+de OpenAI se administran por separado de una suscripcion de ChatGPT.
+
+`LLM_MODEL` (o el `<PROVIDER>_MODEL` correspondiente) se envia sin transformaciones
+como el campo `model` de la solicitud. Debe ser el ID reconocido por el proveedor
+seleccionado y admitir su endpoint y function calling.
+
+Tambien puedes usar `LLM_API_KEY` y `LLM_MODEL` para las credenciales del proveedor
+activo. Por ejemplo, con `LLM_PROVIDER=openai`, coloca en ellas la clave de OpenAI y
+el modelo correspondiente. Al cambiar de proveedor con esta configuracion, actualiza
+tambien la clave y el modelo. Las variables por proveedor tienen precedencia y permiten
+cambiar solo `LLM_PROVIDER` cuando ambos proveedores ya estan configurados. La variable
+generica `LLM_BASE_URL` se mantiene como compatibilidad para Groq y OpenRouter; OpenAI
+usa su URL oficial salvo que se configure `OPENAI_BASE_URL`.
+
+Ejemplo de configuracion con las variables genericas:
+
+```env
+LLM_PROVIDER=openai
+LLM_API_KEY=tu-clave-de-OpenAI
+LLM_MODEL=gpt-oss-20b
+```
+
+El identificador `openai/gpt-oss-20b` corresponde al nombre usado por Groq. En OpenAI,
+el ID oficial es `gpt-oss-20b`; la [documentacion del modelo](https://developers.openai.com/api/docs/models/gpt-oss-20b)
+indica que utiliza Responses API y soporta function calling. El adaptador selecciona
+esa ruta cuando `LLM_PROVIDER=openai`, y conserva Chat Completions para Groq y OpenRouter.
 
 - `LLM_PROVIDER=groq`
-- `LLM_API_KEY`
-- `LLM_MODEL`
-- `LLM_BASE_URL=https://api.groq.com/openai/v1`
 - `LLM_TIMEOUT_SECONDS=20`
 - `LLM_MAX_HISTORY_MESSAGES=30`
 - `LLM_MAX_OUTPUT_TOKENS=500`
 - `LLM_MAX_RESPONSE_CHARACTERS=4000`
 - `LLM_MAX_TOOL_ITERATIONS=3`
 - `LLM_REASON_EVALUATION_ENABLED=true`
-
-Para usar OpenRouter cambia `LLM_PROVIDER` a `openrouter`, `LLM_API_KEY`,
-`LLM_MODEL` y `LLM_BASE_URL=https://openrouter.ai/api/v1`.
 
 El agente actual genera texto y puede ejecutar `ToolCall` mediante un
 `AgentOrchestrator` y un `ToolExecutor` configurado por `main.py`. El runtime usa

@@ -60,6 +60,11 @@ El LLM no recibe ese turno y no puede reemplazar la pregunta fija con una respue
 natural que pierda el estado. Una seleccion invalida conserva el estado y devuelve una
 aclaracion controlada. El estado vencido se elimina sin modificar el calendario.
 
+Antes de validar la seleccion, el router de
+`specs/016-conversation-intent-routing/` permite abandonar la reserva o procesar otra
+solicitud explicita. `cancela` sin objeto claro pide aclaracion y conserva la lista; una
+pregunta nueva se procesa sin quedar atrapada en la seleccion anterior.
+
 El `SYSTEM_PROMPT` y el esquema de `check_availability` mantienen la misma regla para
 las fechas que no entren en el detector determinista. Estas instrucciones son una
 defensa adicional; no sustituyen la validacion backend para las listas generadas por el

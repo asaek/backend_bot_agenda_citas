@@ -9,6 +9,8 @@ motivo. La evidencia de ejecucion se conserva en
 `docs/verification/2026-09-25-date-only-availability-language.md`, además de
 `docs/verification/2026-09-26-backend-slot-selection.md` y
 `docs/verification/2026-09-29-booking-date-and-llm-diagnostics.md`.
+La interrupcion de una seleccion pendiente se define en
+`specs/016-conversation-intent-routing/`.
 
 ## Objetivo
 

@@ -17,10 +17,11 @@ Construccion del contexto
 LLMProvider.generate(messages)
     |
     v
-OpenAICompatibleLLMProvider
+    OpenAICompatibleLLMProvider
     |
     v
-Proveedor API /chat/completions
+Proveedor API (/responses para OpenAI;
+              /chat/completions para Groq y OpenRouter)
     |
     v
 Conversation Service -> WhatsAppClient -> WhatsApp
@@ -37,22 +38,40 @@ ni el formato JSON del proveedor.
 `LLMSettings`. La funcion valida credenciales, modelo y limites positivos antes
 de crear un proveedor.
 
-La implementacion actual acepta `LLM_PROVIDER=groq` y
-`LLM_PROVIDER=openrouter`. Ambos usan el mismo adaptador; se seleccionan el
-endpoint, la API key y el modelo mediante variables de entorno. La salida se
-limita a 4000 caracteres por defecto mediante `LLM_MAX_RESPONSE_CHARACTERS`.
+La implementacion acepta `LLM_PROVIDER=groq`, `openai` u `openrouter`. Cada
+proveedor usa su API key y modelo (`GROQ_*`, `OPENAI_*` u `OPENROUTER_*`), y elige
+su URL oficial por defecto; las variables `<PROVIDER>_BASE_URL` permiten un
+endpoint alternativo. `LLM_API_KEY` y `LLM_MODEL` son fallback para el proveedor
+activo; las variables por proveedor tienen precedencia. `LLM_BASE_URL` conserva
+compatibilidad con Groq y OpenRouter, y OpenAI usa el endpoint oficial o
+`OPENAI_BASE_URL`. Con ambas credenciales y modelos configurados por proveedor,
+cambiar `LLM_PROVIDER` basta para alternar entre Groq y OpenAI. Si se usan las
+variables genericas, se actualizan junto con el selector. La salida se limita a
+4000 caracteres por defecto mediante `LLM_MAX_RESPONSE_CHARACTERS`.
+
+El valor de `LLM_MODEL` o `<PROVIDER>_MODEL` se copia sin transformacion al campo
+`model` del request y debe ser un ID compatible con el endpoint y tool calling del
+proveedor activo. El ID oficial `gpt-oss-20b` usa OpenAI Responses API; el prefijo
+`openai/` corresponde a nombres usados por otros proveedores como Groq.
 
 ## Transporte
 
-`OpenAICompatibleLLMProvider` usa `httpx.AsyncClient` y el endpoint compatible
-con OpenAI:
+`OpenAICompatibleLLMProvider` usa `httpx.AsyncClient`. Selecciona la ruta segun
+el proveedor:
 
 ```text
-{LLM_BASE_URL}/chat/completions
+{OPENAI_BASE_URL}/responses                 # OpenAI
+{GROQ_BASE_URL}/chat/completions            # Groq
+{OPENROUTER_BASE_URL}/chat/completions      # OpenRouter
 ```
 
 El cliente HTTP puede inyectarse. Esto evita llamadas reales durante las
-pruebas y permite probar Groq y OpenRouter con el mismo codigo.
+pruebas y permite probar Groq, OpenAI y OpenRouter con el mismo codigo. Para
+OpenAI se serializa `input`, las funciones Responses y `max_output_tokens`; Groq
+y OpenRouter conservan `messages`, `tools` y `max_tokens` de Chat Completions.
+OpenAI envia `store=false`. La respuesta completa que contiene un tool call se
+conserva en memoria y se reenvia junto con `function_call_output`, incluyendo los
+elementos de razonamiento requeridos por el endpoint.
 
 Las solicitudes usan `temperature=0` para reducir variaciones entre mensajes
 equivalentes. Esto no sustituye la validacion del backend ni convierte al LLM en
@@ -68,6 +87,9 @@ configurables.
 Las pruebas del webhook sustituyen las fabricas de dependencias de `main.py`,
 usan `FakeWhatsAppClient` y una base SQLite temporal. Asi verifican el agente en
 su frontera HTTP sin consumir una API ni enviar mensajes reales.
+Las pruebas del adaptador verifican la seleccion de credenciales, la URL oficial
+de OpenAI y la normalizacion de sus tool calls nativos mediante transporte HTTP
+simulado.
 
 ## Manejo de errores
 

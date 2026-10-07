@@ -49,3 +49,6 @@ indique cual decision anterior queda obsoleta.
 - [0038 - Diagnostico de errores limitado por modo y remitente](./0038-debug-error-reporting.md)
 - [0039 - Resolver la cita antes de solicitar confirmacion](./0039-resolve-appointment-before-confirmation.md)
 - [0040 - Consultar disponibilidad antes de confirmar una reprogramacion](./0040-reschedule-availability-before-confirmation.md)
+- [0041 - Priorizar la intencion mas reciente sobre flujos pendientes](./0041-prioritize-current-intent.md)
+- [0042 - Mostrar disponibilidad al solicitar cambiar la hora](./0042-show-availability-before-reschedule-time.md)
+- [0043 - Seleccion del proveedor OpenAI-compatible por entorno](./0043-openai-compatible-provider-selection.md)
