@@ -93,3 +93,10 @@ y omite las columnas de ID interno. Tambien normaliza la etiqueta del motivo par
 que su valor quede en la linea siguiente, incluso si el modelo lo adjunta a la
 etiqueta o intercala una linea vacia. La conversion ocurre antes de que `main.py`
 envie y persista la respuesta; un `ToolCall` no se transforma.
+
+Las horas de listas se solicitan al LLM en formato de 12 horas con AM/PM.
+`format_whatsapp_reply()` normaliza campos de horario reconocibles en elementos de
+lista, incluyendo las tablas convertidas, usando el formato compartido
+`format_patient_time()`; conserva el texto del motivo. La lectura del ultimo listado
+extrae la hora completa con su periodo y usa `parse_time_selection()` para compararla
+con la hora local de la cita sin confundir una hora de la tarde con una de la mañana.

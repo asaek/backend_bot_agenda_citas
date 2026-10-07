@@ -54,6 +54,9 @@ esten aprobados.
 - [Verificacion de disponibilidad antes de pedir hora para reprogramar](./verification/2026-10-05-reschedule-before-time-selection.md)
 - [Verificacion de seleccion del proveedor LLM](./verification/2026-10-06-llm-provider-selection.md)
 - [Verificacion de prioridad semantica del motivo e historial actual](./verification/2026-10-07-semantic-priority-signals.md)
+- [Verificacion de listas en 12 horas con AM/PM](./verification/2026-10-07-twelve-hour-lists.md)
+- [Verificacion del reinicio obligatorio en local to raspberry](./verification/2026-10-07-local-to-raspberry-restart.md)
+- [Diagnostico de falta de respuesta por token de WhatsApp vencido](./verification/2026-10-07-whatsapp-token-expiration.md)
 
 ## Funcionalidad implementada y verificada por cortes
 

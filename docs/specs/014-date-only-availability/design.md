@@ -52,6 +52,13 @@ internos ni ejecuta una mutacion. Despues de una respuesta exitosa, el backend p
 la fecha, los slots ofrecidos y una expiracion de 10 minutos en
 `pending_appointment_availability` dentro de `conversations.context_json`.
 
+`format_availability_reply()` usa `format_patient_time()` para expresar cada extremo
+en formato de 12 horas con AM/PM. La hora se calcula sin depender del locale; no
+lleva cero inicial, y los minutos siempre tienen dos digitos. Un intervalo que
+cruza mediodia se presenta como `11:30 AM a 12:00 PM`. Este formato se comparte
+con las opciones de cita para reprogramar. La conversion afecta la presentacion;
+los timestamps ISO persistidos conservan la zona horaria para validar la seleccion.
+
 En el siguiente mensaje, `ConversationService` interpreta la hora expresada por el
 paciente y la compara con los slots persistidos en la zona horaria de la agenda. Una
 seleccion valida se transforma en una solicitud pendiente de `create_appointment`

@@ -31,6 +31,7 @@ from appointment_availability import (
     date_only_availability_follow_up_request,
     date_only_availability_request,
     format_availability_reply,
+    format_patient_time,
     parse_time_selection,
 )
 from appointment_reason_evaluation import (
@@ -109,7 +110,7 @@ APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY = (
     "Si deseas una cita oftalmológica, indícame qué problema deseas revisar."
 )
 APPOINTMENT_SLOT_SELECTION_REPLY = (
-    "Elige uno de los horarios disponibles indicando la hora, por ejemplo: 10:00."
+    "Elige uno de los horarios disponibles indicando la hora, por ejemplo: 10:00 AM."
 )
 APPOINTMENT_DATE_REPLY = "Para agendar una cita, ¿qué día te gustaría reservar?"
 APPOINTMENT_DATE_EXPIRED_REPLY = (
@@ -161,9 +162,12 @@ SYSTEM_PROMPT = "\n".join(
         "Usar el id devuelto por list_appointments si luego debe reprogramar o cancelar.",
         "WhatsApp admite formato limitado con asteriscos simples para negrita, "
         "pero no admite tablas Markdown ni HTML.",
+        "En listas de horarios disponibles o citas usa siempre el formato de 12 horas "
+        "con AM o PM en cada hora, por ejemplo: 9:30 AM a 10:00 AM y 1:00 PM a 1:30 PM. "
+        "Medianoche es 12:00 AM y mediodia es 12:00 PM.",
         "Nunca uses tablas Markdown. Para cada cita devuelta por list_appointments "
         "usa este formato, con una cita por bloque y sin combinar el horario y el motivo:\n"
-        "- *Horario:* HH:MM a HH:MM\n"
+        "- *Horario:* h:mm AM/PM a h:mm AM/PM\n"
         "  *Motivo de consulta:*\n"
         "  <motivo de la cita>.",
         "Cada bloque debe ocupar exactamente tres lineas: deja *Motivo de consulta:* "
@@ -181,7 +185,8 @@ SYSTEM_PROMPT = "\n".join(
 
 
 _LISTED_APPOINTMENT_START_TIME_PATTERN = re.compile(
-    r"^[ \t]*-[ \t]+\*?Horario:\*?[ \t]*(?P<hour>\d{1,2}):(?P<minute>\d{2})"
+    r"^[ \t]*-[ \t]+\*?Horario:\*?[ \t]*"
+    r"(?P<time>\d{1,2}:\d{2}(?:[ \t]*[ap]\.?m\.?)?)"
     r"[ \t]+a\b",
     flags=re.IGNORECASE | re.MULTILINE,
 )
@@ -721,7 +726,7 @@ class ConversationService:
             if message.direction != "outgoing" or message.status != "sent":
                 continue
             listed_times = {
-                (int(match.group("hour")), int(match.group("minute")))
+                parse_time_selection(match.group("time"))
                 for match in _LISTED_APPOINTMENT_START_TIME_PATTERN.finditer(message.text)
             }
             if not listed_times:
@@ -794,7 +799,8 @@ class ConversationService:
             start_at = appointment.start_at.astimezone(self._timezone)
             end_at = appointment.end_at.astimezone(self._timezone)
             options.append(
-                f"- {start_at:%d/%m/%Y}, {start_at:%H:%M} a {end_at:%H:%M}"
+                f"- {start_at:%d/%m/%Y}, "
+                f"{format_patient_time(start_at)} a {format_patient_time(end_at)}"
             )
         return (
             "¿Cuál cita quieres modificar? Indica el día y horario de una de estas:\n"
@@ -1732,7 +1738,46 @@ def format_whatsapp_reply(reply: LLMResponse) -> LLMResponse:
     """Adapta listas de citas y tablas Markdown a texto legible en WhatsApp."""
     if not isinstance(reply, str):
         return reply
-    return _split_appointment_reason_label(_convert_markdown_tables(reply))
+    return _format_list_times(
+        _split_appointment_reason_label(_convert_markdown_tables(reply))
+    )
+
+
+_DISPLAY_TIME_PATTERN = re.compile(
+    r"\b\d{1,2}:\d{2}(?:[ \t]*[ap]\.?m\.?)?\b", flags=re.IGNORECASE
+)
+_DISPLAY_TIME_TEXT = r"\d{1,2}:\d{2}(?:[ \t]*[ap]\.?m\.?)?"
+_LIST_TIME_FIELD_PATTERN = re.compile(
+    r"(?P<prefix>(?:^|;)[ \t]*(?:\*?(?:Horario|Hora):\*?[ \t]*)?"
+    r"(?:\d{2}/\d{2}/\d{4}[, \t]+)?)"
+    rf"(?P<value>{_DISPLAY_TIME_TEXT}(?:[ \t]*(?:a|[-–—])[ \t]*{_DISPLAY_TIME_TEXT})?)"
+    r"(?=$|[; \t])",
+    flags=re.IGNORECASE,
+)
+
+
+def _format_list_times(text: str) -> str:
+    """Normaliza las horas de listas del LLM sin reescribir los motivos de consulta."""
+    def replace_time(match: re.Match[str]) -> str:
+        parsed = parse_time_selection(match.group())
+        if parsed is None or not 0 <= parsed[1] < 60:
+            return match.group()
+        return format_patient_time(time(*parsed))
+
+    def replace_field(match: re.Match[str]) -> str:
+        return match.group("prefix") + _DISPLAY_TIME_PATTERN.sub(
+            replace_time, match.group("value")
+        )
+
+    lines = []
+    for line in text.splitlines():
+        item = re.match(r"^(?P<bullet>[ \t]*(?:[-*•]|\d+[.)])[ \t]+)(?P<content>.*)$", line)
+        if item is not None:
+            line = item.group("bullet") + _LIST_TIME_FIELD_PATTERN.sub(
+                replace_field, item.group("content")
+            )
+        lines.append(line)
+    return "\n".join(lines)
 
 
 _INLINE_APPOINTMENT_REASON_LABEL = re.compile(

@@ -44,6 +44,11 @@ debe consultar disponibilidad para el rango completo de ese dia.
 
 La respuesta debe mostrar cada espacio libre con hora de inicio y fin, sin IDs de
 calendario ni tablas Markdown.
+Las horas se expresan en formato de 12 horas con AM/PM en ambos extremos, en la
+zona horaria de agenda: `9:30 AM a 10:00 AM`, `11:30 AM a 12:00 PM` o
+`1:00 PM a 1:30 PM`. La hora no lleva cero inicial y los minutos tienen dos digitos.
+Medianoche es `12:00 AM` y mediodia `12:00 PM`. La misma presentacion se usa cuando
+se muestran horarios disponibles para reprogramar.
 
 ### RF-1403 - No mutacion prematura
 
@@ -88,6 +93,8 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
    cita ni pierde los controles del backend.
 10. `Quisiera agendar una` seguido de `hoy` consulta y muestra los horarios disponibles
     sin invocar al LLM en ninguno de esos dos turnos.
+11. Los slots de mañana, mediodia y tarde se muestran en 12 horas con AM/PM, y una
+    seleccion como `3:00 PM` sigue coincidiendo con el slot interno de las 15:00.
 
 ## Fuera del alcance
 

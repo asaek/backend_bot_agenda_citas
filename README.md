@@ -76,7 +76,10 @@ limite de llamadas se configura con `LLM_MAX_TOOL_ITERATIONS`. RAG y memoria
 semantica siguen fuera del alcance. La suite automatizada usa proveedores falsos y
 no requiere credenciales externas. Las respuestas con varias citas se envian como
 listas simples compatibles con WhatsApp; las tablas Markdown se convierten antes
-de enviarse.
+de enviarse. Las listas de disponibilidad, citas y opciones de reprogramacion muestran
+horas en formato de 12 horas con AM/PM en ambos extremos, por ejemplo
+`9:30 AM a 10:00 AM`, `11:30 AM a 12:00 PM` y `1:00 PM a 1:30 PM`. Se usa la zona
+horaria de la agenda y el paciente puede seleccionar un horario indicando AM o PM.
 
 Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
 objeto JSON estructurado antes de crear la cita. La respuesta debe contener
@@ -214,6 +217,16 @@ uv run uvicorn main:app --reload
 ```
 
 El backend queda disponible en <http://127.0.0.1:8000>.
+
+### Sincronizar y recargar la Raspberry Pi
+
+La solicitud `local to raspberry` sigue la skill del proyecto en
+`.agents/skills/local-to-raspberry/SKILL.md`: sincroniza, reinicia el backend y
+verifica el health check y los webhooks local y publico. El reinicio y la
+verificacion forman parte del flujo aunque no haya archivos nuevos que copiar.
+Uvicorn en la Pi corre sin `--reload`, por lo que copiar archivos por si solo no
+carga cambios en el proceso. El flujo termina cuando se confirma el reinicio y
+las rutas responden correctamente.
 
 ## 4. Probar localmente
 

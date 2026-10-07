@@ -66,6 +66,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   errores de escritura como `laga;as`, mediante respaldo local.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
+- Presentar las listas de disponibilidad, citas y opciones de reprogramacion en
+  formato de 12 horas con AM/PM en cada extremo del intervalo.
 - Conservar durante 10 minutos la intencion de agendar sin hora exacta mientras se
   espera el dia y resolver respuestas como `hoy` directamente en el backend.
 - Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes

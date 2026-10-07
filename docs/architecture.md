@@ -117,6 +117,13 @@ que contiene un dia pero no una hora, `ConversationService` consulta primero
 `check_availability` para todo ese dia. Muestra los slots libres como una lista unica y
 espera la seleccion del paciente; no crea una cita ni pregunta el motivo en ese turno.
 La fecha y los slots ofrecidos quedan en `conversations.context_json` durante 10 minutos.
+Las listas de disponibilidad y opciones de cita usan `format_patient_time()` para
+mostrar cada extremo en formato `h:mm AM/PM` despues de convertir a la zona horaria
+de agenda. Mediodia es `12:00 PM` y medianoche `12:00 AM`, sin depender del locale.
+El prompt solicita ese formato para listas del LLM y `format_whatsapp_reply()`
+normaliza sus campos de hora reconocibles, incluidas tablas convertidas, sin
+reescribir el motivo. La lectura de las horas del ultimo listado acepta AM/PM;
+los slots persistidos y los contratos de herramientas conservan sus fechas ISO.
 Si la solicitud inicial no contiene dia ni hora exacta, el backend guarda
 `pending_appointment_date`, pregunta el dia y resuelve una respuesta relativa posterior,
 como `hoy`, directamente contra `check_availability`. La solicitud pendiente tambien

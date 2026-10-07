@@ -29,6 +29,15 @@
 - [x] Verificar el ciclo completo desde el webhook con un ejecutor inyectado.
 - [x] Ejecutar la suite en la Raspberry Pi.
 
+## Ampliacion - Horas de listas con AM/PM
+
+- [x] Solicitar formato de 12 horas en el prompt de listas de citas y horarios.
+- [x] Normalizar horas en listas reconocibles y tablas convertidas sin reescribir motivos.
+- [x] Leer AM/PM del ultimo listado para identificar la cita a reprogramar.
+- [x] Actualizar las expectativas de las pruebas existentes de listas y tablas.
+- [x] Verificar suite y runtime en Raspberry Pi y registrar evidencia en
+      `docs/verification/2026-10-07-twelve-hour-lists.md`.
+
 ## Siguiente incremento
 
 - [ ] Configurar el proveedor real de calendario.

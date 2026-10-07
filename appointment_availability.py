@@ -345,6 +345,12 @@ def availability_request_for_date(
     return _availability_request_for_date(requested_date, local_now, timezone)
 
 
+def format_patient_time(value: datetime | time) -> str:
+    """Presenta una hora de agenda en 12 horas sin depender del locale del servidor."""
+    period = "AM" if value.hour < 12 else "PM"
+    return f"{value.hour % 12 or 12}:{value.minute:02d} {period}"
+
+
 def format_availability_reply(
     result: ToolResult,
     request: DateOnlyAvailabilityRequest,
@@ -373,7 +379,10 @@ def format_availability_reply(
             "Si quieres, reviso otro dia."
         )
 
-    lines = [f"- {start:%H:%M} a {end:%H:%M}" for start, end in slots]
+    lines = [
+        f"- {format_patient_time(start)} a {format_patient_time(end)}"
+        for start, end in slots
+    ]
     return (
         f"Horarios disponibles para el {requested_date}:\n"
         + "\n".join(lines)

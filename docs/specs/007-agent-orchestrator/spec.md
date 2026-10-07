@@ -75,7 +75,8 @@ permitir una reprogramacion o cancelacion posterior.
 La respuesta textual final no debe usar tablas Markdown, HTML ni separadores con
 barras verticales. Debe limitarse a la sintaxis de formato que WhatsApp reconoce,
 como negrita con un asterisco simple. Cada cita devuelta por `list_appointments`
-debe presentarse en su propio bloque de tres lineas: `- *Horario:* HH:MM a HH:MM`,
+debe presentarse en su propio bloque de tres lineas:
+`- *Horario:* h:mm AM/PM a h:mm AM/PM`,
 `  *Motivo de consulta:*` y la descripcion del motivo en la linea siguiente. El
 horario y el motivo no deben combinarse; el texto del motivo debe conservarse. Si
 el listado abarca varios dias, se debe indicar la fecha de cada cita. Si el LLM
@@ -84,6 +85,9 @@ devuelve la etiqueta y el motivo juntos o separados por lineas vacias,
 de su etiqueta sin reescribirlo. Si el LLM devuelve una tabla,
 `ConversationService` debe convertir sus filas a una lista y omitir columnas de ID
 interno.
+Cada hora de las listas debe mostrarse en formato de 12 horas con AM o PM explicito,
+incluidos los listados convertidos desde tablas. La normalizacion conserva las horas
+que sean parte del texto del motivo y no modifica los argumentos de herramientas.
 
 ## Criterios de aceptacion
 
@@ -103,6 +107,8 @@ interno.
     de horario y motivo en negrita compatible con WhatsApp, con el motivo debajo de
     su etiqueta, sin tablas ni IDs internos.
 12. La suite funciona sin servicios externos.
+13. Las listas muestran AM/PM en cada extremo y el historial en ese formato sigue
+    permitiendo identificar una cita para reprogramarla.
 
 ## Fuera de alcance
 

@@ -27,3 +27,13 @@
 - [x] Ejecutar la suite completa en la Raspberry Pi.
 - [x] Verificar health check y ambos metodos del webhook en la Raspberry Pi.
 - [x] Probar `Quisiera agendar una` seguido de `hoy` sin llamadas al LLM.
+
+## Ampliacion - Listas en 12 horas con AM/PM
+
+- [x] Compartir formato de 12 horas para disponibilidad y opciones de cita.
+- [x] Mostrar AM/PM en ambos extremos y ajustar ejemplos de seleccion.
+- [x] Actualizar las expectativas de las pruebas existentes de disponibilidad y reprogramacion.
+- [x] Verificar mañana, mediodia, tarde, medianoche y seleccion con PM en Raspberry Pi.
+- [x] Ejecutar suite completa, reiniciar backend y verificar las rutas HTTP.
+
+Evidencia: `docs/verification/2026-10-07-twelve-hour-lists.md`.

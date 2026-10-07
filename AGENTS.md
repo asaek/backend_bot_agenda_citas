@@ -41,6 +41,8 @@
 
 ## Mirror Workflow
 
+- For `local to raspberry` requests, follow `.agents/skills/local-to-raspberry/SKILL.md`,
+  including its required backend restart and verification after synchronization.
 - Make all code and documentation changes in this local checkout only.
 - The execution mirror is `asaek@192.168.101.19:~/Downloads/chatbot_test_repo`.
 - After every local change, synchronize the project files to the Raspberry Pi before compiling, running, or verifying anything; use the Raspberry Pi as the runtime environment.
