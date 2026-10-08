@@ -155,6 +155,15 @@ la fecha y conserva esa intencion durante 10 minutos. Una respuesta relativa com
 consulta directamente la disponibilidad usando la zona horaria configurada, sin necesitar
 que el LLM reconstruya el contexto.
 
+Preguntas informativas o saludos durante una gestion de cita pausan su avance.
+`Retomemos la cita` recupera el paso pendiente, incluido el nombre ya recibido para
+esa reserva; una fecha o seleccion clara tambien puede retomarlo. La pausa se
+conserva en SQLite y sobrevive a reinicios y al recorte del historial del modelo.
+Los horarios vencidos se consultan de nuevo. Una cancelacion o reprogramacion
+pausada requiere una confirmacion nueva; un `Si` durante otro tema no la ejecuta.
+`Ya no quiero agendar`, `No la modifiques` o `No quiero cancelarla` abandonan la
+operacion sin alterar la cita. Una nueva gestion explicita reemplaza la anterior.
+
 La configuracion prevista usa `DOCTOR_WHATSAPP_NUMBERS`, una lista de numeros
 separados por comas. Todos los doctores configurados reciben una copia del mismo
 mensaje. La entrega valida `DOCTOR_NOTIFICATIONS_ENABLED`, recorta espacios,

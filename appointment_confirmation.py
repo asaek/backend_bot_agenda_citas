@@ -251,7 +251,10 @@ class PendingAppointmentAction:
 
     @property
     def is_expired(self) -> bool:
-        return _parse_timestamp(self.expires_at) <= datetime.now(timezone.utc)
+        return self.is_expired_at(datetime.now(timezone.utc))
+
+    def is_expired_at(self, now: datetime) -> bool:
+        return _parse_timestamp(self.expires_at) <= now
 
     def to_context(self) -> dict[str, object]:
         context: dict[str, object] = {

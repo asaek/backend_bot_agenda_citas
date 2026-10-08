@@ -267,8 +267,13 @@ nunca expone excepciones crudas, prompts, mensajes, cuerpos HTTP ni credenciales
 
 La funcionalidad definida en `specs/016-conversation-intent-routing/` permite que el
 mensaje mas reciente del paciente abandone o reemplace una seleccion, una reserva
-pendiente o una confirmacion. Las expresiones ambiguas solicitan aclaracion y no alteran
-el calendario. Las confirmaciones descartadas no pueden reutilizarse posteriormente.
+pendiente o una confirmacion. Una seleccion como `agendame a las 11 am` continua
+la lista ofrecida. Preguntas informativas y saludos pausan una sola gestion en el
+contexto SQLite, conservando el paso y los datos recibidos para retomarla sin depender
+del historial del LLM. Las expresiones ambiguas solicitan aclaracion y no alteran
+el calendario. Una nueva gestion explicita o un abandono elimina la anterior.
+Al retomar se renueva la disponibilidad vencida y las cancelaciones/reprogramaciones
+requieren una confirmacion nueva. Un `Si` durante otro tema no ejecuta una accion pausada.
 
 ### Fase incremental: disponibilidad real
 

@@ -275,13 +275,26 @@ precise cual desea modificar.
 La funcionalidad definida en `specs/016-conversation-intent-routing/` consulta el
 mensaje mas reciente antes de resolver fechas, selecciones, datos de reserva o
 confirmaciones pendientes. `conversation_intent.py` identifica continuacion, abandono,
-aclaracion y cambio explicito de tarea. Abandonar o cambiar de tarea limpia los estados
+aclaracion, pausa informativa y cambio explicito de tarea. Abandonar o cambiar de tarea limpia los estados
 de agenda en una sola actualizacion de contexto; una intencion nueva vuelve al flujo
 normal y conserva las confirmaciones de seguridad existentes. Una expresion ambigua
 como `cancela` solicita aclaracion y no borra estado ni ejecuta una mutacion. Una
 confirmacion descartada no puede ejecutarse con un `Si` posterior.
-Los saludos comunes y las instrucciones de olvidar la actividad actual tambien se
-clasifican como cambios de intencion para que el agente responda al mensaje nuevo.
+Una expresion completa de seleccion, como `agendame a las 11 am`, continua el flujo
+si corresponde a la lista; una hora dentro de otra instruccion no cuenta como eleccion.
+Los saludos y preguntas informativas mueven el snapshot tipado de
+`conversation_workflow.py` a `paused_conversation_workflow` dentro del mismo contexto
+SQLite. La transaccion conserva solo una gestion activa o pausada y el agente recibe
+un recordatorio operativo independiente del historial recortado. Sus solicitudes de
+mutacion se interceptan mientras responde otro tema con una gestion pausada.
+
+Retomar restaura el paso pendiente y los datos recibidos. Las fechas y selecciones
+claras pueden retomarlo implicitamente; un `Si` no reactiva una confirmacion pausada.
+La pausa conserva los vencimientos: renovar slots requiere una consulta de agenda;
+`name_message_id` acompaña la misma reserva en fecha/disponibilidad renovadas.
+Las acciones se vuelven a resolver contra la agenda y requieren confirmaciones
+nuevas. Las instrucciones de olvidar la actividad y las nuevas gestiones explicitas
+siguen descartando el snapshot anterior.
 
 ### Motivo antes de crear una cita
 

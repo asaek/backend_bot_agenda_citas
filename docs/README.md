@@ -57,6 +57,7 @@ esten aprobados.
 - [Verificacion de listas en 12 horas con AM/PM](./verification/2026-10-07-twelve-hour-lists.md)
 - [Verificacion del reinicio obligatorio en local to raspberry](./verification/2026-10-07-local-to-raspberry-restart.md)
 - [Diagnostico de falta de respuesta por token de WhatsApp vencido](./verification/2026-10-07-whatsapp-token-expiration.md)
+- [Verificacion de continuidad y pausa persistente de gestiones](./verification/2026-10-07-conversation-pause-continuity.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -81,3 +82,4 @@ esten aprobados.
 - [ADR 0041 - Priorizar la intencion mas reciente sobre flujos pendientes](./decisions/0041-prioritize-current-intent.md)
 - [ADR 0042 - Mostrar disponibilidad al solicitar cambiar la hora](./decisions/0042-show-availability-before-reschedule-time.md)
 - [ADR 0043 - Seleccion del proveedor OpenAI-compatible por entorno](./decisions/0043-openai-compatible-provider-selection.md)
+- [ADR 0044 - Pausa persistente y seleccion contextual de horarios](./decisions/0044-persistent-conversation-pause.md)

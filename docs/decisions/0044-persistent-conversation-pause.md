@@ -1,0 +1,45 @@
+# ADR 0044 - Pausa persistente y seleccion contextual de horarios
+
+## Estado
+
+Aceptada. Reemplaza parcialmente ADR 0041 para preguntas informativas y saludos.
+
+## Contexto y decision
+
+La palabra `agendame` interpretaba una seleccion de horario como una nueva gestion,
+eliminando la disponibilidad pendiente. Ademas, descartar una reserva al preguntar
+por el costo obligaba a comenzar de nuevo. El paciente debe poder conversar sobre
+otro tema, retomar su avance o desistir sin efectos de agenda.
+
+Una seleccion completa y contextual como `agendame a las 11 am` continua la lista
+ofrecida. Una hora dentro de `cancela mi cita de las 11` no es una seleccion. Una hora
+no ofrecida pide aclaracion y conserva el estado. Las preguntas informativas y saludos
+pausan; una nueva gestion explicita de agenda o una peticion de olvidar la anterior
+la reemplaza; el abandono explicito elimina la solicitud.
+
+El backend mueve un snapshot tipado a `paused_conversation_workflow` dentro del
+contexto SQLite existente. Conserva una sola gestion, el paso y datos recibidos,
+sin ampliar el historial del LLM ni incorporar memoria semantica. El prompt recibe
+un recordatorio operativo construido por el backend; la recuperacion depende del
+snapshot, no del recuerdo o una respuesta textual del modelo.
+
+`Retomemos la cita` recupera el paso pendiente. Una fecha u hora claramente esperada
+tambien puede retomarlo; nombres y motivos no se adivinan mientras la gestion esta
+pausada. Pausar no renueva la vigencia de los horarios. Al retomar una lista o reserva
+vencida se consulta nuevamente la disponibilidad y se conserva el nombre recibido
+para esa misma reserva, incluso si es necesario elegir otra fecha.
+
+Las confirmaciones se guardan solo como intencion inactiva durante la pausa. Al
+retomar se resuelve nuevamente la cita, se comprueba el horario de reprogramacion y
+se emite una confirmacion nueva. Un fallo de agenda conserva la accion inactiva;
+un `Si` durante otro tema no la ejecuta. El backend intercepta mutaciones que el
+modelo solicite al responder un tema informativo mientras existe una gestion pausada.
+
+## Consecuencias
+
+- La pausa sobrevive a reinicios y al recorte del historial.
+- La disponibilidad guardada no bloquea un espacio en el calendario.
+- No se mantienen pilas de gestiones ni confirmaciones reutilizables.
+- Una nueva reserva pide nombre de nuevo; retomar la misma no repite un nombre recibido.
+- Las reglas locales reconocen expresiones explicitas; mensajes ambiguos requieren
+  aclaracion y no autorizan operaciones.

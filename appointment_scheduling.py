@@ -64,6 +64,8 @@ class PendingAppointmentReason:
             raise ValueError("La solicitud pendiente de cita no es valida")
         _parse_timestamp(self.created_at)
         _parse_timestamp(self.expires_at)
+        # Las solicitudes antiguas pueden no tener zona; el servicio aplica la de agenda.
+        datetime.fromisoformat(self.start_at)
 
     @classmethod
     def from_tool_call(
@@ -83,12 +85,15 @@ class PendingAppointmentReason:
         if tool_call.call_id is None or not tool_call.call_id.strip():
             return None
 
-        return cls.from_start_at(
-            start_at,
-            call_id=tool_call.call_id,
-            now=now,
-            source_message_id=source_message_id,
-        )
+        try:
+            return cls.from_start_at(
+                start_at,
+                call_id=tool_call.call_id,
+                now=now,
+                source_message_id=source_message_id,
+            )
+        except ValueError:
+            return None
 
     @classmethod
     def from_start_at(
@@ -163,7 +168,10 @@ class PendingAppointmentReason:
 
     @property
     def is_expired(self) -> bool:
-        return _parse_timestamp(self.expires_at) <= datetime.now(timezone.utc)
+        return self.is_expired_at(datetime.now(timezone.utc))
+
+    def is_expired_at(self, now: datetime) -> bool:
+        return _parse_timestamp(self.expires_at) <= now
 
     def to_context(self) -> dict[str, object]:
         context = {

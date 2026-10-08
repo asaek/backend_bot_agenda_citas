@@ -49,6 +49,7 @@ class PendingAppointmentAvailability:
     expires_at: str
     appointment_id: str | None = None
     call_id: str | None = None
+    name_message_id: int | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -70,6 +71,11 @@ class PendingAppointmentAvailability:
             or not self.call_id.strip()
         ):
             raise ValueError("La reprogramacion pendiente no es valida")
+        if self.name_message_id is not None and (
+            type(self.name_message_id) is not int or self.name_message_id <= 0
+            or self.appointment_id is not None
+        ):
+            raise ValueError("El nombre previo debe pertenecer a una reserva pendiente")
         _parse_timestamp(self.created_at)
         _parse_timestamp(self.expires_at)
 
@@ -83,6 +89,7 @@ class PendingAppointmentAvailability:
         now: datetime | None = None,
         appointment_id: str | None = None,
         call_id: str | None = None,
+        name_message_id: int | None = None,
     ) -> "PendingAppointmentAvailability | None":
         unique_slots: dict[tuple[str, str], None] = {}
         for slot in slots:
@@ -105,6 +112,7 @@ class PendingAppointmentAvailability:
             expires_at=(created_at + APPOINTMENT_AVAILABILITY_TTL).isoformat(),
             appointment_id=appointment_id,
             call_id=call_id,
+            name_message_id=name_message_id,
         )
 
     @classmethod
@@ -147,6 +155,7 @@ class PendingAppointmentAvailability:
                 expires_at=expires_at,
                 appointment_id=appointment_id,
                 call_id=call_id,
+                name_message_id=value.get("name_message_id"),
             )
         except ValueError:
             return None
@@ -176,6 +185,8 @@ class PendingAppointmentAvailability:
         if self.appointment_id is not None and self.call_id is not None:
             context["appointment_id"] = self.appointment_id
             context["call_id"] = self.call_id
+        if self.name_message_id is not None:
+            context["name_message_id"] = self.name_message_id
         return context
 
     def matching_slot(
@@ -204,18 +215,26 @@ class PendingAppointmentDate:
 
     created_at: str
     expires_at: str
+    name_message_id: int | None = None
 
     def __post_init__(self) -> None:
+        if self.name_message_id is not None and (
+            type(self.name_message_id) is not int or self.name_message_id <= 0
+        ):
+            raise ValueError("El mensaje del nombre no es valido")
         _parse_timestamp(self.created_at)
         _parse_timestamp(self.expires_at)
 
     @classmethod
-    def start(cls, now: datetime) -> "PendingAppointmentDate":
+    def start(
+        cls, now: datetime, *, name_message_id: int | None = None,
+    ) -> "PendingAppointmentDate":
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now debe incluir una zona horaria")
         return cls(
             created_at=now.isoformat(),
             expires_at=(now + APPOINTMENT_DATE_TTL).isoformat(),
+            name_message_id=name_message_id,
         )
 
     @classmethod
@@ -227,7 +246,10 @@ class PendingAppointmentDate:
         if not isinstance(created_at, str) or not isinstance(expires_at, str):
             return None
         try:
-            return cls(created_at=created_at, expires_at=expires_at)
+            return cls(
+                created_at=created_at, expires_at=expires_at,
+                name_message_id=value.get("name_message_id"),
+            )
         except ValueError:
             return None
 
@@ -236,11 +258,14 @@ class PendingAppointmentDate:
             raise ValueError("now debe incluir una zona horaria")
         return _parse_timestamp(self.expires_at) <= now.astimezone(dt_timezone.utc)
 
-    def to_context(self) -> dict[str, str]:
-        return {
+    def to_context(self) -> dict[str, object]:
+        context: dict[str, object] = {
             "created_at": self.created_at,
             "expires_at": self.expires_at,
         }
+        if self.name_message_id is not None:
+            context["name_message_id"] = self.name_message_id
+        return context
 
 
 _WEEKDAYS = {

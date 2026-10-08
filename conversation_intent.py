@@ -20,6 +20,7 @@ class PendingInterruption(StrEnum):
     CLARIFY = "clarify"
     AMBIGUOUS_CANCEL = "ambiguous_cancel"
     SWITCH = "switch"
+    PAUSE = "pause"
 
 
 _ABANDON_PATTERNS = (
@@ -28,8 +29,9 @@ _ABANDON_PATTERNS = (
     r"\b(?:mejor\s+no|no\s+gracias|no\s+quiero\s+seguir|"
     r"no\s+quiero\s+continuar|no\s+quiero\s+agendar|"
     r"no\s+quiero\s+reservar|no\s+quiero\s+cambiar|"
-    r"no\s+quiero\s+reprogramar|no\s+quiero\s+cancelar)\b",
-    r"\bno\s+(?:la\s+)?(?:cambies|reprogrames|canceles)\b",
+    r"no\s+quiero\s+(?:reprogramar|cancelar|modificar|cambiar)(?:la)?)\b",
+    r"\b(?:ya\s+)?no\s+(?:la\s+)?(?:cambies|modifiques|reprogrames|canceles)\b",
+    r"\bya\s+no\s+quiero\s+(?:agendar|reservar|seguir|continuar|cambiar|modificar|cancelar)\b",
     r"\b(?:cancela|cancelar|deten|detener|olvida|olvidar|abandona|"
     r"abandonar|para)\b.{0,30}\b(?:esta\s+)?(?:solicitud|reserva|"
     r"busqueda|cambio|reprogramacion|agendamiento)\b",
@@ -65,18 +67,51 @@ _AVAILABILITY_PATTERNS = (
     r"\bhoras?\s+libres\b",
 )
 _GENERAL_SWITCH_PATTERNS = (
-    r"^(?:hola|holi|hey|buenos\s+dias|buenas\s+tardes|buenas\s+noches|buenas)\b",
     r"\bolvida\s+(?:lo\s+que\s+)?estas\s+(?:haciendo|haces)\b",
+)
+_GENERAL_PAUSE_PATTERNS = (
+    r"^(?:hola|holi|hey|buenos\s+dias|buenas\s+tardes|buenas\s+noches|buenas)\b",
     r"\bte\s+estoy\s+saludando\b",
     r"\botra\s+pregunta\b",
     r"\bcambiando\s+de\s+tema\b",
     r"\bquiero\s+preguntarte\s+otra\s+cosa\b",
     r"\bpasemos\s+a\s+otra\s+cosa\b",
+    r"\b(?:precio|costo|ubicacion|direccion)\b",
 )
 _QUESTION_START = re.compile(
     r"^(?:que|quien|quienes|como|cuando|donde|cual|cuales|cuanto|"
     r"cuanta|por\s+que|puedes|podrias|tienen|hay|me\s+puedes)\b"
 )
+_TIME_REPLY = (
+    r"(?:(?:a|para)\s+)?(?:las?\s+)?\d{1,2}"
+    r"(?:[:.]\d{2})?\s*(?:a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"
+    r"de\s+la\s+(?:manana|tarde|noche))?"
+)
+
+
+def is_pending_slot_selection(text: str, flow: PendingConversationFlow) -> bool:
+    """Reconoce una eleccion completa, no una hora dentro de otra instruccion."""
+    if flow not in {
+        PendingConversationFlow.BOOKING_AVAILABILITY,
+        PendingConversationFlow.RESCHEDULE_AVAILABILITY,
+    }:
+        return False
+    prefix = (
+        r"(?:agendame|reservame|programame|damela|dame|quiero|elijo|prefiero|"
+        r"(?:quiero|quisiera)\s+(?:agendar|reservar|programar))"
+    )
+    if flow is PendingConversationFlow.RESCHEDULE_AVAILABILITY:
+        prefix = r"(?:cambiala|muevela|reprogramala|quiero\s+cambiar|elijo|prefiero)"
+    # Conservar ':' y '.' para la hora, normalizando solamente acentos y espacios.
+    normalized = unicodedata.normalize("NFD", text.casefold())
+    normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+    normalized = " ".join(normalized.split()).strip(" .")
+    return re.fullmatch(
+        rf"(?:hola[,\s]+)?(?:por\s+favor[,\s]+)?"
+        rf"(?:{prefix}\s+(?:(?:una|la|esa)\s+cita\s+)?)?"
+        rf"{_TIME_REPLY}(?:\s+por\s+favor)?",
+        normalized,
+    ) is not None
 
 
 def classify_pending_interruption(
@@ -96,16 +131,34 @@ def classify_pending_interruption(
     if _is_abandonment(normalized):
         return PendingInterruption.ABANDON
 
+    if is_pending_slot_selection(text, flow):
+        return PendingInterruption.NONE if expected_reply else PendingInterruption.CLARIFY
+
     if _starts_new_appointment_task(normalized):
         return PendingInterruption.SWITCH
 
     if _matches_any(normalized, (_CANCEL_PATTERN,)):
         return PendingInterruption.AMBIGUOUS_CANCEL
 
+    if _matches_any(normalized, _GENERAL_PAUSE_PATTERNS):
+        return PendingInterruption.PAUSE
+
     if _looks_like_question(text, normalized):
-        if expected_reply or flow is PendingConversationFlow.APPOINTMENT_CONFIRMATION:
+        tentative = text.strip().strip("¿?").strip()
+        if expected_reply and (
+            is_pending_slot_selection(tentative, flow)
+            or (
+                flow is PendingConversationFlow.BOOKING_DATE
+                and len(normalized.split()) <= 3
+                and _QUESTION_START.search(normalized) is None
+            )
+            or (
+                flow is PendingConversationFlow.APPOINTMENT_CONFIRMATION
+                and re.fullmatch(r"(?:si|no|claro|confirmo|de acuerdo)(?: por favor)?", normalized)
+            )
+        ):
             return PendingInterruption.CLARIFY
-        return PendingInterruption.SWITCH
+        return PendingInterruption.PAUSE
 
     if expected_reply:
         return PendingInterruption.NONE
@@ -118,6 +171,18 @@ def classify_pending_interruption(
         return PendingInterruption.CLARIFY
 
     return PendingInterruption.NONE
+
+
+def is_resume_request(text: str) -> bool:
+    normalized = _normalize(text)
+    return re.fullmatch(
+        r"(?:(?:quiero|quisiera)\s+)?"
+        r"(?:retomemos|retomar|retoma|continuemos|continuar|continua|sigamos|seguir)"
+        r"(?:\s+(?:con\s+)?(?:la\s+|mi\s+|el\s+)?"
+        r"(?:cita|reserva|solicitud|agendamiento|cancelacion|reprogramacion|cambio))?"
+        r"(?:\s+por\s+favor)?",
+        " ".join(normalized.split()),
+    ) is not None
 
 
 def is_reschedule_request_without_target_time(text: str) -> bool:
@@ -133,7 +198,10 @@ def is_reschedule_request_without_target_time(text: str) -> bool:
 
 
 def _is_abandonment(normalized: str) -> bool:
-    return normalized in {"no", "nop", "no gracias", "mejor no"} or _matches_any(
+    return normalized in {
+        "no", "nop", "no gracias", "mejor no", "prefiero no", "no quiero",
+        "mantenerla", "conservarla", "prefiero no gracias",
+    } or _matches_any(
         normalized,
         _ABANDON_PATTERNS,
     )
@@ -142,7 +210,10 @@ def _is_abandonment(normalized: str) -> bool:
 def _starts_new_appointment_task(normalized: str) -> bool:
     if _matches_any(normalized, _BOOKING_PATTERNS + _APPOINTMENT_LIST_PATTERNS):
         return True
-    if _matches_any(normalized, (_RESCHEDULE_PATTERN,)):
+    if (
+        _matches_any(normalized, (_RESCHEDULE_PATTERN,))
+        and _matches_any(normalized, (_RESCHEDULE_REFERENCE_PATTERN,))
+    ):
         return True
     if _matches_any(normalized, (_CANCEL_PATTERN,)) and re.search(
         r"\bcitas?\b",

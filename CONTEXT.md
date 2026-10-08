@@ -82,6 +82,17 @@ Solicitud de cancelacion o reprogramacion que aun espera la confirmacion del
 paciente y no ha cambiado la fuente de verdad de agenda.
 _Evitar_: Cita modificada, operacion confirmada
 
+**Gestion pausada**:
+Solicitud incompleta que conserva su avance mientras el paciente pregunta por otro
+tema. Puede retomarse desde el dato pendiente; no representa una cita reservada ni
+una autorizacion para modificar o cancelar una cita.
+_Evitar_: Cita pausada, solicitud abandonada
+
+**Retomar una gestion**:
+Continuar una solicitud pausada con sus datos ya recibidos. Los horarios deben seguir
+disponibles y una modificacion o cancelacion requiere una confirmacion nueva.
+_Evitar_: Reiniciar una reserva, reutilizar una confirmacion
+
 **Notificacion al doctor**:
 Mensaje interno enviado a cada doctor configurado despues de que una cita sea
 agendada, modificada o cancelada correctamente. Incluye los datos de la cita y un

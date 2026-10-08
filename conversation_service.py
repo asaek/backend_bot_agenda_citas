@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 import json
 import re
@@ -18,6 +18,14 @@ from conversation_intent import (
     PendingInterruption,
     classify_pending_interruption,
     is_reschedule_request_without_target_time,
+    is_pending_slot_selection,
+    is_resume_request,
+)
+from conversation_workflow import (
+    PAUSED_CONVERSATION_WORKFLOW_KEY,
+    PENDING_WORKFLOW_KEYS,
+    PausedConversationWorkflow,
+    PendingConversationWorkflow,
 )
 from appointment_availability import (
     DateOnlyAvailabilityRequest,
@@ -129,6 +137,9 @@ SYSTEM_PROMPT = "\n".join(
         "Pedir aclaración cuando falte información.",
         "Prioriza la intención más reciente del paciente. Si abandona o cambia una "
         "solicitud pendiente, no insistas en completar el flujo anterior.",
+        "Las preguntas informativas y saludos pueden pausar una gestión. Usa el estado "
+        "del backend como referencia; no reconstruyas ni reactives una reserva o "
+        "confirmación por tu cuenta usando el historial.",
         "Si el paciente solicita agendar para un dia pero no indica una hora exacta, "
         "consultar primero check_availability para todo ese dia; no pedir aun la hora "
         "ni el motivo.",
@@ -222,17 +233,6 @@ class ConversationContext:
     @property
     def conversation_id(self) -> int:
         return self.patient_scope.conversation_id
-
-
-@dataclass(frozen=True, slots=True)
-class PendingConversationWorkflow:
-    """Snapshot del flujo pendiente que puede interrumpir el mensaje entrante."""
-
-    flow: PendingConversationFlow
-    action: PendingAppointmentAction | None = None
-    reason: PendingAppointmentReason | None = None
-    availability: PendingAppointmentAvailability | None = None
-    pending_date: PendingAppointmentDate | None = None
 
 
 def utc_now() -> str:
@@ -340,9 +340,19 @@ class ConversationService:
         context: ConversationContext,
         appointment_event_sink: AppointmentNotificationEventSink | None = None,
     ) -> LLMResponse:
+        resume_reply = await self._resolve_paused_workflow(context)
+        if resume_reply is not None:
+            return resume_reply
+        if is_resume_request(context.incoming_text):
+            active = self._load_pending_conversation_workflow(context.conversation_id)
+            if active.flow is not PendingConversationFlow.NONE:
+                return await self._resumed_workflow_prompt(context, active)
+            return "No hay una gestión pendiente para retomar. ¿Qué deseas hacer?"
         interruption_reply = self._resolve_pending_interruption(context)
         if interruption_reply is not None:
             return interruption_reply
+        if self._load_paused_workflow(context.conversation_id) is not None:
+            return await self._generate_agent_reply(context, appointment_event_sink)
 
         pending_reply = await self._resolve_pending_appointment_action(
             context,
@@ -373,6 +383,13 @@ class ConversationService:
         pending_reply = await self._resolve_pending_appointment_availability(context)
         if pending_reply is not None:
             return pending_reply
+        return await self._generate_agent_reply(context, appointment_event_sink)
+
+    async def _generate_agent_reply(
+        self,
+        context: ConversationContext,
+        appointment_event_sink: AppointmentNotificationEventSink | None,
+    ) -> LLMResponse:
         if self.llm_configuration_error is not None:
             raise self.llm_configuration_error
         if self.llm_provider is None:
@@ -423,12 +440,23 @@ class ConversationService:
             self._clear_pending_conversation_workflow(context.conversation_id)
             return self._abandoned_workflow_reply(workflow)
         if interruption is PendingInterruption.AMBIGUOUS_CANCEL:
+            if workflow.action is not None:
+                self._replace_workflow_context(
+                    context.conversation_id,
+                    paused=PausedConversationWorkflow(workflow, utc_now()),
+                )
             return self._ambiguous_cancel_reply(workflow)
         if interruption is PendingInterruption.CLARIFY:
             return self._pending_interruption_clarification(
                 workflow,
                 expected_reply=expected_reply,
             )
+        if interruption is PendingInterruption.PAUSE:
+            self._replace_workflow_context(
+                context.conversation_id,
+                paused=PausedConversationWorkflow(workflow, utc_now()),
+            )
+            return None
 
         self._clear_pending_conversation_workflow(context.conversation_id)
         return None
@@ -448,48 +476,272 @@ class ConversationService:
         if not isinstance(stored_context, dict):
             return PendingConversationWorkflow(PendingConversationFlow.NONE)
 
-        pending_action = PendingAppointmentAction.from_context(
-            stored_context.get(PENDING_APPOINTMENT_ACTION_KEY)
+        return PendingConversationWorkflow.from_context(stored_context)
+
+    def _load_paused_workflow(self, conversation_id: int) -> PausedConversationWorkflow | None:
+        with self.database.transaction() as connection:
+            conversation = self.conversations.get_by_id(connection, conversation_id)
+        if conversation is None:
+            return None
+        try:
+            stored_context = json.loads(conversation.context_json)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(stored_context, dict):
+            return None
+        return PausedConversationWorkflow.from_context(
+            stored_context.get(PAUSED_CONVERSATION_WORKFLOW_KEY)
         )
-        if pending_action is not None:
-            return PendingConversationWorkflow(
-                PendingConversationFlow.APPOINTMENT_CONFIRMATION,
-                action=pending_action,
+
+    def _replace_workflow_context(
+        self,
+        conversation_id: int,
+        *,
+        active: PendingConversationWorkflow | None = None,
+        paused: PausedConversationWorkflow | None = None,
+    ) -> None:
+        """Mueve o elimina el estado en una sola transaccion, conservando otros datos."""
+        with self.database.transaction() as connection:
+            conversation = self.conversations.get_by_id(connection, conversation_id)
+            if conversation is None:
+                return
+            try:
+                stored_context = json.loads(conversation.context_json)
+            except json.JSONDecodeError:
+                stored_context = {}
+            if not isinstance(stored_context, dict):
+                stored_context = {}
+            for key in (*PENDING_WORKFLOW_KEYS, PAUSED_CONVERSATION_WORKFLOW_KEY):
+                stored_context.pop(key, None)
+            if active is not None:
+                stored_context.update(active.to_context())
+            elif paused is not None:
+                stored_context[PAUSED_CONVERSATION_WORKFLOW_KEY] = paused.to_context()
+            self.conversations.update_context(
+                connection, conversation_id,
+                json.dumps(stored_context, ensure_ascii=False, sort_keys=True), utc_now(),
             )
 
-        pending_reason = PendingAppointmentReason.from_context(
-            stored_context.get(PENDING_APPOINTMENT_REASON_KEY)
+    async def _resolve_paused_workflow(self, context: ConversationContext) -> str | None:
+        paused = self._load_paused_workflow(context.conversation_id)
+        if paused is None:
+            return None
+        workflow = paused.workflow
+        explicit_resume = is_resume_request(context.incoming_text)
+        expected = self._is_expected_pending_reply(context, workflow)
+        interruption = classify_pending_interruption(
+            context.incoming_text, flow=workflow.flow, expected_reply=expected,
         )
-        if pending_reason is not None:
-            return PendingConversationWorkflow(
-                PendingConversationFlow.BOOKING_DETAILS,
-                reason=pending_reason,
+        if interruption is PendingInterruption.ABANDON:
+            self._clear_pending_conversation_workflow(context.conversation_id)
+            return self._abandoned_workflow_reply(workflow)
+        if interruption is PendingInterruption.AMBIGUOUS_CANCEL:
+            return self._ambiguous_cancel_reply(workflow)
+        can_resume_with_data = (
+            expected and interruption is PendingInterruption.NONE
+            and workflow.action is None
+            and (
+                workflow.availability is None
+                or is_pending_slot_selection(context.incoming_text, workflow.flow)
             )
+        )
+        if explicit_resume or can_resume_with_data:
+            self._replace_workflow_context(context.conversation_id, active=workflow)
+            if explicit_resume:
+                return await self._resumed_workflow_prompt(context, workflow)
+            if workflow.pending_date is not None and workflow.pending_date.is_expired_at(self._current_local_time()):
+                self._save_pending_appointment_date(
+                    context.conversation_id,
+                    PendingAppointmentDate.start(
+                        self._current_local_time(), name_message_id=workflow.pending_date.name_message_id,
+                    ),
+                )
+            if workflow.availability is not None and workflow.availability.is_expired_at(self._current_local_time()):
+                return await self._resumed_workflow_prompt(context, workflow)
+            return None
+        if interruption is PendingInterruption.SWITCH:
+            self._clear_pending_conversation_workflow(context.conversation_id)
+            return None
+        if workflow.action is not None and expected:
+            return (
+                "La gestión está pausada. Escribe ‘retomemos la cita’ para revisar "
+                "los datos y recibir una nueva solicitud de confirmación."
+            )
+        return None
 
-        pending_availability = PendingAppointmentAvailability.from_context(
-            stored_context.get(PENDING_APPOINTMENT_AVAILABILITY_KEY)
-        )
-        if pending_availability is not None:
-            flow = (
-                PendingConversationFlow.RESCHEDULE_AVAILABILITY
-                if pending_availability.appointment_id is not None
-                else PendingConversationFlow.BOOKING_AVAILABILITY
+    async def _resumed_workflow_prompt(
+        self, context: ConversationContext, workflow: PendingConversationWorkflow,
+    ) -> str:
+        if workflow.reason is not None:
+            if workflow.reason.is_expired_at(self._current_local_time()):
+                start = self._booking_start_at(workflow.reason.start_at)
+                return await self._refresh_booking_availability(
+                    context, start.date(), name_message_id=workflow.reason.name_message_id,
+                )
+            return self._booking_details_prompt(context, workflow.reason)
+        if workflow.availability is not None:
+            availability = workflow.availability
+            if availability.is_expired_at(self._current_local_time()):
+                if availability.appointment_id is not None:
+                    return await self._recover_reschedule_slots(context, workflow)
+                return await self._refresh_booking_availability(
+                    context, date.fromisoformat(availability.target_date),
+                    name_message_id=availability.name_message_id,
+                )
+            lines = [
+                "- " + format_patient_time(datetime.fromisoformat(slot.start_at).astimezone(self._timezone))
+                + " a " + format_patient_time(datetime.fromisoformat(slot.end_at).astimezone(self._timezone))
+                for slot in availability.slots
+            ]
+            return (
+                f"Horarios disponibles para el {date.fromisoformat(availability.target_date):%d/%m/%Y}:\n"
+                + "\n".join(lines) + "\n\n" + APPOINTMENT_SLOT_SELECTION_REPLY
             )
-            return PendingConversationWorkflow(
-                flow,
-                availability=pending_availability,
+        if workflow.action is not None:
+            return await self._renew_paused_confirmation(context, workflow)
+        if workflow.pending_date is not None:
+            self._replace_workflow_context(
+                context.conversation_id,
+                active=PendingConversationWorkflow(
+                    PendingConversationFlow.BOOKING_DATE,
+                    pending_date=PendingAppointmentDate.start(
+                        self._current_local_time(), name_message_id=workflow.pending_date.name_message_id,
+                    ),
+                ),
             )
+        return APPOINTMENT_DATE_REPLY
 
-        pending_date = PendingAppointmentDate.from_context(
-            stored_context.get(PENDING_APPOINTMENT_DATE_KEY)
-        )
-        if pending_date is not None:
-            return PendingConversationWorkflow(
+    async def _refresh_booking_availability(
+        self, context: ConversationContext, target_date: date, *, name_message_id: int | None,
+    ) -> str:
+        now = self._current_local_time()
+        self._replace_workflow_context(
+            context.conversation_id,
+            active=PendingConversationWorkflow(
                 PendingConversationFlow.BOOKING_DATE,
-                pending_date=pending_date,
-            )
+                pending_date=PendingAppointmentDate.start(now, name_message_id=name_message_id),
+            ),
+        )
+        request = availability_request_for_date(target_date, now=now, timezone=self._timezone)
+        if target_date < now.date() or request is None:
+            return "El horario anterior ya pasó. " + APPOINTMENT_DATE_REPLY
+        return await self._execute_date_only_availability(context, request)
 
-        return PendingConversationWorkflow(PendingConversationFlow.NONE)
+    async def _renew_paused_confirmation(
+        self, context: ConversationContext, workflow: PendingConversationWorkflow,
+    ) -> str:
+        action = workflow.action
+        if action is None or self.tool_executor is None:
+            return CONTROLLED_FALLBACK_REPLY
+        # Mantenerla inactiva incluso si falla una lectura durante la recuperacion.
+        self._replace_workflow_context(
+            context.conversation_id, paused=PausedConversationWorkflow(workflow, utc_now()),
+        )
+        try:
+            appointment = await self._find_appointment_for_confirmation(
+                context.patient_scope, action.arguments["appointment_id"],
+            )
+        except Exception as error:
+            public_error = public_error_from_exception(error)
+            return self._calendar_error_reply(
+                context, public_error.to_tool_error(), error_type=type(public_error).__name__,
+            )
+        if appointment is None:
+            self._clear_pending_conversation_workflow(context.conversation_id)
+            return AppointmentNotFound().message
+        tool_call = action.to_tool_call()
+        if action.tool_name is ToolName.RESCHEDULE_APPOINTMENT:
+            requested_start = self._booking_start_at(action.arguments["new_start_at"])
+            result = await self.tool_executor.execute(
+                ToolRequest(
+                    tool_name=ToolName.CHECK_AVAILABILITY,
+                    arguments={
+                        "start_at": requested_start.isoformat(),
+                        "end_at": (requested_start + timedelta(minutes=30)).isoformat(),
+                    },
+                    patient_scope=context.patient_scope,
+                )
+            )
+            if not result.ok:
+                return result.error.message if result.error is not None else CONTROLLED_FALLBACK_REPLY
+            if not isinstance(result.data, CheckAvailabilityOutput):
+                return CONTROLLED_FALLBACK_REPLY
+            if not any(slot.start_at == requested_start for slot in result.data.slots):
+                return await self._recover_reschedule_slots(
+                    context, workflow, appointment=appointment,
+                )
+        fresh_action = PendingAppointmentAction.from_tool_call(
+            tool_call, appointment=appointment, now=self._current_local_time(),
+        )
+        if fresh_action is None:
+            return CONTROLLED_FALLBACK_REPLY
+        self._replace_workflow_context(
+            context.conversation_id,
+            active=PendingConversationWorkflow(
+                PendingConversationFlow.APPOINTMENT_CONFIRMATION, action=fresh_action,
+            ),
+        )
+        return fresh_action.confirmation_prompt()
+
+    async def _recover_reschedule_slots(
+        self, context: ConversationContext, workflow: PendingConversationWorkflow,
+        *, appointment: Appointment | None = None,
+    ) -> str:
+        """No descartar la intencion pausada hasta persistir una lista nueva."""
+        self._replace_workflow_context(
+            context.conversation_id, paused=PausedConversationWorkflow(workflow, utc_now()),
+        )
+        if workflow.action is not None:
+            tool_call = workflow.action.to_tool_call()
+        elif workflow.availability is not None:
+            availability = workflow.availability
+            tool_call = ToolCall(
+                name=ToolName.RESCHEDULE_APPOINTMENT.value,
+                arguments={
+                    "appointment_id": availability.appointment_id,
+                    "new_start_at": availability.slots[0].start_at,
+                },
+                call_id=availability.call_id,
+            )
+        else:
+            return CONTROLLED_FALLBACK_REPLY
+        if appointment is None:
+            try:
+                appointment = await self._find_appointment_for_confirmation(
+                    context.patient_scope, tool_call.arguments["appointment_id"],
+                )
+            except Exception as error:
+                public_error = public_error_from_exception(error)
+                return self._calendar_error_reply(
+                    context, public_error.to_tool_error(), error_type=type(public_error).__name__,
+                )
+        if appointment is None:
+            self._clear_pending_conversation_workflow(context.conversation_id)
+            return AppointmentNotFound().message
+        reply = await self._offer_reschedule_availability(context, tool_call, appointment)
+        fresh_workflow = self._load_pending_conversation_workflow(context.conversation_id)
+        if fresh_workflow.availability is not None:
+            self._replace_workflow_context(context.conversation_id, active=fresh_workflow)
+        return reply
+
+    def _booking_start_at(self, value: str) -> datetime:
+        start = datetime.fromisoformat(value)
+        if start.utcoffset() is None:
+            start = start.replace(tzinfo=self._timezone)
+        return start.astimezone(self._timezone)
+
+    def _booking_details_prompt(
+        self, context: ConversationContext, reason: PendingAppointmentReason,
+    ) -> str:
+        needs_name = reason.name_required
+        if needs_name is None:
+            needs_name = self._load_patient_name(context.patient_id) is None
+        start = self._booking_start_at(reason.start_at)
+        return (
+            f"Continuamos con tu solicitud para el {start:%d/%m/%Y} "
+            f"a las {format_patient_time(start)}. "
+            + (APPOINTMENT_NAME_REPLY if needs_name else APPOINTMENT_REASON_REPLY)
+        )
 
     def _is_expected_pending_reply(
         self,
@@ -503,7 +755,8 @@ class ConversationService:
             )
         if workflow.availability is not None:
             return (
-                workflow.availability.matching_slot(
+                is_pending_slot_selection(context.incoming_text.strip().strip("¿?").strip(), workflow.flow)
+                and workflow.availability.matching_slot(
                     context.incoming_text,
                     timezone=self._timezone,
                 )
@@ -535,7 +788,11 @@ class ConversationService:
         workflow: PendingConversationWorkflow,
     ) -> str:
         if workflow.action is not None:
-            return CONFIRMATION_RESPONSE_INSTRUCTIONS
+            return (
+                "¿Quieres abandonar la operación pendiente y mantener tu cita, "
+                "o solicitar la cancelación de una cita existente? "
+                "Indícame qué deseas hacer; todavía no se realizó ningún cambio."
+            )
         if workflow.flow is PendingConversationFlow.RESCHEDULE_AVAILABILITY:
             return (
                 "¿Quieres abandonar el cambio y dejar tu cita como está, o cancelar "
@@ -589,35 +846,7 @@ class ConversationService:
         )
 
     def _clear_pending_conversation_workflow(self, conversation_id: int) -> None:
-        pending_keys = (
-            PENDING_APPOINTMENT_ACTION_KEY,
-            PENDING_APPOINTMENT_REASON_KEY,
-            PENDING_APPOINTMENT_AVAILABILITY_KEY,
-            PENDING_APPOINTMENT_DATE_KEY,
-        )
-        now = utc_now()
-        with self.database.transaction() as connection:
-            conversation = self.conversations.get_by_id(connection, conversation_id)
-            if conversation is None:
-                return
-            try:
-                stored_context = json.loads(conversation.context_json)
-            except json.JSONDecodeError:
-                stored_context = {}
-            if not isinstance(stored_context, dict):
-                stored_context = {}
-            changed = False
-            for key in pending_keys:
-                if key in stored_context:
-                    stored_context.pop(key)
-                    changed = True
-            if changed:
-                self.conversations.update_context(
-                    connection,
-                    conversation_id,
-                    json.dumps(stored_context, ensure_ascii=False, sort_keys=True),
-                    now,
-                )
+        self._replace_workflow_context(conversation_id)
 
     async def _resolve_reschedule_request_without_target_time(
         self,
@@ -876,9 +1105,11 @@ class ConversationService:
             raise RuntimeError("La disponibilidad requiere un ToolExecutor")
 
         now = self._current_local_time()
+        previous_date = self._load_pending_appointment_date(context.conversation_id)
+        name_message_id = previous_date.name_message_id if previous_date is not None else None
         self._save_pending_appointment_date(
             context.conversation_id,
-            PendingAppointmentDate.start(now),
+            PendingAppointmentDate.start(now, name_message_id=name_message_id),
         )
 
         result = await self.tool_executor.execute(
@@ -899,16 +1130,22 @@ class ConversationService:
                 result.data.slots,
                 timezone=self._timezone,
                 now=self._current_local_time(),
+                name_message_id=name_message_id,
             )
             if pending_availability is not None:
                 self._save_pending_appointment_availability(
                     context.conversation_id,
                     pending_availability,
                 )
+            elif name_message_id is not None:
+                self._save_pending_appointment_date(
+                    context.conversation_id,
+                    PendingAppointmentDate.start(now, name_message_id=name_message_id),
+                )
         else:
             self._save_pending_appointment_date(
                 context.conversation_id,
-                PendingAppointmentDate.start(self._current_local_time()),
+                PendingAppointmentDate.start(self._current_local_time(), name_message_id=name_message_id),
             )
         return format_availability_reply(
             result,
@@ -952,7 +1189,10 @@ class ConversationService:
             selected_slot.start_at,
             call_id=f"backend-availability-{context.incoming_message_id}",
             source_message_id=context.incoming_message_id,
+            now=self._current_local_time(),
         )
+        if pending_availability.name_message_id is not None:
+            pending_reason = pending_reason.with_name_message(pending_availability.name_message_id)
         reply = self._start_pending_appointment_reason(context, pending_reason)
         self._clear_pending_appointment_availability(context.conversation_id)
         return reply
@@ -963,11 +1203,27 @@ class ConversationService:
         tool_call: ToolCall,
         patient_scope: PatientScope,
     ) -> str | None:
+        if (
+            self._load_paused_workflow(context.conversation_id) is not None
+            and tool_call.name in {
+                ToolName.CREATE_APPOINTMENT.value,
+                ToolName.CANCEL_APPOINTMENT.value,
+                ToolName.RESCHEDULE_APPOINTMENT.value,
+            }
+        ):
+            return (
+                "Tu gestión sigue pausada. Para continuar, escribe ‘retomemos la cita’, "
+                "o indica qué nueva gestión quieres realizar."
+            )
         pending_reason = PendingAppointmentReason.from_tool_call(
             tool_call,
             source_message_id=context.incoming_message_id,
+            now=self._current_local_time(),
         )
         if pending_reason is not None:
+            pending_reason = replace(
+                pending_reason, start_at=self._booking_start_at(pending_reason.start_at).isoformat(),
+            )
             return self._start_pending_appointment_reason(context, pending_reason)
         return await self._request_appointment_confirmation(
             context,
@@ -981,7 +1237,9 @@ class ConversationService:
         tool_call: ToolCall,
         patient_scope: PatientScope,
     ) -> str | None:
-        pending_action = PendingAppointmentAction.from_tool_call(tool_call)
+        pending_action = PendingAppointmentAction.from_tool_call(
+            tool_call, now=self._current_local_time(),
+        )
         if pending_action is None:
             return None
         if self.tool_executor is None:
@@ -1021,6 +1279,7 @@ class ConversationService:
         pending_action = PendingAppointmentAction.from_tool_call(
             tool_call,
             appointment=appointment,
+            now=self._current_local_time(),
         )
         if pending_action is None:
             return None
@@ -1140,6 +1399,7 @@ class ConversationService:
         pending_action = PendingAppointmentAction.from_tool_call(
             tool_call,
             appointment=appointment,
+            now=self._current_local_time(),
         )
         if pending_action is None:
             return CONTROLLED_FALLBACK_REPLY
@@ -1181,7 +1441,7 @@ class ConversationService:
         pending_action = self._load_pending_appointment_action(context.conversation_id)
         if pending_action is None:
             return None
-        if pending_action.is_expired:
+        if pending_action.is_expired_at(self._current_local_time()):
             self._clear_pending_appointment_action(context.conversation_id)
             return (
                 "La confirmación expiró. Si aún deseas realizar el cambio, "
@@ -1224,7 +1484,7 @@ class ConversationService:
         )
         if pending_reason is None:
             return None
-        if pending_reason.is_expired:
+        if pending_reason.is_expired_at(self._current_local_time()):
             self._clear_pending_appointment_reason(context.conversation_id)
             return (
                 "La solicitud para agendar esa cita expiró. "
@@ -1443,7 +1703,10 @@ class ConversationService:
             context.conversation_id,
             pending_reason,
         )
-        return APPOINTMENT_NAME_REPLY
+        return (
+            APPOINTMENT_REASON_REPLY if pending_reason.name_required is False
+            else APPOINTMENT_NAME_REPLY
+        )
 
     def _save_pending_appointment_availability(
         self,
@@ -1618,6 +1881,31 @@ class ConversationService:
                 content=self._build_system_prompt(),
             )
         ]
+        paused = self._load_paused_workflow(context.conversation_id)
+        if paused is not None:
+            workflow = paused.workflow
+            detail = "falta indicar el día"
+            if workflow.reason is not None:
+                reason = workflow.reason
+                start = self._booking_start_at(reason.start_at)
+                needs_name = reason.name_required
+                if needs_name is None:
+                    needs_name = self._load_patient_name(context.patient_id) is None
+                detail = (
+                    f"reserva solicitada para {start:%d/%m/%Y}, {format_patient_time(start)}; "
+                    + ("falta nombre" if needs_name else "nombre recibido; falta motivo")
+                    + "; el horario elegido no está reservado"
+                )
+            elif workflow.availability is not None:
+                detail = f"falta elegir horario para {workflow.availability.target_date}"
+            elif workflow.action is not None:
+                detail = "cambio o cancelación pendiente; requiere una confirmación nueva al retomar"
+            messages[0] = ChatMessage(
+                role="system",
+                content=messages[0].content + "\nGestión pausada (datos del backend): " + detail
+                + "\nResponde el tema actual. No pidas datos de la cita pausada ni afirmes "
+                "que se realizó. El backend controla la recuperación y las confirmaciones.",
+            )
 
         for message in recent_history:
             if message.direction == "incoming":

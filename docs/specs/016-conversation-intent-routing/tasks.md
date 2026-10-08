@@ -7,6 +7,11 @@
 - [x] Limpiar los estados relacionados al abandonar o cambiar de tarea.
 - [x] Mantener la aclaracion ambigua sin cambiar ni limpiar la agenda pendiente.
 - [x] Priorizar el mensaje nuevo y descartar confirmaciones que ya no corresponden.
+- [x] Reconocer selecciones completas con `agendame` sin reiniciar la reserva.
+- [x] Persistir una gestion pausada y recuperar su paso despues de otro tema.
+- [x] Incorporar el recordatorio de pausa al contexto del modelo y bloquear mutaciones.
+- [x] Reconsultar disponibilidad vencida conservando el nombre de la misma reserva.
+- [x] Generar confirmaciones nuevas al retomar cancelaciones o reprogramaciones.
 
 ## Pruebas y verificacion
 
@@ -17,3 +22,11 @@
 - [x] Probar que un `Sí` tardio no ejecute una reprogramacion descartada.
 - [x] Probar saludos y peticiones de olvidar el flujo pendiente.
 - [x] Ejecutar la suite completa y verificar los endpoints en Raspberry Pi.
+
+## Verificacion del incremento de pausa
+
+- [x] Reproducir la perdida de estado de `agendame a las 11 am` antes de corregirla.
+- [x] Probar pausa tras entregar nombre, reinicio e historial acotado.
+- [x] Probar disponibilidad ocupada/vencida y conservacion del nombre.
+- [x] Completar regresiones de abandono, confirmaciones inactivas y nuevas gestiones.
+- [x] Ejecutar suite completa, revisar cambios y reiniciar/verificar el runtime.

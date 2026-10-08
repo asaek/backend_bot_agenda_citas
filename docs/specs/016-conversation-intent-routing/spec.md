@@ -2,8 +2,9 @@
 
 ## Estado
 
-Verificado en Raspberry Pi. Los mensajes nuevos se clasifican antes de procesar un
-flujo pendiente; la evidencia esta en
+Verificado en Raspberry Pi con seleccion contextual y pausa persistente; evidencia
+en `docs/verification/2026-10-07-conversation-pause-continuity.md`.
+El corte original fue verificado en
 `docs/verification/2026-10-05-conversation-intent-routing.md`.
 
 ## Objetivo
@@ -18,7 +19,7 @@ la respuesta que esperaba el flujo anterior.
 - Continuar cuando el mensaje responde claramente al dato solicitado.
 - Abandonar una solicitud de reserva o cambio sin crear, modificar o cancelar una cita.
 - Reemplazar el flujo pendiente cuando el paciente inicia claramente otra gestion de
-  citas, hace otra pregunta, saluda o pide olvidar la tarea actual.
+  citas o pide olvidar la tarea actual. Preguntas informativas y saludos pausan el avance.
 - Aclarar expresiones ambiguas como `cancela` sin borrar el estado ni ejecutar una
   mutacion.
 - Descartar confirmaciones pendientes al cambiar de tarea para que un `Si` posterior no
@@ -41,10 +42,11 @@ ni notificaciones.
 
 ### RF-1603 - Cambio explicito de intencion
 
-Una solicitud explicita de consultar citas, agendar, consultar horarios, reprogramar,
-cancelar una cita, saludar, olvidar la tarea actual u otra pregunta debe limpiar el estado
-pendiente anterior y procesar el mensaje nuevo por su flujo normal. Una solicitud real de
-cancelacion debe conservar la confirmacion explicita ya definida.
+Una nueva solicitud explicita de consultar citas, agendar, consultar horarios,
+reprogramar, cancelar una cita u olvidar la tarea actual debe limpiar el estado
+pendiente anterior y procesar el mensaje nuevo por su flujo normal. Una seleccion
+contextual de la lista, incluso con `agendame`, continua la misma reserva. Una
+solicitud real de cancelacion conserva la confirmacion explicita ya definida.
 
 ### RF-1604 - Cancelacion ambigua
 
@@ -63,6 +65,30 @@ respuesta afirmativa posterior no debe ejecutar la accion descartada.
 Limpiar una tarea debe eliminar unicamente los estados pendientes de agenda; debe
 conservar el resto del contexto de conversacion y del paciente.
 
+### RF-1607 - Pausa persistente
+
+Preguntas informativas y saludos deben pausar el flujo y recibir una respuesta al
+tema actual. El estado conservado incluye el paso, fecha, horario y datos recibidos,
+y sobrevive a reinicios y al limite de historial. Existe como maximo una gestion
+activa o pausada. No se permiten mutaciones del LLM mientras responde otro tema
+con una gestion pausada.
+
+### RF-1608 - Recuperacion contextual
+
+`Retomemos la cita` y variantes claras recuperan el paso solicitado, sin repetir el
+nombre si ya se recibio para esa reserva. Una respuesta clara de fecha o seleccion
+tambien retoma el flujo. Un `Si` aislado no recupera ni ejecuta una confirmacion
+pausada. Nombres o motivos ambiguos durante otro tema no se consumen automaticamente.
+
+### RF-1609 - Vigencia al retomar
+
+La pausa no renueva los diez minutos de disponibilidad. Retomar una lista o reserva
+vencida consulta horarios actuales antes de aceptar una eleccion anterior. El nombre
+recibido acompaña la misma reserva cuando cambia de horario o necesita otra fecha.
+Retomar una cancelacion o reprogramacion resuelve la cita actual y genera una nueva
+confirmacion; la reprogramacion comprueba ademas la disponibilidad del destino.
+Si la lectura falla, la confirmacion anterior sigue inactiva.
+
 ## Criterios de aceptacion
 
 1. `no cancela mejor dejala asi` durante una seleccion de disponibilidad finaliza la
@@ -72,10 +98,20 @@ conservar el resto del contexto de conversacion y del paciente.
    y elimina la lista anterior.
 4. `Cancela mi cita de las 11` durante una seleccion de reprogramacion inicia el flujo de
    cancelacion y muestra su confirmacion sin cancelar la cita inmediatamente.
-5. Una pregunta nueva durante una confirmacion de reprogramacion descarta esa confirmacion;
-   un `Sí` posterior no mueve la cita.
+5. Una nueva gestion de agenda durante una confirmacion de reprogramacion la descarta;
+   una pregunta informativa la pausa como intencion inactiva. Un `Sí` posterior no mueve
+   la cita hasta retomar y recibir una confirmacion nueva.
 6. Fechas, horarios y confirmaciones claras continuan el flujo pendiente existente.
 7. Las interrupciones y aclaraciones no emiten eventos ni cambian el calendario.
 8. Los datos no relacionados del contexto persisten despues de limpiar la tarea.
-9. `Hola` y `Olvida lo que estás haciendo, te estoy saludando` durante una seleccion
-   pendiente abandonan esa tarea y reciben una respuesta al nuevo mensaje.
+9. `Hola` pausa la seleccion; `Olvida lo que estás haciendo, te estoy saludando`
+   descarta la gestion anterior. Ambos reciben una respuesta al nuevo mensaje.
+10. `11 am`, `damela a las 11` y `agendame a las 11 am` continúan la lista ofrecida;
+    `cancela mi cita de las 11` inicia cancelacion, aunque la lista contenga esa hora.
+11. Una pregunta sobre costo despues de entregar el nombre no lo reemplaza ni vuelve
+    a solicitarlo al retomar, incluso con un servicio reiniciado e historial corto.
+12. Un horario ocupado durante la pausa no se acepta desde una lista vencida.
+13. `No quiero cancelarla`, `No la modifiques` y `Ya no quiero agendar` abandonan
+    la operacion correspondiente sin mutaciones ni eventos.
+14. Una nueva gestion de agenda reemplaza la pausada; no queda una solicitud antigua
+    recuperable con una confirmacion posterior.

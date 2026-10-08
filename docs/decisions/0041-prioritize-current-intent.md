@@ -4,6 +4,9 @@
 
 Aceptada.
 
+Ampliada por ADR 0044: preguntas informativas y saludos pausan la gestion para
+retomarla; una nueva gestion explicita sigue descartando la anterior.
+
 ## Contexto
 
 `ConversationService` resolvia estados pendientes antes de clasificar el mensaje entrante.

@@ -52,3 +52,4 @@ indique cual decision anterior queda obsoleta.
 - [0041 - Priorizar la intencion mas reciente sobre flujos pendientes](./0041-prioritize-current-intent.md)
 - [0042 - Mostrar disponibilidad al solicitar cambiar la hora](./0042-show-availability-before-reschedule-time.md)
 - [0043 - Seleccion del proveedor OpenAI-compatible por entorno](./0043-openai-compatible-provider-selection.md)
+- [0044 - Pausa persistente y seleccion contextual de horarios](./0044-persistent-conversation-pause.md)

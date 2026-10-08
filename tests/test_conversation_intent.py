@@ -56,21 +56,21 @@ class PendingConversationIntentTests(unittest.TestCase):
         self.assertEqual(continuation, PendingInterruption.NONE)
         self.assertEqual(question, PendingInterruption.CLARIFY)
 
-    def test_unrelated_question_leaves_the_pending_flow_for_the_new_intent(self) -> None:
+    def test_unrelated_question_pauses_the_pending_flow(self) -> None:
         interruption = classify_pending_interruption(
             "a que hora cierran?",
             flow=PendingConversationFlow.BOOKING_AVAILABILITY,
         )
 
-        self.assertEqual(interruption, PendingInterruption.SWITCH)
+        self.assertEqual(interruption, PendingInterruption.PAUSE)
 
-    def test_greeting_replaces_pending_slot_selection(self) -> None:
+    def test_greeting_pauses_pending_slot_selection(self) -> None:
         interruption = classify_pending_interruption(
             "Hola",
             flow=PendingConversationFlow.BOOKING_AVAILABILITY,
         )
 
-        self.assertEqual(interruption, PendingInterruption.SWITCH)
+        self.assertEqual(interruption, PendingInterruption.PAUSE)
 
     def test_explicit_request_to_forget_current_task_replaces_pending_flow(self) -> None:
         interruption = classify_pending_interruption(
