@@ -76,3 +76,16 @@ class AppointmentReasonValidationTests(unittest.TestCase):
 
         self.assertTrue(result.accepted)
         self.assertEqual(result.code, AppointmentReasonValidationCode.ACCEPTED)
+
+    def test_habitual_reference_does_not_hide_a_meaningful_reason(self) -> None:
+        for text in ("Tengo molestias en la vista, como siempre",
+                     "Lo de siempre: revisión de córnea"):
+            with self.subTest(text=text):
+                self.assertTrue(validate_appointment_reason(text).accepted)
+        for text in ("Es lo de siempre.", "Lo mismo de siempre", "Como siempre",
+                     "Es por lo de siempre", "Lo de siempre, por favor"):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    validate_appointment_reason(text).code,
+                    AppointmentReasonValidationCode.AMBIGUOUS,
+                )

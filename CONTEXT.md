@@ -50,11 +50,23 @@ _Evitar_: Motivo de la cita, estado de la cita, diagnostico
 Descripcion proporcionada por el paciente de prueba sobre la razon de su visita.
 _Evitar_: Etiqueta interna
 
+**Motivo general comprensible**:
+Descripcion que identifica la razon de una consulta oftalmologica, aunque no detalle
+el sintoma, su intensidad ni su duracion. Es suficiente para solicitar una cita;
+no equivale a un diagnostico ni a una descripcion incomprensible.
+_Evitar_: Motivo ilegible, motivo incompleto por falta de diagnostico
+
 **Nombre del paciente**:
 Nombre proporcionado por el paciente de prueba y conservado para identificarlo en la
 notificacion operativa al doctor. No es un diagnostico ni sustituye al numero de
 WhatsApp como alcance tecnico.
 _Evitar_: Nombre inventado, identidad verificada
+
+**Nombre pendiente de aclaracion**:
+Nombre recibido que conserva todas sus partes mientras el paciente confirma su
+escritura o proporciona una correccion. Todavia no es el nombre aceptado para una
+nueva cita; un apellido poco comun no se considera falso por esa sola razon.
+_Evitar_: Nombre corregido automaticamente, apellido rechazado, identidad verificada
 
 **Motivo validado**:
 Motivo expresado por el paciente que supera las reglas locales de calidad minima
@@ -117,3 +129,18 @@ Sintesis interna de la conversacion que conserva la informacion relevante para
 continuar la atencion, incluidas las señales de prioridad detectadas. Cuando se
 notifica al doctor, acompaña al evento de la cita y no sustituye una nota clinica.
 _Evitar_: Historial completo, nota clinica, diagnostico
+
+**Turno conversacional**:
+Atencion de un mensaje del paciente y la respuesta decidida para ese mensaje.
+Repetir la entrega del mismo mensaje no representa una nueva solicitud del paciente.
+_Evitar_: Cita, gestion nueva, intento de envio
+
+**Respuesta preparada**:
+Respuesta ya decidida para un turno y lista para entregar. Prepararla no significa
+que el paciente la haya recibido; intentar entregarla otra vez no cambia su contenido.
+_Evitar_: Respuesta recibida, nueva decision, nueva solicitud
+
+**Reintento obsoleto**:
+Repeticion de un turno anterior cuando ya se atendieron turnos posteriores de la
+misma conversacion. No autoriza volver a abrir una gestion terminada.
+_Evitar_: Nueva intencion, retomar una gestion, recordatorio

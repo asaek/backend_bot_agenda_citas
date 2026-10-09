@@ -118,6 +118,10 @@ la respuesta controlada, excepto para remitentes de depuracion autorizados segun
 la especificacion 015. Si WhatsApp tambien falla, debe registrar esa salida como
 `failed` y permitir reintentar el mensaje entrante posteriormente.
 
+Segun el incremento 018, ese reintento reutiliza la respuesta preparada cuando
+el turno sigue vigente. No vuelve a generar ni a ejecutar herramientas; los
+turnos obsoletos o con resultado incierto se reconocen sin reenviar al paciente.
+
 ### RF-316 - Diagnostico seguro de errores HTTP
 
 Cuando el proveedor LLM responda con un error HTTP, el backend debe guardar su codigo

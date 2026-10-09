@@ -73,6 +73,12 @@ Si el envio mediante WhatsApp falla, el backend debe conservar el mensaje
 entrante y registrar la respuesta saliente como fallida para permitir un reintento
 posterior.
 
+El incremento 018 precisa esta politica: reintentar el texto preparado solamente
+si el turno sigue vigente y el fallo permite saber que el envio no fue aceptado.
+Los turnos obsoletos o inciertos no se regeneran ni se reenvian automaticamente.
+La bandeja de respuestas y la auditoria de intentos son aditivas al esquema de
+mensajes original.
+
 ### RF-209 - Eventos no soportados
 
 Los eventos de estado y los mensajes que no sean de tipo `text` deben seguir

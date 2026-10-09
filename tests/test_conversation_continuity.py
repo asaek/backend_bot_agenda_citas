@@ -95,7 +95,7 @@ class ConversationContinuityTests(unittest.TestCase):
     def test_booking_word_in_slot_selection_keeps_the_same_booking(self) -> None:
         self.offer_slots()
         self.assertEqual(self.send("agéndame a las 11 am"), APPOINTMENT_NAME_REPLY)
-        self.assertEqual(self.send("Asael Ponce Silva"), APPOINTMENT_REASON_REPLY)
+        self.assertTrue(self.send("Asael Ponce Silva").endswith(APPOINTMENT_REASON_REPLY))
         self.assertIn("confirmada", self.send("Revisión general"))
         self.assertEqual(self.llm.call_count, 0)
         self.assertEqual(len(self.provider.appointments), 1)
@@ -127,7 +127,7 @@ class ConversationContinuityTests(unittest.TestCase):
     def test_question_pauses_and_resume_survives_restart_and_short_history(self) -> None:
         self.offer_slots()
         self.assertEqual(self.send("11 am"), APPOINTMENT_NAME_REPLY)
-        self.assertEqual(self.send("Asael Ponce Silva"), APPOINTMENT_REASON_REPLY)
+        self.assertTrue(self.send("Asael Ponce Silva").endswith(APPOINTMENT_REASON_REPLY))
         self.assertIn("Información", self.send("¿Cuánto cuesta la consulta?"))
         self.service = self.new_service()
         self.assertIn("Información", self.send("¿Dónde está el consultorio?"))
@@ -208,7 +208,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("¿Cuánto cuesta una consulta a las 11?")
         self.service = self.new_service()
         self.assertEqual(self.send("agéndame a las 11 am"), APPOINTMENT_NAME_REPLY)
-        self.assertEqual(self.send("Asael Ponce Silva"), APPOINTMENT_REASON_REPLY)
+        self.assertTrue(self.send("Asael Ponce Silva").endswith(APPOINTMENT_REASON_REPLY))
         self.assertIn("confirmada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
 

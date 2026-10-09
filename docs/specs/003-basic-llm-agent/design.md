@@ -145,9 +145,11 @@ controlada; nunca serializa la llamada como texto para el paciente.
 Si la generacion falla, `main.py` registra el tipo de error y el codigo HTTP seguro
 cuando existe en la tabla de fallos del LLM, y envia la respuesta controlada. Si
 WhatsApp esta disponible, la respuesta controlada se registra como `sent`; si tambien
-falla, queda como `failed`. Como las respuestas fallidas no forman parte del contexto, el
-siguiente webhook puede reintentar la generacion sin presentar una respuesta no
-entregada al modelo.
+falla, queda como `failed`. Las respuestas fallidas no forman parte del contexto.
+El incremento 018 conserva el cuerpo final y los eventos antes de enviar: un
+reintento vigente recupera esos datos sin repetir generacion o herramientas.
+Los turnos obsoletos e inciertos se reconocen sin reenviar al paciente ni reabrir
+una gestion.
 
 Para el remitente autorizado por el modo debug, la respuesta controlada puede incluir el
 diagnostico sanitizado definido en la especificacion 015. La logica no cambia el registro

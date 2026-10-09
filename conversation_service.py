@@ -45,12 +45,19 @@ from appointment_availability import (
 from appointment_reason_evaluation import (
     AppointmentReasonCategory,
     AppointmentReasonEvaluation,
+    AppointmentReasonEvaluationSource,
     AppointmentReasonEvaluator,
     AppointmentReasonQuality,
+    MIN_REASON_EVALUATION_CONFIDENCE,
+    apply_minimum_reason_policy,
     failed_appointment_reason_evaluation,
     local_appointment_reason_evaluation,
 )
-from appointment_reason_validation import validate_appointment_reason
+from appointment_reason_validation import (
+    AppointmentReasonValidationCode,
+    AppointmentReasonValidationResult,
+    validate_appointment_reason,
+)
 from appointment_scheduling import (
     LAST_APPOINTMENT_REASON_EVALUATION_KEY,
     PENDING_APPOINTMENT_REASON_KEY,
@@ -79,6 +86,11 @@ from llm_provider import (
 )
 from notification_domain import AppointmentNotificationEventSink
 from persistence import SQLiteDatabase
+from patient_name_validation import (
+    PatientNameValidationCode,
+    classify_patient_name_confirmation,
+    validate_patient_name,
+)
 from repositories import (
     ConversationRepository,
     LLMFailureRecord,
@@ -108,10 +120,13 @@ APPOINTMENT_NAME_CLARIFICATION_REPLY = (
 )
 APPOINTMENT_REASON_REPLY = "Gracias. Ahora, ¿cuál es el motivo de la consulta?"
 APPOINTMENT_REASON_CLARIFICATION_REPLY = (
-    "No pude identificar el motivo de la consulta. "
-    "¿Qué problema de la vista deseas revisar? Puedes escribirlo con tus palabras, "
-    "por ejemplo: visión borrosa, dolor ocular, ojo rojo, seguimiento de córnea "
-    "o revisión general."
+    "No logré leer el motivo. ¿Qué deseas revisar en la consulta? "
+    "Puedes describirlo con tus palabras o indicar ‘revisión general’."
+)
+APPOINTMENT_REASON_EVALUATION_ERROR_REPLY = (
+    "Tuve un problema técnico al evaluar el motivo; no significa que lo hayas "
+    "explicado mal. El horario sigue pendiente. Vuelve a enviar el mismo motivo "
+    "en unos momentos para que lo intente de nuevo."
 )
 APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY = (
     "El motivo parece no estar relacionado con una consulta de la vista. "
@@ -135,6 +150,8 @@ SYSTEM_PROMPT = "\n".join(
         "No afirmar que realizó acciones externas.",
         "No proporcionar diagnósticos médicos.",
         "Pedir aclaración cuando falte información.",
+        "Conservar todas las partes del nombre proporcionado por el paciente. No corregir, "
+        "abreviar ni omitir apellidos; el backend controla su validacion y confirmacion.",
         "Prioriza la intención más reciente del paciente. Si abandona o cambia una "
         "solicitud pendiente, no insistas en completar el flujo anterior.",
         "Las preguntas informativas y saludos pueden pausar una gestión. Usa el estado "
@@ -427,6 +444,19 @@ class ConversationService:
             workflow.reason.name_message_id,
         }:
             return None
+        if workflow.reason is not None:
+            reason = workflow.reason
+            if (
+                reason.name_clarification_message_id is not None
+                and context.incoming_message_id <= reason.name_clarification_message_id
+            ):
+                return None
+            if reason.name_candidate is not None and (
+                classify_patient_name_confirmation(context.incoming_text)
+                is not ConfirmationDecision.UNKNOWN
+                or not context.incoming_text.strip(" ¿?.!\t\n")
+            ):
+                return None
 
         expected_reply = self._is_expected_pending_reply(context, workflow)
         interruption = classify_pending_interruption(
@@ -740,7 +770,11 @@ class ConversationService:
         return (
             f"Continuamos con tu solicitud para el {start:%d/%m/%Y} "
             f"a las {format_patient_time(start)}. "
-            + (APPOINTMENT_NAME_REPLY if needs_name else APPOINTMENT_REASON_REPLY)
+            + (
+                self._name_candidate_prompt(reason.name_candidate)
+                if needs_name and reason.name_candidate is not None
+                else APPOINTMENT_NAME_REPLY if needs_name else APPOINTMENT_REASON_REPLY
+            )
         )
 
     def _is_expected_pending_reply(
@@ -1498,17 +1532,53 @@ class ConversationService:
                 return APPOINTMENT_REASON_REPLY
             return APPOINTMENT_NAME_REPLY
 
-        if pending_reason.name_message_id == context.incoming_message_id:
-            return APPOINTMENT_REASON_REPLY
+        if (
+            pending_reason.name_message_id == context.incoming_message_id
+            or (
+                pending_reason.name_clarification_message_id is not None
+                and context.incoming_message_id <= pending_reason.name_clarification_message_id
+            )
+        ):
+            if pending_reason.name_required is False:
+                return self._name_received_reply(context.patient_id)
+            if pending_reason.name_candidate is not None:
+                return self._name_candidate_prompt(pending_reason.name_candidate)
+            return APPOINTMENT_NAME_CLARIFICATION_REPLY
 
         name_required = pending_reason.name_required
         if name_required is None:
             name_required = self._load_patient_name(context.patient_id) is None
 
         if name_required:
-            normalized_name = _normalize_patient_name(context.incoming_text)
-            if normalized_name is None:
+            candidate = pending_reason.name_candidate
+            decision = classify_patient_name_confirmation(context.incoming_text)
+            if candidate is not None and decision is ConfirmationDecision.REJECTED:
+                self._save_pending_appointment_reason(
+                    context.conversation_id,
+                    pending_reason.without_name_candidate(context.incoming_message_id),
+                )
+                return f"Recibí ‘{candidate}’. Para corregirlo, escribe tu nombre completo de nuevo."
+            validation = validate_patient_name(context.incoming_text)
+            if candidate is not None and decision is ConfirmationDecision.CONFIRMED:
+                normalized_name = candidate
+            elif validation.code is PatientNameValidationCode.INVALID:
+                self._save_pending_appointment_reason(
+                    context.conversation_id,
+                    pending_reason.with_name_candidate(candidate, context.incoming_message_id)
+                    if candidate is not None
+                    else pending_reason.without_name_candidate(context.incoming_message_id),
+                )
+                if candidate is not None:
+                    return self._name_candidate_prompt(candidate)
                 return APPOINTMENT_NAME_CLARIFICATION_REPLY
+            elif validation.code is PatientNameValidationCode.NEEDS_CONFIRMATION:
+                self._save_pending_appointment_reason(
+                    context.conversation_id,
+                    pending_reason.with_name_candidate(validation.normalized_text, context.incoming_message_id),
+                )
+                return self._name_candidate_prompt(validation.normalized_text)
+            else:
+                normalized_name = validation.normalized_text
             named_pending_reason = pending_reason.with_name_message(
                 context.incoming_message_id
             )
@@ -1517,7 +1587,7 @@ class ConversationService:
                 normalized_name,
                 named_pending_reason,
             )
-            return APPOINTMENT_REASON_REPLY
+            return self._name_received_reply(context.patient_id)
 
         evaluated_at = utc_now()
         validation = validate_appointment_reason(context.incoming_text)
@@ -1549,18 +1619,26 @@ class ConversationService:
                     evaluated_at=evaluated_at,
                 )
 
+        evaluation = apply_minimum_reason_policy(validation, evaluation)
         evaluated_pending_reason = pending_reason.with_evaluation(evaluation)
         self._save_pending_appointment_reason(
             context.conversation_id,
             evaluated_pending_reason,
         )
         if (
-            evaluation.quality is AppointmentReasonQuality.OUT_OF_SCOPE
-            or evaluation.category is AppointmentReasonCategory.OUT_OF_SCOPE
+            (
+                evaluation.quality is AppointmentReasonQuality.OUT_OF_SCOPE
+                or evaluation.category is AppointmentReasonCategory.OUT_OF_SCOPE
+            )
+            and evaluation.confidence >= MIN_REASON_EVALUATION_CONFIDENCE
         ):
             return APPOINTMENT_REASON_OUT_OF_SCOPE_REPLY
         if not evaluation.accepted:
-            return APPOINTMENT_REASON_CLARIFICATION_REPLY
+            return self._appointment_reason_clarification_reply(
+                validation,
+                evaluation,
+                attempt_count=evaluated_pending_reason.attempt_count,
+            )
 
         self._save_last_appointment_reason_evaluation(
             context.conversation_id,
@@ -1582,6 +1660,58 @@ class ConversationService:
         if result.error is not None:
             return result.error.message
         return CONTROLLED_FALLBACK_REPLY
+
+    @staticmethod
+    def _appointment_reason_clarification_reply(
+        validation: AppointmentReasonValidationResult,
+        evaluation: AppointmentReasonEvaluation,
+        *,
+        attempt_count: int,
+    ) -> str:
+        if evaluation.source is AppointmentReasonEvaluationSource.ERROR:
+            return APPOINTMENT_REASON_EVALUATION_ERROR_REPLY
+
+        quote = validation.normalized_text
+        if len(quote) > 180:
+            quote = quote[:177] + "…"
+        uncertain = (
+            evaluation.source is AppointmentReasonEvaluationSource.LLM
+            and evaluation.confidence < MIN_REASON_EVALUATION_CONFIDENCE
+        )
+        if uncertain:
+            acknowledgement = f"No pude confirmar la evaluación de ‘{quote}’. "
+        elif validation.code is AppointmentReasonValidationCode.AMBIGUOUS:
+            acknowledgement = (
+                f"Recibí ‘{quote}’. Entiendo que te refieres a una consulta anterior. "
+            )
+        elif (
+            validation.accepted
+            or validation.code is AppointmentReasonValidationCode.TOO_SHORT
+        ):
+            acknowledgement = f"Recibí ‘{quote}’. "
+        else:
+            acknowledgement = ""
+
+        if attempt_count >= 3:
+            return (
+                acknowledgement
+                + "No necesitas un diagnóstico ni detalles clínicos para agendar. "
+                "¿Se trata de una revisión, un seguimiento o una molestia ocular? "
+                "Puedes responder ‘revisión general’, ‘seguimiento’ o describir "
+                "la molestia con tus palabras."
+            )
+        if attempt_count >= 2 or uncertain:
+            return (
+                acknowledgement
+                + "¿Quieres una revisión general, un seguimiento o consultar por una "
+                "molestia en los ojos? Basta una descripción general."
+            )
+        if not acknowledgement:
+            return APPOINTMENT_REASON_CLARIFICATION_REPLY
+        return (
+            acknowledgement
+            + "¿Qué deseas revisar en esta consulta? Basta una descripción general."
+        )
 
     @staticmethod
     def _create_appointment_reply(result: ToolResult) -> str:
@@ -1692,6 +1822,26 @@ class ConversationService:
             return None
         normalized_name = " ".join(patient.name.split())
         return normalized_name or None
+
+    @staticmethod
+    def _name_candidate_prompt(name: str) -> str:
+        first_part = name.split()[0]
+        question = (
+            "¿Me confirmas tus apellidos?"
+            if len(name.split()) > 1
+            and validate_patient_name(first_part).code is PatientNameValidationCode.ACCEPTED
+            else "¿Me confirmas tu nombre completo?"
+        )
+        return (
+            f"{question} Recibí ‘{name}’. Si está correcto, responde ‘sí’; "
+            "si hay un error, escribe tu nombre completo de nuevo."
+        )
+
+    def _name_received_reply(self, patient_id: int) -> str:
+        name = self._load_patient_name(patient_id)
+        if name is None:
+            return APPOINTMENT_NAME_CLARIFICATION_REPLY
+        return f"Guardé tu nombre completo como ‘{name}’. {APPOINTMENT_REASON_REPLY}"
 
     def _start_pending_appointment_reason(
         self,
@@ -1873,7 +2023,17 @@ class ConversationService:
         if history_limit <= 0:
             raise ValueError("max_history_messages debe ser positivo")
 
-        history = self.get_history(context.conversation_id)
+        history = [
+            message for message in self.get_history(context.conversation_id)
+            if (
+                message.direction == "incoming"
+                and message.id <= context.incoming_message_id
+            ) or (
+                message.direction == "outgoing"
+                and message.reply_to_message_id is not None
+                and message.reply_to_message_id < context.incoming_message_id
+            )
+        ]
         recent_history = history[-history_limit:]
         messages = [
             ChatMessage(
@@ -2197,14 +2357,3 @@ def _is_internal_id_header(header: str) -> bool:
         "identificador",
         "identificador interno",
     }
-
-
-def _normalize_patient_name(value: str) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = " ".join(value.split())
-    if not 2 <= len(normalized) <= 120:
-        return None
-    if not re.search(r"[^\W\d_]", normalized, flags=re.UNICODE):
-        return None
-    return normalized

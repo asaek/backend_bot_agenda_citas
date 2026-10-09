@@ -41,6 +41,17 @@ ejecuta mediante `TestClient` sin consumir APIs.
 Durante el desarrollo local, ngrok proporcionara la URL publica que Meta
 necesita para comunicarse con FastAPI.
 
+## Espejo de ejecucion en Raspberry Pi
+
+`specs/017-local-to-raspberry/` define el despliegue operativo del MVP. La skill
+sincroniza proyecto y `.env` completo desde el checkout local, comprueba igualdad
+en memoria y modo `600`, y recarga el backend verificado desde la raiz del mirror.
+La copia masiva trata el codigo; un paso dedicado transfiere `.env` sobre SSH con
+reemplazo completo y permisos restringidos. Los secretos quedan fuera de Git y
+del reporte. La configuracion efectiva del proceso debe coincidir con la copiada.
+Las verificaciones incluyen rutas locales/publicas y autenticacion de Meta de
+solo lectura, para distinguir un webhook saludable de una credencial de envio valida.
+
 ## Arquitectura objetivo
 
 ```text
@@ -89,6 +100,12 @@ parte de la arquitectura de produccion.
 
 Define los endpoints HTTP y transforma las solicitudes en llamadas al codigo del
 backend. Extrae mensajes de texto y coordina el `ConversationService`.
+`reply_delivery.patient_turn()` serializa recepcion, generacion, envio y
+notificaciones del mismo paciente dentro del proceso Uvicorn. El bloqueo es
+compartido por servicios creados en solicitudes distintas, permite avanzar a
+pacientes distintos en paralelo y se libera tambien ante errores o cancelacion.
+`ReplyDeliveryService` reclama el turno, decide si esta obsoleto y recupera una
+respuesta ya preparada antes de volver a generar.
 
 ### Conversation Service
 
@@ -98,7 +115,9 @@ conversacion y el numero de WhatsApp resueltos por el backend. Conserva el
 historial y construye el contexto para el LLM. El `PatientScope` no se obtiene
 de los argumentos del LLM.
 El contexto comienza con las reglas del asistente y usa los mensajes mas
-recientes persistidos. Las reglas indican que los detalles de una cita no deben
+recientes persistidos hasta el turno actual. No incluye mensajes o respuestas
+de turnos posteriores al mensaje que se procesa; el filtro temporal se aplica
+antes del limite de historial. Las reglas indican que los detalles de una cita no deben
 mostrar su ID interno al paciente, aunque el agente conserva ese valor para
 operaciones posteriores. Tambien solicita la respuesta al proveedor LLM, convierte
 las tablas Markdown accidentales en listas compatibles con WhatsApp y conserva el
@@ -170,6 +189,14 @@ permitido recibe el nombre seguro del proveedor, el tipo de error y el codigo HT
 codigo publico de agenda, junto con la respuesta. Sin ambas condiciones, todos reciben la
 respuesta controlada/publica normal. El modo no expone mensajes de excepcion, prompts,
 cuerpos ni encabezados HTTP.
+`reply_outbox` conserva una respuesta unica por mensaje entrante y sus eventos
+de cita, preparados antes del envio. Los estados de procesamiento y transporte
+se separan de los estados historicos de `messages`. `ReplyDeliveryRepository`
+encapsula la reclamacion y las transiciones, junto con `reply_delivery_attempts`,
+que conserva inicio, final, estado e ID del proveedor por intento. Los reintentos
+con turnos posteriores ya procesados quedan en `superseded`; los mensajes
+posteriores solamente recibidos no vuelven obsoleto al anterior. Los resultados
+inciertos quedan en `uncertain` y no autorizan otra generacion o envio.
 La tabla `appointments` conserva el ID interno de la cita, el calendario y evento
 de Google, el paciente, el estado, el intervalo, el motivo y las fechas de
 sincronizacion. `PersistentCalendarProvider` traduce el ID interno expuesto a las
@@ -237,12 +264,17 @@ ToolExecutor
                                       -> WhatsAppClient -> Doctores configurados
 ```
 
-`main.py` recolecta los eventos durante `ConversationService.build_reply()`. Despues
+`main.py` recolecta los eventos durante `ConversationService.build_reply()` y
+guarda su snapshot junto con la respuesta preparada. Despues
 de enviar y persistir la respuesta del paciente, compone el resumen y llama a
 `DoctorNotificationDeliveryService` por cada evento. La entrega al doctor se
 encapsula en un limite de errores: una falla de configuracion, composicion,
 persistencia o WhatsApp se registra sin propagarse al paciente; el servicio de
 entrega mantiene ademas el aislamiento entre destinatarios.
+Un reintento de envio carga el snapshot, sin repetir una mutacion para reconstruir
+el evento. Si se interrumpe despues de persistir el envio al paciente pero antes
+de finalizar las notificaciones, el duplicado puede completar estas sin volver a
+enviar al paciente. El incremento se define en `specs/018-safe-webhook-retries/`.
 
 ### Confirmacion de cambios de citas
 
@@ -301,12 +333,34 @@ siguen descartando el snapshot anterior.
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
 `create_appointment` antes de `ToolExecutor`. `ConversationService` guarda el
 horario en `conversations.context_json`, solicita el nombre en cada cita nueva y lo
-actualiza en `patients.name`, aunque ya existiera, y despues pregunta el motivo. El
+valida con `patient_name_validation.py`. Actualiza `patients.name` solo al aceptarlo,
+aunque ya existiera, muestra el nombre completo guardado y despues pregunta el motivo. El
 valor que el LLM haya propuesto se descarta. El
 mensaje que entrega el nombre queda marcado en el estado pendiente para que un
 reintento no se use como motivo. El siguiente mensaje de motivo se normaliza solo en
 espacios y se usa como `reason` para ejecutar la cita; referencias vagas como `Lo de
 siempre` se conservan pendientes y solicitan aclaracion.
+
+La politica minima de ADR 0048 acepta una descripcion oftalmologica general,
+sin exigir diagnostico, intensidad ni duracion. `apply_minimum_reason_policy()`
+combina un respaldo positivo de expresiones completas con categorias oftalmologicas
+reconocidas con confianza por el evaluador. Si el respaldo local resuelve una
+evaluacion insuficiente o fallida, registra `rules` sin atribuir su confianza al LLM.
+Sin respaldo suficiente, distingue fallo tecnico, incertidumbre y falta de motivo.
+Las aclaraciones reconocen el texto/referencia recibidos y `attempt_count` cambia la
+pregunta desde el segundo intento; no se añade una migracion de persistencia.
+
+El validador del nombre distingue entradas invalidas de partes que necesitan
+confirmacion; no usa un diccionario ni modifica la escritura. Las señales de texto
+de prueba se aplican por palabra latina y no se extrapolan a otros alfabetos.
+`PendingAppointmentReason` conserva `name_candidate`, `name_required=true` y el
+ultimo `name_clarification_message_id` en el mismo JSON. Una afirmacion explicita
+acepta ese candidato completo; un nuevo nombre se valida de nuevo y una negativa
+pide reescribirlo sin abandonar la reserva. La captura aceptada y el cambio de paso
+se guardan en una transaccion. Los reintentos de mensajes de aclaracion anteriores
+no reemplazan el candidato actual ni se usan como motivo. Una pausa conserva el
+candidato y retomarla vuelve a mostrar la aclaracion; un `Si` aislado no lo acepta
+mientras la gestion esta pausada.
 
 La primera pregunta no modifica la agenda ni genera eventos. Una creacion exitosa
 posterior conserva el mismo flujo de respuesta, persistencia y notificacion al

@@ -65,6 +65,32 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS messages_by_conversation
 ON messages(conversation_id, id);
 
+CREATE TABLE IF NOT EXISTS reply_outbox (
+    incoming_message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (
+        status IN ('processing', 'ready', 'sending', 'sent', 'failed', 'superseded', 'uncertain')
+    ),
+    body TEXT,
+    notification_events_json TEXT NOT NULL DEFAULT '[]',
+    notifications_completed INTEGER NOT NULL DEFAULT 0 CHECK (notifications_completed IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reply_delivery_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    incoming_message_id INTEGER NOT NULL REFERENCES reply_outbox(incoming_message_id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('sending', 'sent', 'failed', 'uncertain')),
+    provider_message_id TEXT,
+    error_type TEXT,
+    http_status_code INTEGER CHECK (http_status_code BETWEEN 100 AND 599),
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS reply_attempts_by_message
+ON reply_delivery_attempts(incoming_message_id, id);
+
 CREATE TABLE IF NOT EXISTS llm_failures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

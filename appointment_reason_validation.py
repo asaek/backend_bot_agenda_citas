@@ -109,15 +109,14 @@ def _looks_ambiguous(value: str) -> bool:
         for character in normalized
         if unicodedata.category(character) != "Mn"
     )
-    return any(
-        re.search(pattern, normalized)
-        for pattern in (
-            r"\blo de siempre\b",
-            r"\blo mismo de siempre\b",
-            r"\bcomo siempre\b",
-            r"\bla consulta de siempre\b",
-        )
-    )
+    # Una referencia sola no identifica la visita; acompañar un motivo concreto
+    # con "como siempre" no lo vuelve incomprensible.
+    return re.fullmatch(
+        r"(?:(?:es|por|para|quiero|necesito|vengo|seria|solo) )*"
+        r"(?:lo (?:mismo )?de siempre|como siempre|la consulta de siempre)"
+        r"(?:[,;:]? (?:otra vez|de nuevo|por favor|gracias))*",
+        normalized.strip(" .!¿?¡"),
+    ) is not None
 
 
 def _is_vowel(character: str) -> bool:

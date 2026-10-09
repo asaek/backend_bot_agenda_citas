@@ -53,3 +53,7 @@ indique cual decision anterior queda obsoleta.
 - [0042 - Mostrar disponibilidad al solicitar cambiar la hora](./0042-show-availability-before-reschedule-time.md)
 - [0043 - Seleccion del proveedor OpenAI-compatible por entorno](./0043-openai-compatible-provider-selection.md)
 - [0044 - Pausa persistente y seleccion contextual de horarios](./0044-persistent-conversation-pause.md)
+- [0045 - Aclarar el nombre sospechoso sin corregirlo](./0045-confirm-suspicious-patient-name.md)
+- [0046 - Copiar .env completo en local to raspberry](./0046-full-env-in-local-to-raspberry.md)
+- [0047 - Preparar respuestas antes de reintentar WhatsApp](./0047-persist-replies-before-whatsapp-retries.md)
+- [0048 - Motivos generales comprensibles y aclaraciones diferenciadas](./0048-understandable-general-appointment-reasons.md)

@@ -44,6 +44,10 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Parsear mensajes de texto y enviar una respuesta generada por el LLM.
 - Identificar pacientes de prueba por su numero de WhatsApp.
 - Guardar pacientes, conversaciones y mensajes en SQLite.
+- Preparar respuestas y eventos de cita antes del envio, reutilizarlos en
+  reintentos vigentes y descartar turnos obsoletos sin reabrir gestiones.
+- Serializar solicitudes del mismo paciente en el runtime de un proceso y
+  auditar cada intento de envio, incluyendo resultados inciertos.
 - Mantener una conversacion activa entre varias solicitudes y reinicios.
 - Construir el `PatientScope` del backend con paciente, conversacion y numero de
   WhatsApp antes de cualquier operacion de agenda.
@@ -54,8 +58,9 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Solicitar, validar y evaluar estructuradamente el motivo expresado por el paciente
   antes de crear una cita; conservar el horario y metadata mientras se espera ese
   dato.
-- Solicitar y persistir el nombre del paciente cuando aun no este registrado antes
-  de continuar con el motivo.
+- Solicitar y persistir el nombre completo del paciente en cada cita nueva antes
+  de continuar con el motivo; citar y conservar el texto pendiente ante una parte
+  sospechosa, permitiendo su confirmacion o correccion sin recortar apellidos.
 - Separar señales operativas de prioridad de cualquier diagnostico y conservarlas sin
   cambiar el flujo de agendamiento.
 - Detectar ojos rojos como señal operativa y llevarla a la notificacion mediante el
@@ -87,11 +92,29 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Habilitar un modo debug apagado por defecto que muestre diagnosticos seguros solo a
   remitentes de WhatsApp explicitamente autorizados.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
+- Mantener el mirror de Raspberry Pi con los archivos y el `.env` completo locales
+  al solicitar `local to raspberry`; comprobar copia, permisos, configuracion
+  efectiva, reinicio, rutas y autenticacion de WhatsApp sin mostrar secretos.
 
 ## Estrategia de implementacion por cortes
 
 El proyecto se construira y verificara una seccion a la vez. No se comenzara un
 corte nuevo hasta cerrar el corte activo.
+
+### Incremento: reintentos seguros del webhook
+
+`specs/018-safe-webhook-retries/` separa la generacion de una respuesta del envio.
+Una bandeja SQLite conserva el cuerpo y los eventos de cita; los reintentos
+obsoletos se descartan y los vigentes recuperan lo preparado sin repetir el LLM
+ni las herramientas. El runtime de un proceso serializa turnos del paciente y
+conserva auditoria por intento. Una entrega incierta no se reenvia automaticamente.
+
+### Flujo operativo: espejo de proyecto y configuracion
+
+`specs/017-local-to-raspberry/` define que la solicitud de despliegue incluye el
+`.env` completo por defecto. La copia se verifica byte por byte, con modo `600`,
+y precede al reinicio y a las comprobaciones del runtime. Los alcances explicitos
+de una variable, exclusion de `.env` o sincronizacion sin reinicio se respetan.
 
 ### Corte anterior: webhook y respuesta fija de WhatsApp
 
@@ -232,12 +255,22 @@ mutacion.
 La funcionalidad definida en `specs/013-appointment-reason-collection/` evita que el
 LLM complete un motivo que el paciente de prueba no ha expresado. Antes de crear una
 cita, el backend siempre solicita el nombre completo, incluso si ya estaba registrado,
-lo actualiza en `patients.name` y despues pregunta el motivo. El horario y el estado
+lo valida y muestra integro al guardarlo en `patients.name`; despues pregunta el motivo.
+Si hay señales de texto de prueba, conserva el nombre completo pendiente y solicita
+confirmacion de su escritura o un nombre completo corregido. Un apellido inusual puede
+confirmarse sin cambios y el nombre anterior no se reemplaza mientras hay una duda.
+El horario y el estado
 pendiente se conservan en el contexto de la conversacion. El validador local rechaza entradas
 evidentemente ilegibles sin perder ese estado. Un evaluador estructurado clasifica la
 calidad, categoria y señales permitidas; el backend conserva los intentos y la fecha,
 pero mantiene el texto del paciente como unico motivo. Solo una evaluacion aceptable
 completa la solicitud y permite crear la cita y emitir las notificaciones al doctor.
+Una descripcion oftalmologica general comprensible es suficiente: no se exige
+diagnostico, intensidad ni duracion. Un respaldo local positivo puede conservar
+el avance si el evaluador falla o pide mas detalle para esas expresiones.
+Cuando no basta ese respaldo, las respuestas distinguen fallo tecnico, incertidumbre
+y motivo insuficiente. Las aclaraciones reconocen lo recibido y usan el contador
+persistido para preguntas mas concretas desde el segundo intento.
 
 Las referencias vagas como `Lo de siempre` piden aclaracion. Las señales de prioridad
 se limitan a codigos evidenciados por el texto y se convierten en descripciones

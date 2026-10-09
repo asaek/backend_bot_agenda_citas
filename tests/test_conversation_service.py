@@ -147,6 +147,22 @@ class ConversationContextTests(unittest.TestCase):
             prompt,
         )
 
+    def test_chat_history_excludes_turns_after_the_message_being_processed(self) -> None:
+        old = self.service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.old-context",
+            message_type="text", text="Primer mensaje",
+        ))
+        later = self.service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.later-context",
+            message_type="text", text="Mensaje posterior que no debe aparecer",
+        ))
+        self.service.record_reply_sent(later, "Respuesta posterior", "wamid.later-reply")
+        history = self.service.build_chat_messages(old)
+
+        self.assertEqual([(item.role, item.content) for item in history[1:]], [
+            ("user", "Primer mensaje"),
+        ])
+
     def test_date_only_appointment_request_returns_available_slots_before_reason(self) -> None:
         provider = FakeCalendarProvider()
         llm_provider = FakeLLMProvider(reply="El LLM no deberia responder este turno")
@@ -564,7 +580,8 @@ class ConversationContextTests(unittest.TestCase):
 
         self.assertIn("horarios disponibles", date_reply.lower())
         self.assertEqual(choice_reply, APPOINTMENT_NAME_REPLY)
-        self.assertEqual(name_reply, APPOINTMENT_REASON_REPLY)
+        self.assertTrue(name_reply.endswith(APPOINTMENT_REASON_REPLY))
+        self.assertIn("Ana Prueba", name_reply)
         self.assertIn("confirmada", reason_reply.lower())
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(len(provider.appointments), 1)
@@ -1261,7 +1278,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         self.assertIn("nombre", first_reply.lower())
         self.assertIn("motivo", name_reply.lower())
-        self.assertIn("no pude identificar", invalid_reply.lower())
+        self.assertIn("no logré leer", invalid_reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
         self.assertEqual(events, [])
         self.assertEqual(self.service.llm_provider.call_count, 1)
@@ -1319,7 +1336,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("no pude identificar", reply.lower())
+        self.assertIn("no logré leer", reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
 
     def test_valid_blurred_reason_creates_appointment_at_one_pm(self) -> None:
@@ -1499,7 +1516,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("no pude identificar", reply.lower())
+        self.assertIn("consulta anterior", reply.lower())
         self.assertEqual(self.provider.appointments, (self.appointment,))
 
     def test_valid_reason_after_invalid_reason_creates_only_one_appointment(self) -> None:

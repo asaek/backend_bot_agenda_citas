@@ -17,6 +17,10 @@ La señal `eye_redness` y el filtrado de señales libres del resumen se verifica
 `docs/verification/2026-10-05-red-eye-priority-signals.md`.
 Los abandonos y cambios de intencion mientras se espera el nombre o motivo se definen en
 `specs/016-conversation-intent-routing/`.
+La aclaracion conservadora del nombre esta verificada en Raspberry Pi en
+`docs/verification/2026-10-08-patient-name-clarification.md`.
+La aceptacion de motivos generales y las aclaraciones diferenciadas estan verificadas
+en `docs/verification/2026-10-09-general-appointment-reasons.md`.
 
 ## Objetivo
 
@@ -30,6 +34,8 @@ La funcionalidad cubre:
 - Solicitud del motivo antes de ejecutar `create_appointment`.
 - Solicitud y actualizacion del nombre del paciente antes de solicitar el motivo en
   cada cita nueva.
+- Aclaracion de partes sospechosas del nombre, conservando el texto completo y el
+  horario hasta recibir confirmacion o un nombre completo corregido.
 - Conservacion del horario solicitado mientras se espera el siguiente mensaje.
 - Uso del texto del paciente como motivo de la cita.
 - Validacion local de calidad minima antes de usar el texto como motivo.
@@ -40,6 +46,9 @@ La funcionalidad cubre:
 - Deteccion de ojos rojos como señal de prioridad e inclusion en notificaciones al doctor.
 - Solicitud de aclaracion para referencias vagas como `Lo de siempre`.
 - Persistencia de intentos, resultado, categoria, señales y fecha de evaluacion.
+- Aceptacion de motivos oftalmologicos generales comprensibles sin exigir detalle clinico.
+- Respuestas distintas para motivo insuficiente, baja confianza y fallo tecnico.
+- Aclaraciones progresivas que reconocen la referencia o el texto recibido.
 - Persistencia del estado pendiente en `conversations.context_json`.
 - Expiracion de la solicitud pendiente despues de 10 minutos.
 - Eventos y notificaciones solamente despues de crear la cita correctamente.
@@ -75,11 +84,33 @@ el backend debe solicitar el nombre completo antes del motivo. El nombre normali
 debe guardarse o actualizarse en el registro del paciente y la solicitud pendiente
 debe conservarse hasta recibir ambos datos. Un nombre no textual, vacio o fuera del
 limite permitido debe pedir una aclaracion y no debe crear la cita.
+La normalizacion solo ajusta espacios; no corrige letras, acentos, mayusculas ni
+elimina partes. La respuesta de aceptacion muestra el nombre completo guardado.
+
+### RF-1313 - Parte sospechosa del nombre
+
+Si una palabra del nombre contiene señales claras de texto de prueba, el backend
+debe mantener la captura del nombre activa y citar todo el nombre recibido al pedir
+aclaracion, por ejemplo: `¿Me confirmas tus apellidos? Recibí ‘Asael Ponce jhbashkda’.`
+La pregunta explica como confirmar la escritura o enviar el nombre completo corregido.
+No guarda un nombre parcial ni reemplaza `patients.name` antes de aceptar la respuesta.
+
+La sospecha no demuestra que un apellido sea falso. No se exige aparecer en un
+diccionario y no se aplican reglas de vocales latinas a otros alfabetos. El paciente
+puede confirmar explicitamente el candidato completo. Repetir un nombre sospechoso,
+incluso con otro mensaje, vuelve a pedir aclaracion; una negativa solicita el nombre
+completo corregido sin abandonar la reserva. Una respuesta invalida conserva el
+candidato. Un segundo nombre sospechoso se evalua como nombre, no como motivo.
+La aclaracion sobrevive un reinicio y una pausa; un `Si` mientras esta pausada no
+acepta el nombre hasta retomar la gestion.
 
 ### RF-1312 - Reintento de entrega del nombre
 
 Si se reintenta el mismo mensaje que entrego el nombre, el backend debe devolver la
 pregunta por el motivo sin volver a tratar ese texto como motivo ni crear una cita.
+Los reintentos de mensajes anteriores de aclaracion tampoco se convierten en motivo
+ni reemplazan el candidato mas reciente. El mensaje que confirma un candidato
+cuenta como entrega del nombre y conserva la misma proteccion.
 
 ### RF-1307 - Motivo evidentemente ilegible
 
@@ -93,9 +124,14 @@ el motivo con sus propias palabras.
 Cuando el texto supera las reglas locales, el evaluador puede solicitar al LLM una
 respuesta JSON con `quality`, `category`, `priority_signals`, `priority_signal_evidence`
 y `confidence`. El
-backend solo acepta `valid` con una categoria soportada distinta de `unknown` o
-`out_of_scope` y una confianza minima de `0.75`. Una respuesta invalida, ausente o
-con baja confianza se trata como `needs_clarification`.
+backend acepta `valid` con una categoria soportada distinta de `unknown` o
+`out_of_scope` y una confianza minima de `0.75`. Una categoria oftalmologica
+`visual_symptom`, `follow_up`, `routine_exam` o `procedure` con esa confianza
+identifica un motivo suficiente aun si el modelo responde `needs_clarification`.
+Un respaldo local positivo para expresiones completas de molestias/problemas
+oculares y revisiones generales puede aceptar el texto cuando el modelo discrepa,
+tiene baja confianza o falla. Fuera de ese respaldo, baja confianza y errores
+conservan la solicitud pendiente, pero reciben respuestas diferenciadas.
 
 El LLM no puede devolver el motivo de la cita, diagnosticar ni crear la cita. Las
 señales se limitan a una lista de codigos soportados y solo se conservan cuando el
@@ -112,6 +148,42 @@ Mientras la solicitud este pendiente, el backend conserva el numero de intentos 
 ultima evaluacion con su resultado, categoria, señales, confianza y fecha. Cuando la
 cita se completa, conserva esa evaluacion bajo `last_appointment_reason_evaluation`
 y elimina solamente el estado pendiente.
+
+### RF-1314 - Motivo general suficiente
+
+Una descripcion comprensible de una consulta oftalmologica basta para agendar.
+`Tengo problemas en el ojo izquierdo`, `Tengo molestias en la vista` y
+`Revision general` no deben rechazarse por no especificar diagnostico, sintoma,
+intensidad ni duracion. Acompañar un motivo con `como siempre` no lo convierte
+en una referencia ambigua sin contenido. El respaldo local es positivo y acotado: no reemplaza la
+evaluacion semantica del resto de las expresiones ni acepta negaciones, motivos
+ajenos o instrucciones mezcladas por contener la palabra `ojo`.
+El motivo persistido conserva el texto del paciente, normalizando solo espacios.
+
+### RF-1315 - Incertidumbre y fallo tecnico
+
+Un fallo de llamada o una respuesta malformada se registra como fallo tecnico.
+Si no existe respaldo local suficiente, se informa del problema tecnico, se
+conserva el horario pendiente y se permite reenviar el mismo texto sin exigir
+reformularlo. No se atribuye el error a la claridad del paciente.
+Una evaluacion de baja confianza sin respaldo suficiente expresa incertidumbre
+de la evaluacion y pregunta si la consulta es una molestia, revision o seguimiento.
+No se afirma que el motivo este fuera de alcance cuando esa clasificacion tiene
+baja confianza. Ninguno de esos rechazos crea una cita ni una notificacion.
+
+### RF-1316 - Aclaracion progresiva
+
+Un motivo legible insuficiente recibe una pregunta que cita el texto recibido;
+una referencia como `Lo de siempre` se reconoce como referencia a una consulta
+anterior. Sus variantes introductorias o de cortesia (`Es por lo de siempre`,
+`Lo de siempre, por favor`) tampoco identifican un motivo, incluso con el evaluador
+LLM desactivado. La primera aclaracion pregunta que desea revisar; a partir del segundo
+intento ofrece revision, seguimiento o molestia ocular. A partir del tercero
+explica que no hace falta diagnostico ni detalles clinicos y ofrece ejemplos de
+respuesta general, manteniendo las opciones de molestia, revision y seguimiento.
+Respuestas legibles pero insuficientes como `ok` o `Si` se citan como texto recibido,
+sin presentarlas como ilegibles. Un texto ilegible pide reescribirlo sin afirmar haberlo entendido.
+La progresion usa el contador persistido, sobrevive reinicios y conserva el horario.
 
 ### RF-1310 - Señal de prioridad sin diagnostico
 
@@ -160,8 +232,9 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
    valido posterior usando el horario original.
 6. Una solicitud fallida o vencida no produce una notificacion de exito.
 7. La respuesta final no muestra IDs internos de la agenda.
-8. Una respuesta estructurada con baja confianza o categoria fuera de alcance pide
-   aclaracion y no crea la cita.
+8. Una respuesta estructurada con baja confianza sin respaldo local pide aclaracion
+   expresando incertidumbre y no crea la cita; una categoria fuera de alcance solo
+   se afirma cuando tiene confianza suficiente y no hay respaldo local contradictorio.
 9. Un motivo aceptado conserva el texto normalizado del paciente, registra los
    intentos y la evaluacion, y no usa texto producido por el LLM como `reason`.
 10. `jnbajnbsdijkqnbwikbdqwd` y `asdf` no crean una cita ni generan una notificacion.
@@ -185,6 +258,26 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
     aunque el LLM omita la señal, sin cambiar el motivo del paciente.
 20. Una perdida visual expresada sin las palabras clave locales puede registrar un
     codigo soportado cuando el modelo aporta evidencia literal del motivo.
+21. `Asael Ponce jhbashkda` y `Asael Ponce junajusndqwd` piden aclaracion mostrando
+    todas sus partes; no guardan un nombre parcial ni crean una cita/notificacion.
+22. `Asael Ponce Silva` despues de esa aclaracion muestra y guarda el nombre completo;
+    un motivo valido crea una sola cita en el horario original y la notificacion usa
+    `Nombre: Asael Ponce Silva`, sin las partes de prueba en ese campo.
+23. Un apellido inusual señalado por la heuristica puede confirmarse explicitamente
+    despues de reiniciar el servicio; se guarda integro y no se interpreta `Si` como
+    nombre literal, motivo ni autorizacion para crear una cita.
+24. Acentos, apellidos compuestos, apostrofos, guiones, apellidos cortos y nombres
+     escritos en alfabetos no latinos se conservan sin correcciones automaticas.
+25. `Tengo problemas en el ojo izquierdo` crea una unica cita con ese motivo aunque
+    el modelo pida detalle, tenga baja confianza o devuelva un formato invalido.
+26. Una descripcion general reconocida semanticamente con una categoria oftalmologica
+    y confianza suficiente crea la cita sin exigir mas detalle clinico.
+27. Un fallo tecnico sin respaldo local conserva el horario y permite que el mismo
+    texto, despues de reiniciar el servicio, cree una sola cita al recuperarse el evaluador.
+28. Las aclaraciones del segundo y tercer intento cambian la pregunta y permiten
+    completar la cita con `Revision general`, sin repetir nombre ni horario.
+29. Motivos negados o ajenos a la consulta no se aceptan por coincidencias aisladas
+    de palabras del respaldo local.
 
 ## Fuera del alcance
 
@@ -192,5 +285,6 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 - Validacion medica del texto del paciente.
 - Triage clinico automatico o instrucciones de emergencia.
 - Politica clinica para operar señales de prioridad con pacientes reales.
-- Confirmacion interactiva adicional para crear la cita.
+- Confirmacion interactiva adicional de la creacion despues del motivo (la aclaracion
+  de la escritura del nombre no autoriza por si sola una cita).
 - Botones o plantillas especiales de WhatsApp.

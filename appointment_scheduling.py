@@ -27,6 +27,8 @@ class PendingAppointmentReason:
     last_evaluation: AppointmentReasonEvaluation | None = None
     name_message_id: int | None = None
     name_required: bool | None = True
+    name_candidate: str | None = None
+    name_clarification_message_id: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -53,6 +55,22 @@ class PendingAppointmentReason:
             or (
                 self.name_required is not None
                 and type(self.name_required) is not bool
+            )
+            or (
+                self.name_candidate is not None
+                and (
+                    not isinstance(self.name_candidate, str)
+                    or not 2 <= len(self.name_candidate) <= 120
+                    or self.name_required is not True
+                    or self.name_clarification_message_id is None
+                )
+            )
+            or (
+                self.name_clarification_message_id is not None
+                and (
+                    type(self.name_clarification_message_id) is not int
+                    or self.name_clarification_message_id <= 0
+                )
             )
             or type(self.attempt_count) is not int
             or self.attempt_count < 0
@@ -129,6 +147,8 @@ class PendingAppointmentReason:
         source_message_id = value.get("source_message_id")
         name_message_id = value.get("name_message_id")
         name_required = value.get("name_required")
+        name_candidate = value.get("name_candidate")
+        name_clarification_message_id = value.get("name_clarification_message_id")
         attempt_count = value.get("attempt_count", 0)
         last_evaluation_value = value.get("last_evaluation")
         if not all(
@@ -160,6 +180,8 @@ class PendingAppointmentReason:
                 source_message_id=source_message_id,
                 name_message_id=name_message_id,
                 name_required=name_required,
+                name_candidate=name_candidate,
+                name_clarification_message_id=name_clarification_message_id,
                 attempt_count=attempt_count,
                 last_evaluation=last_evaluation,
             )
@@ -187,6 +209,10 @@ class PendingAppointmentReason:
             context["source_message_id"] = self.source_message_id
         if self.name_message_id is not None:
             context["name_message_id"] = self.name_message_id
+        if self.name_candidate is not None:
+            context["name_candidate"] = self.name_candidate
+        if self.name_clarification_message_id is not None:
+            context["name_clarification_message_id"] = self.name_clarification_message_id
         if self.last_evaluation is not None:
             context["last_evaluation"] = self.last_evaluation.to_context()
         return context
@@ -194,7 +220,17 @@ class PendingAppointmentReason:
     def with_name_message(self, message_id: int) -> "PendingAppointmentReason":
         if message_id <= 0:
             raise ValueError("message_id debe ser positivo")
-        return replace(self, name_message_id=message_id, name_required=False)
+        return replace(self, name_message_id=message_id, name_required=False, name_candidate=None)
+
+    def with_name_candidate(self, name: str, message_id: int) -> "PendingAppointmentReason":
+        return replace(
+            self, name_candidate=name, name_clarification_message_id=message_id, name_required=True,
+        )
+
+    def without_name_candidate(self, message_id: int) -> "PendingAppointmentReason":
+        return replace(
+            self, name_candidate=None, name_clarification_message_id=message_id, name_required=True,
+        )
 
     def with_evaluation(
         self,

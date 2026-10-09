@@ -58,6 +58,12 @@ esten aprobados.
 - [Verificacion del reinicio obligatorio en local to raspberry](./verification/2026-10-07-local-to-raspberry-restart.md)
 - [Diagnostico de falta de respuesta por token de WhatsApp vencido](./verification/2026-10-07-whatsapp-token-expiration.md)
 - [Verificacion de continuidad y pausa persistente de gestiones](./verification/2026-10-07-conversation-pause-continuity.md)
+- [Verificacion de aclaracion conservadora del nombre completo](./verification/2026-10-08-patient-name-clarification.md)
+- [Recuperacion de envio de WhatsApp por token vencido](./verification/2026-10-08-whatsapp-token-expiration.md)
+- [Verificacion de copia completa de .env en local to raspberry](./verification/2026-10-08-local-to-raspberry-full-env.md)
+- [Verificacion de reintentos seguros y recuperacion de autenticacion](./verification/2026-10-08-safe-webhook-retries.md)
+- [Local to raspberry y cierre de autenticacion de WhatsApp](./verification/2026-10-08-local-to-raspberry-retry-auth-recovery.md)
+- [Verificacion de motivos generales y aclaraciones diferenciadas](./verification/2026-10-09-general-appointment-reasons.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -67,6 +73,8 @@ esten aprobados.
 - [014 - Horarios libres antes de elegir una cita](./specs/014-date-only-availability/spec.md)
 - [015 - Diagnostico seguro de errores en modo debug](./specs/015-debug-error-reporting/spec.md)
 - [016 - Enrutamiento de intencion con flujos pendientes](./specs/016-conversation-intent-routing/spec.md)
+- [017 - Espejo de proyecto y configuracion en Raspberry Pi](./specs/017-local-to-raspberry/spec.md)
+- [018 - Reintentos de webhook sin reabrir gestiones antiguas](./specs/018-safe-webhook-retries/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
@@ -83,3 +91,7 @@ esten aprobados.
 - [ADR 0042 - Mostrar disponibilidad al solicitar cambiar la hora](./decisions/0042-show-availability-before-reschedule-time.md)
 - [ADR 0043 - Seleccion del proveedor OpenAI-compatible por entorno](./decisions/0043-openai-compatible-provider-selection.md)
 - [ADR 0044 - Pausa persistente y seleccion contextual de horarios](./decisions/0044-persistent-conversation-pause.md)
+- [ADR 0045 - Aclarar el nombre sospechoso sin corregirlo](./decisions/0045-confirm-suspicious-patient-name.md)
+- [ADR 0046 - Copiar .env completo en local to raspberry](./decisions/0046-full-env-in-local-to-raspberry.md)
+- [ADR 0047 - Preparar respuestas antes de reintentar WhatsApp](./decisions/0047-persist-replies-before-whatsapp-retries.md)
+- [ADR 0048 - Motivos generales comprensibles y aclaraciones diferenciadas](./decisions/0048-understandable-general-appointment-reasons.md)

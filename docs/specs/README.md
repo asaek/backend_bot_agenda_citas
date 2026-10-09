@@ -42,3 +42,5 @@ NNN-nombre-de-la-funcionalidad/
 - [014 - Horarios libres antes de elegir una cita](./014-date-only-availability/spec.md)
 - [015 - Diagnostico seguro de errores en modo debug](./015-debug-error-reporting/spec.md)
 - [016 - Enrutamiento de intencion con flujos pendientes](./016-conversation-intent-routing/spec.md)
+- [017 - Espejo de proyecto y configuracion en Raspberry Pi](./017-local-to-raspberry/spec.md)
+- [018 - Reintentos de webhook sin reabrir gestiones antiguas](./018-safe-webhook-retries/spec.md)

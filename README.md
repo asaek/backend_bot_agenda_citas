@@ -84,13 +84,27 @@ horaria de la agenda y el paciente puede seleccionar un horario indicando AM o P
 Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
 objeto JSON estructurado antes de crear la cita. La respuesta debe contener
 `quality`, `category`, `priority_signals`, `priority_signal_evidence` y `confidence`; el backend valida esos
-campos y exige una confianza minima de `0.75`. El LLM no proporciona el motivo ni
-ejecuta la cita. Si la evaluacion no es valida, la solicitud permanece pendiente y
-se pide una aclaracion. Las señales de prioridad se registran como metadata y no
+campos y exige una confianza minima de `0.75` para aceptar la clasificacion del LLM.
+Un motivo general comprensible, como `Tengo problemas en el ojo izquierdo`, basta:
+no se exige diagnostico, intensidad ni duracion. Un respaldo local acotado permite
+aceptar esas expresiones cuando el evaluador pide mas detalle, tiene baja confianza
+o falla. El LLM no proporciona el motivo ni ejecuta la cita. Sin respaldo suficiente,
+la solicitud permanece pendiente: el bot distingue fallo tecnico, incertidumbre de
+la evaluacion y falta de motivo, reconociendo el texto recibido y usando preguntas
+mas concretas en los siguientes intentos. Las señales de prioridad se registran como metadata y no
 activan triage clinico automatico en este MVP. Sus descripciones internas usan
 lenguaje operativo, no diagnosticos como glaucoma o desprendimiento, y pueden
 acompañar la notificacion al doctor despues de una cita creada correctamente. Antes
 de usar estas señales con pacientes reales hace falta una politica clinica explicita.
+
+En cada cita nueva se solicita el nombre completo antes del motivo. El backend
+conserva todas sus partes y normaliza solo espacios. Si una parte contiene señales
+claras de texto de prueba, pregunta por su escritura citando el nombre completo,
+por ejemplo: `¿Me confirmas tus apellidos? Recibí ‘Asael Ponce jhbashkda’.`
+El paciente puede responder `sí` para confirmar un apellido poco comun o escribir
+su nombre completo corregido. Hasta entonces se conserva el horario y el nombre
+recibido como pendiente, sin reemplazar el nombre registrado. Al aceptarlo, el bot
+muestra el nombre completo que guardo antes de pedir el motivo.
 
 Para activar Google Calendar para todas las operaciones, cambia
 `CALENDAR_PROVIDER=google` y configura:
@@ -186,8 +200,16 @@ con HTTP simulado en el mirror de Raspberry Pi.
 
 El webhook crea el proveedor, recupera el historial desde `ConversationService`,
 genera la respuesta, ejecuta herramientas mediante el `ToolExecutor` configurado,
-la envia por WhatsApp y registra el resultado. Un fallo de
-generacion o envio queda marcado como `failed` para permitir un reintento.
+prepara su cuerpo y eventos de cita en SQLite antes de enviarla por WhatsApp y
+registra el resultado. Un fallo confirmado de envio permite reintentar ese mismo
+texto sin volver a generar ni ejecutar herramientas. Si ya hay turnos posteriores
+procesados, el mensaje antiguo se reconoce con HTTP 200 y se descarta sin enviar
+ni reabrir la gestion. Los turnos del mismo paciente se serializan en el runtime
+Uvicorn de un proceso; pacientes distintos pueden avanzar en paralelo.
+`reply_delivery_attempts` conserva fechas y resultado de cada intento, mientras
+`messages.created_at` conserva la fecha original del registro. Un procesamiento
+interrumpido o un envio con resultado incierto no se repite automaticamente.
+El detalle esta en `docs/specs/018-safe-webhook-retries/`.
 Los fallos de generacion guardan el tipo de excepcion y el codigo HTTP cuando aplica;
 el log operativo no registra el texto del paciente ni la respuesta completa del proveedor.
 
@@ -231,11 +253,15 @@ El backend queda disponible en <http://127.0.0.1:8000>.
 
 La solicitud `local to raspberry` sigue la skill del proyecto en
 `.agents/skills/local-to-raspberry/SKILL.md`: sincroniza, reinicia el backend y
-verifica el health check y los webhooks local y publico. El reinicio y la
-verificacion forman parte del flujo aunque no haya archivos nuevos que copiar.
+verifica el health check y los webhooks local y publico. Incluye por defecto la
+copia completa del `.env` local a la Pi, con igualdad byte por byte y modo `600`,
+sin mostrar credenciales ni pedir otra confirmacion. Una solicitud explicita sin
+`.env` lo conserva; una solicitud de una sola variable actualiza solo esa clave.
+El reinicio y la verificacion forman parte del flujo aunque no haya codigo nuevo.
 Uvicorn en la Pi corre sin `--reload`, por lo que copiar archivos por si solo no
 carga cambios en el proceso. El flujo termina cuando se confirma el reinicio y
-las rutas responden correctamente.
+las rutas responden correctamente y, si estan configuradas, las credenciales de
+envio de WhatsApp pasan una consulta autenticada de solo lectura a Meta.
 
 ## 4. Probar localmente
 
@@ -268,6 +294,8 @@ contexto, genera la respuesta, la envia y la guarda como `sent`.
 Un segundo evento con el mismo valor de `from` reutiliza el paciente y la
 conversacion activa. Si Meta reenvia el mismo `id`, el backend no duplica la
 respuesta cuando ya fue enviada.
+Si la respuesta fallo, recupera el cuerpo preparado solamente cuando el turno
+sigue vigente y el error permite reintentar con resultado conocido.
 
 Para probar persistencia, continuidad, idempotencia y la construccion de la
 solicitud de salida sin enviar un mensaje real ni consumir un LLM:

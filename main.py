@@ -43,6 +43,7 @@ from notification_delivery import (
 from debug_reporting import format_debug_fallback_reply
 from notification_domain import AppointmentNotificationEvent
 from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
+from reply_delivery import ReplyDeliveryService, patient_turn
 from persistent_calendar_provider import PersistentCalendarProvider
 from tool_executor import ToolExecutor
 from tool_validation import BusinessHours, TimeWindow
@@ -469,15 +470,34 @@ async def receive_webhook(request: Request) -> dict[str, str]:
     conversation_service = create_conversation_service()
     whatsapp_client = WhatsAppClient()
     for message in messages:
-        context: ConversationContext = conversation_service.receive_message(message)
-        if context.reply_status == "sent":
-            continue
+        async with patient_turn(conversation_service.database.path, message.sender):
+            context = conversation_service.receive_message(message)
+            delivery = ReplyDeliveryService(conversation_service.database)
+            try:
+                await _process_reply(conversation_service, whatsapp_client, delivery, context, message)
+            except BaseException:
+                delivery.interrupt(context)
+                raise
 
-        appointment_events: list[AppointmentNotificationEvent] = []
+    return {"status": "ok"}
+
+
+async def _process_reply(
+    conversation_service: ConversationService,
+    whatsapp_client: WhatsAppClient,
+    delivery: ReplyDeliveryService,
+    context: ConversationContext,
+    message: IncomingTextMessage,
+) -> None:
+    plan = delivery.begin(context)
+    if plan is None:
+        return
+    appointment_events = list(plan.events)
+    reply = plan.body
+    if reply is None:
         try:
             reply = await conversation_service.build_reply(
-                context,
-                appointment_event_sink=appointment_events.append,
+                context, appointment_event_sink=appointment_events.append,
             )
         except LLMProviderError as error:
             http_status_code = (
@@ -510,30 +530,29 @@ async def receive_webhook(request: Request) -> dict[str, str]:
                 http_status_code=None,
                 llm_provider=conversation_service.llm_provider,
             )
+    if plan.send_required:
+        delivery.prepare(context, reply, appointment_events)
+        attempt_id = delivery.start_send(context)
         try:
             result = await whatsapp_client.send_text(
                 to=normalize_recipient_number(message.sender),
                 body=reply,
             )
         except WhatsAppConfigurationError as error:
-            conversation_service.record_reply_failed(context, reply)
+            delivery.record_failed(context, attempt_id, reply, error)
             raise HTTPException(status_code=500, detail=str(error)) from error
         except httpx.HTTPError as error:
-            conversation_service.record_reply_failed(context, reply)
+            delivery.record_failed(context, attempt_id, reply, error)
             raise HTTPException(
                 status_code=502,
                 detail="No se pudo enviar la respuesta mediante WhatsApp Cloud API",
             ) from error
 
-        conversation_service.record_reply_sent(
+        delivery.record_sent(
             context,
+            attempt_id=attempt_id,
             body=reply,
             provider_message_id=extract_provider_message_id(result),
         )
-        await deliver_doctor_notifications(
-            conversation_service,
-            whatsapp_client,
-            appointment_events,
-        )
-
-    return {"status": "ok"}
+    await deliver_doctor_notifications(conversation_service, whatsapp_client, appointment_events)
+    delivery.complete_notifications(context)

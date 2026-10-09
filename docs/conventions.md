@@ -29,8 +29,9 @@ Borrador.
   exportadas explicitamente tienen prioridad.
 - `WHATSAPP_VERIFY_TOKEN` contiene el token elegido para verificar el webhook.
 - El Verify Token y el Access Token de WhatsApp son credenciales diferentes.
-- `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID` solo se configuran en el
-  entorno de ejecucion de la Raspberry Pi.
+- La configuracion de WhatsApp del runtime se conserva en el `.env` local y se
+  copia al mirror de Raspberry Pi mediante el flujo de `specs/017-local-to-raspberry/`.
+  Los valores quedan fuera de Git, argumentos, logs y documentacion.
 
 ## Implementacion incremental
 

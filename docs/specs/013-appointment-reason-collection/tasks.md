@@ -69,4 +69,32 @@
 - [x] Mantener compatibilidad con respuestas sin evidencia mediante el respaldo local.
 - [x] Excluir negaciones explicitas y no forzar prioridad ante pocas lagañas al despertar.
 - [x] Ejecutar la suite completa en Raspberry Pi y registrar la verificacion en
-      `docs/verification/2026-10-07-semantic-priority-signals.md`.
+       `docs/verification/2026-10-07-semantic-priority-signals.md`.
+
+## Corte 9 - Aclaracion conservadora del nombre completo
+
+- [x] Reproducir con regresiones la aceptacion de nombres de prueba y el agradecimiento
+      que no muestra el nombre guardado.
+- [x] Validar todas las partes sin diccionario, recortes ni correcciones silenciosas.
+- [x] Conservar el candidato completo y el horario al pedir confirmar o corregir.
+- [x] Permitir confirmar un apellido inusual y mostrar el nombre integro al guardarlo.
+- [x] Mantener el nombre registrado previo hasta aceptar el nuevo dato.
+- [x] Proteger reintentos de candidatos, aclaraciones y confirmaciones ante reinicios.
+- [x] Conservar la aclaracion al pausar y retomar la gestion.
+- [x] Verificar el flujo hasta la notificacion al doctor con los dos nombres reportados.
+- [x] Ejecutar la suite completa en Raspberry Pi, cargar el backend actualizado y comprobar
+      las rutas; evidencia en `docs/verification/2026-10-08-patient-name-clarification.md`.
+
+## Corte 10 - Motivos generales y aclaraciones diferenciadas
+
+- [x] Aceptar descripciones oftalmologicas generales sin exigir detalle clinico.
+- [x] Incorporar un respaldo local positivo y conservar el texto como unico motivo.
+- [x] Distinguir contenido insuficiente, incertidumbre de la evaluacion y fallo tecnico.
+- [x] Usar el contador persistido para preguntas progresivas sin perder el horario.
+- [x] Añadir regresiones de motivo general, baja confianza, formato invalido, fallo del
+      proveedor, reinicio, continuacion y motivos negados/ajenos.
+- [x] Cubrir motivos acompañados de referencias habituales, respuestas breves legibles
+      y la opcion de seguimiento en aclaraciones posteriores de baja confianza.
+- [x] Ejecutar las regresiones y la suite completa en Raspberry Pi: 324 pruebas correctas.
+- [x] Recargar el backend y verificar las rutas locales/publicas y autenticacion;
+      evidencia en `docs/verification/2026-10-09-general-appointment-reasons.md`.

@@ -31,9 +31,11 @@
   Check for an existing process first and verify the public webhook route afterward.
 - Uvicorn on `127.0.0.1:8000` requires that tunnel or another reverse proxy for Meta
   to reach the webhook.
-- Treat `.env` as secret configuration. For token rotation, transfer only the
-  requested variable over SSH, verify it without printing its value, and preserve
-  file mode `600`; copy the whole file only when explicitly requested.
+- Treat `.env` as secret configuration. A `local to raspberry` request includes
+  replacing the Pi `.env` with the complete local file by default, verifying
+  byte-for-byte equality without printing values, and preserving file mode `600`.
+  An explicit single-variable request updates only that key; an explicit exclusion
+  of `.env` preserves the Pi file. Follow the skill for transfer and runtime checks.
 
 ## Verification
 
@@ -42,9 +44,10 @@
 ## Mirror Workflow
 
 - For `local to raspberry` requests, follow `.agents/skills/local-to-raspberry/SKILL.md`,
-  including its required backend restart and verification after synchronization.
+  including its full `.env` copy, backend restart and verification after synchronization.
 - Make all code and documentation changes in this local checkout only.
 - The execution mirror is `asaek@192.168.101.19:~/Downloads/chatbot_test_repo`.
 - After every local change, synchronize the project files to the Raspberry Pi before compiling, running, or verifying anything; use the Raspberry Pi as the runtime environment.
 - Do not edit the Raspberry Pi copy directly. Keep source, documentation, and configuration paths mirrored, while excluding `.venv`, caches, and `.git`.
+- Transfer `.env` through the skill's configuration step; keep source and documentation edits local.
 - Never store the SSH password or other credentials in the repository; obtain them through the approved local SSH authentication method.

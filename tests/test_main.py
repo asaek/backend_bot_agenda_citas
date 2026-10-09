@@ -34,6 +34,7 @@ from main import (
     normalize_recipient_number,
 )
 from persistence import SQLiteDatabase
+from reply_delivery import ReplyDeliveryService
 from persistent_calendar_provider import PersistentCalendarProvider
 from tool_executor import ToolExecutor
 from tool_validation import BusinessHours, TimeWindow
@@ -465,7 +466,7 @@ class WebhookTests(unittest.TestCase):
         fake_client = FailOnceWhatsAppClient()
         payload = self.text_payload()
 
-        with self.configured_runtime(fake_client):
+        with self.configured_runtime(fake_client) as provider:
             with TestClient(app) as client:
                 first_response = client.post("/webhook/whatsapp", json=payload)
                 second_response = client.post("/webhook/whatsapp", json=payload)
@@ -473,6 +474,7 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 502)
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(fake_client.attempts, 2)
+        self.assertEqual(provider.call_count, 1)
         with open_database(self.database_path) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 2)
             self.assertEqual(
@@ -481,6 +483,323 @@ class WebhookTests(unittest.TestCase):
                 ).fetchone()[0],
                 "sent",
             )
+
+    def test_old_failed_reply_does_not_reopen_a_confirmed_booking(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FailOnceWhatsAppClient()
+        old_payload = self.text_payload(message_id="wamid.old-greeting", text="Buenos dias")
+        provider = FakeLLMProvider(replies=(
+            "¡Hola! ¿En qué puedo ayudarte?",
+            ToolCall(
+                name="create_appointment",
+                arguments={"start_at": "2026-09-21T09:00:00", "reason": "Revision"},
+                call_id="call-stale-booking",
+            ),
+        ))
+
+        with self.configured_runtime(fake_client, provider):
+            with TestClient(app) as client:
+                failed = client.post("/webhook/whatsapp", json=old_payload)
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.new-date", text="Agendar mañana"),
+                    self.text_payload(message_id="wamid.new-time", text="9:00"),
+                    self.text_payload(message_id="wamid.new-name", text="Ana Prueba"),
+                    self.text_payload(message_id="wamid.new-reason", text="tengo vision borrosa"),
+                )
+                with open_database(self.database_path) as connection:
+                    before = connection.execute("SELECT context_json FROM conversations").fetchone()[0]
+                sent_count = len(fake_client.sent_messages)
+                retry = client.post("/webhook/whatsapp", json=old_payload)
+
+        self.assertEqual(failed.status_code, 502)
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertIn("Tu cita está confirmada", fake_client.sent_messages[sent_count - 1][1])
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(len(fake_client.sent_messages), sent_count)
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+        with open_database(self.database_path) as connection:
+            after = connection.execute("SELECT context_json FROM conversations").fetchone()[0]
+        self.assertEqual(after, before)
+        self.assertNotIn("pending_appointment_reason", json.loads(after))
+
+    def test_failed_reply_reuses_saved_text_after_service_recreation(self) -> None:
+        fake_client = FailOnceWhatsAppClient()
+        payload = self.text_payload(message_id="wamid.cached-reply")
+        first_provider = FakeLLMProvider(reply="Respuesta original, preparada una sola vez.")
+        with self.configured_runtime(fake_client, first_provider):
+            with TestClient(app) as client:
+                first = client.post("/webhook/whatsapp", json=payload)
+        restarted_provider = FakeLLMProvider(error=LLMResponseError("No debe regenerarse"))
+        with self.configured_runtime(fake_client, restarted_provider):
+            with TestClient(app) as client:
+                retry = client.post("/webhook/whatsapp", json=payload)
+
+        self.assertEqual(first.status_code, 502)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(restarted_provider.call_count, 0)
+        self.assertEqual(fake_client.sent_messages, [
+            ("5491100000000", "Respuesta original, preparada una sola vez."),
+        ])
+
+    def test_simultaneous_duplicate_waits_for_the_first_send(self) -> None:
+        async def exercise() -> tuple[list[httpx.Response], FakeWhatsAppClient, FakeLLMProvider]:
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class BlockingWhatsAppClient(FakeWhatsAppClient):
+                async def send_text(self, to: str, body: str) -> dict[str, Any]:
+                    started.set()
+                    await release.wait()
+                    return await super().send_text(to, body)
+
+            fake_client = BlockingWhatsAppClient()
+            with self.configured_runtime(fake_client) as provider:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://test",
+                ) as client:
+                    first = asyncio.create_task(client.post("/webhook/whatsapp", json=self.text_payload()))
+                    await asyncio.wait_for(started.wait(), 2)
+                    duplicate = asyncio.create_task(client.post("/webhook/whatsapp", json=self.text_payload()))
+                    await asyncio.sleep(0)
+                    release.set()
+                    responses = await asyncio.wait_for(asyncio.gather(first, duplicate), 2)
+            return responses, fake_client, provider
+
+        responses, fake_client, provider = asyncio.run(exercise())
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(len(fake_client.sent_messages), 1)
+        self.assertEqual(provider.call_count, 1)
+
+    def test_same_patient_turns_wait_but_another_patient_can_reply(self) -> None:
+        async def exercise() -> tuple[FakeWhatsAppClient, FakeLLMProvider]:
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class BlockingFirstSend(FakeWhatsAppClient):
+                async def send_text(self, to: str, body: str) -> dict[str, Any]:
+                    if body == "Primera respuesta":
+                        started.set()
+                        await release.wait()
+                    return await super().send_text(to, body)
+
+            fake_client = BlockingFirstSend()
+            provider = FakeLLMProvider(replies=("Primera respuesta", "Otro paciente", "Segundo turno"))
+            with self.configured_runtime(fake_client, provider):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://test",
+                ) as client:
+                    first = asyncio.create_task(client.post("/webhook/whatsapp", json=self.text_payload()))
+                    await asyncio.wait_for(started.wait(), 2)
+                    second = asyncio.create_task(client.post("/webhook/whatsapp", json=self.text_payload(
+                        message_id="wamid.second-queued", text="¿Qué servicios ofrecen?",
+                    )))
+                    await asyncio.sleep(0)
+                    other = await asyncio.wait_for(client.post("/webhook/whatsapp", json=self.text_payload(
+                        sender="5491100000001", message_id="wamid.other-patient",
+                    )), 2)
+                    self.assertEqual(other.status_code, 200)
+                    self.assertEqual(provider.call_count, 2)
+                    release.set()
+                    responses = await asyncio.wait_for(asyncio.gather(first, second), 2)
+                    self.assertTrue(all(response.status_code == 200 for response in responses))
+            return fake_client, provider
+
+        fake_client, provider = asyncio.run(exercise())
+        self.assertEqual([body for _, body in fake_client.sent_messages], [
+            "Otro paciente", "Primera respuesta", "Segundo turno",
+        ])
+        self.assertEqual([(item.role, item.content) for item in provider.received_messages[-1][1:]], [
+            ("user", "Hola"), ("assistant", "Primera respuesta"), ("user", "¿Qué servicios ofrecen?"),
+        ])
+
+    def test_legacy_failed_reply_is_reused_without_an_outbox_record(self) -> None:
+        service = ConversationService(SQLiteDatabase(self.database_path))
+        context = service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.legacy-failed",
+            message_type="text", text="Hola",
+        ))
+        service.record_reply_failed(context, "Respuesta historica guardada")
+        fake_client = FakeWhatsAppClient()
+        with self.configured_runtime(fake_client) as provider:
+            with TestClient(app) as client:
+                response = client.post("/webhook/whatsapp", json=self.text_payload(
+                    message_id="wamid.legacy-failed",
+                ))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.call_count, 0)
+        self.assertEqual(fake_client.sent_messages, [("5491100000000", "Respuesta historica guardada")])
+
+    def test_prepared_reply_survives_interruption_before_send(self) -> None:
+        service = ConversationService(SQLiteDatabase(self.database_path))
+        context = service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.prepared",
+            message_type="text", text="Hola",
+        ))
+        delivery = ReplyDeliveryService(service.database)
+        delivery.begin(context)
+        delivery.prepare(context, "Respuesta preparada antes del reinicio", [])
+        fake_client = FakeWhatsAppClient()
+        with self.configured_runtime(fake_client) as provider:
+            with TestClient(app) as client:
+                response = client.post("/webhook/whatsapp", json=self.text_payload(message_id="wamid.prepared"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.call_count, 0)
+        self.assertEqual(fake_client.sent_messages, [
+            ("5491100000000", "Respuesta preparada antes del reinicio"),
+        ])
+
+    def test_read_timeout_does_not_resend_a_potentially_accepted_message(self) -> None:
+        class ReadTimeoutClient(FakeWhatsAppClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attempts = 0
+
+            async def send_text(self, to: str, body: str) -> dict[str, Any]:
+                self.attempts += 1
+                raise httpx.ReadTimeout("respuesta externa desconocida")
+
+        fake_client = ReadTimeoutClient()
+        with self.configured_runtime(fake_client) as provider:
+            with TestClient(app) as client:
+                responses = self.post_messages(client, self.text_payload(), self.text_payload())
+
+        self.assertEqual([response.status_code for response in responses], [502, 200])
+        self.assertEqual(fake_client.attempts, 1)
+        self.assertEqual(provider.call_count, 1)
+        with open_database(self.database_path) as connection:
+            attempts = connection.execute(
+                "SELECT status, error_type, started_at, completed_at FROM reply_delivery_attempts"
+            ).fetchall()
+        self.assertEqual(attempts[0][:2], ("uncertain", "ReadTimeout"))
+        self.assertIsNotNone(attempts[0][2])
+        self.assertIsNotNone(attempts[0][3])
+
+    def test_interrupted_generation_is_not_executed_again(self) -> None:
+        service = ConversationService(SQLiteDatabase(self.database_path))
+        context = service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.interrupted",
+            message_type="text", text="Hola",
+        ))
+        ReplyDeliveryService(service.database).begin(context)
+        fake_client = FakeWhatsAppClient()
+        with self.configured_runtime(fake_client) as provider:
+            with TestClient(app) as client:
+                response = client.post("/webhook/whatsapp", json=self.text_payload(message_id="wamid.interrupted"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.call_count, 0)
+        self.assertEqual(fake_client.sent_messages, [])
+        with open_database(self.database_path) as connection:
+            state = connection.execute("SELECT status FROM reply_outbox").fetchone()[0]
+        self.assertEqual(state, "uncertain")
+
+    def test_cancelled_send_releases_patient_lock_without_resending(self) -> None:
+        async def exercise() -> tuple[FakeWhatsAppClient, FakeLLMProvider]:
+            started = asyncio.Event()
+
+            class CancelledSendClient(FakeWhatsAppClient):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.attempts = 0
+
+                async def send_text(self, to: str, body: str) -> dict[str, Any]:
+                    self.attempts += 1
+                    if self.attempts == 1:
+                        started.set()
+                        await asyncio.Event().wait()
+                    return await super().send_text(to, body)
+
+            fake_client = CancelledSendClient()
+            with self.configured_runtime(fake_client) as provider:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://test",
+                ) as client:
+                    first = asyncio.create_task(client.post("/webhook/whatsapp", json=self.text_payload()))
+                    await asyncio.wait_for(started.wait(), 2)
+                    first.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await first
+                    retry = await asyncio.wait_for(client.post("/webhook/whatsapp", json=self.text_payload()), 2)
+                    new = await asyncio.wait_for(client.post("/webhook/whatsapp", json=self.text_payload(
+                        message_id="wamid.after-cancellation", text="Otro saludo",
+                    )), 2)
+                    self.assertEqual([retry.status_code, new.status_code], [200, 200])
+            return fake_client, provider
+
+        fake_client, provider = asyncio.run(exercise())
+        self.assertEqual(len(fake_client.sent_messages), 1)
+        self.assertEqual(provider.call_count, 2)
+        with open_database(self.database_path) as connection:
+            attempts = connection.execute("SELECT status FROM reply_delivery_attempts ORDER BY id").fetchall()
+        self.assertEqual(attempts, [("uncertain",), ("sent",)])
+
+    def test_only_receiving_a_later_message_does_not_discard_a_saved_reply(self) -> None:
+        service = ConversationService(SQLiteDatabase(self.database_path))
+        old = service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.unanswered-old",
+            message_type="text", text="Hola",
+        ))
+        service.record_reply_failed(old, "Respuesta que aun puede enviarse")
+        service.receive_message(IncomingTextMessage(
+            sender="5491100000000", message_id="wamid.only-received",
+            message_type="text", text="Otro mensaje aun sin procesar",
+        ))
+        fake_client = FakeWhatsAppClient()
+        with self.configured_runtime(fake_client) as provider:
+            with TestClient(app) as client:
+                response = client.post("/webhook/whatsapp", json=self.text_payload(message_id="wamid.unanswered-old"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.call_count, 0)
+        self.assertEqual(fake_client.sent_messages, [("5491100000000", "Respuesta que aun puede enviarse")])
+
+    def test_booking_reply_retry_keeps_doctor_event_without_repeating_booking(self) -> None:
+        self.set_fixed_calendar_runtime()
+
+        class FailedConfirmationClient(FakeWhatsAppClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.failed = False
+
+            async def send_text(self, to: str, body: str) -> dict[str, Any]:
+                if body.startswith("Tu cita está confirmada") and not self.failed:
+                    self.failed = True
+                    raise httpx.ConnectError("fallo antes del envio")
+                return await super().send_text(to, body)
+
+        fake_client = FailedConfirmationClient()
+        provider = FakeLLMProvider(reply='{"summary":"Cita agendada por vision borrosa.","priority_signals":[]}')
+        environment = {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"}
+        reason = self.text_payload(message_id="wamid.retry-booking-reason", text="tengo vision borrosa")
+        with self.configured_runtime(fake_client, provider, environment):
+            with TestClient(app) as client:
+                setup = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.retry-booking-date", text="Agendar mañana"),
+                    self.text_payload(message_id="wamid.retry-booking-time", text="9:00"),
+                    self.text_payload(message_id="wamid.retry-booking-name", text="Ana Prueba"),
+                )
+                failed = client.post("/webhook/whatsapp", json=reason)
+                retry = client.post("/webhook/whatsapp", json=reason)
+                duplicate = client.post("/webhook/whatsapp", json=reason)
+
+        self.assertTrue(all(response.status_code == 200 for response in setup))
+        self.assertEqual([failed.status_code, retry.status_code, duplicate.status_code], [502, 200, 200])
+        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+        self.assertEqual(provider.call_count, 1)  # Solo el resumen para el doctor.
+        self.assertEqual([to for to, _ in fake_client.sent_messages][-2:], ["5491100000000", "5491100000001"])
+        with open_database(self.database_path) as connection:
+            attempts = connection.execute(
+                "SELECT status, started_at, completed_at FROM reply_delivery_attempts ORDER BY id DESC LIMIT 2"
+            ).fetchall()
+            notifications = connection.execute("SELECT status, attempt_count FROM doctor_notifications").fetchall()
+        self.assertEqual([row[0] for row in attempts], ["sent", "failed"])
+        self.assertTrue(all(row[1] and row[2] for row in attempts))
+        self.assertEqual(notifications, [("sent", 1)])
 
     def test_whatsapp_configuration_failure_records_controlled_reply_as_failed(self) -> None:
         fake_client = MissingWhatsAppConfigurationClient()
@@ -825,6 +1144,53 @@ class WebhookTests(unittest.TestCase):
                 ("appointment_cancelled", "sent", 1),
             ],
         )
+
+    def test_suspicious_names_are_clarified_before_notifying_the_doctor(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(
+            replies=(
+                ToolCall(
+                    name="create_appointment",
+                    arguments={"start_at": "2026-09-21T11:00:00", "reason": "Revision"},
+                    call_id="call-name-clarification",
+                ),
+                '{"summary":"El paciente solicito una revisión general.","priority_signals":[]}',
+            )
+        )
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"},
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.name-request", text="Agendame a las 11:00"),
+                    self.text_payload(message_id="wamid.name-first", text="Asael Ponce jhbashkda"),
+                    self.text_payload(message_id="wamid.name-second", text="Asael Ponce junajusndqwd"),
+                )
+                self.assertEqual([response.status_code for response in responses], [200] * 3)
+                self.assertIn("Recibí ‘Asael Ponce jhbashkda’", fake_client.sent_messages[1][1])
+                self.assertIn("Recibí ‘Asael Ponce junajusndqwd’", fake_client.sent_messages[2][1])
+                self.assertEqual(app.state.calendar_provider.appointments, ())
+                self.assertTrue(all(recipient == "5491100000000" for recipient, _ in fake_client.sent_messages))
+                with open_database(self.database_path) as connection:
+                    self.assertIsNone(connection.execute("SELECT name FROM patients").fetchone()[0])
+                    self.assertEqual(connection.execute("SELECT COUNT(*) FROM doctor_notifications").fetchone()[0], 0)
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.name-corrected", text="Asael Ponce Silva"),
+                    self.text_payload(message_id="wamid.name-reason", text="Revisión general"),
+                )
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertEqual(len(doctor_bodies), 1)
+        self.assertIn("Nombre: Asael Ponce Silva", doctor_bodies[0])
+        self.assertNotIn("jhbashkda", doctor_bodies[0])
+        self.assertNotIn("junajusndqwd", doctor_bodies[0])
+        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+        self.assertEqual(app.state.calendar_provider.appointments[0].start_at.hour, 11)
 
     def test_invalid_appointment_reason_does_not_notify_the_doctor(self) -> None:
         self.set_fixed_calendar_runtime()
