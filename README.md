@@ -105,6 +105,11 @@ El paciente puede responder `sí` para confirmar un apellido poco comun o escrib
 su nombre completo corregido. Hasta entonces se conserva el horario y el nombre
 recibido como pendiente, sin reemplazar el nombre registrado. Al aceptarlo, el bot
 muestra el nombre completo que guardo antes de pedir el motivo.
+Una seleccion como `quisiera una cita a las 9 am` continua la lista ofrecida sin
+reiniciar la reserva. El nombre aceptado se conserva para esa solicitud, incluso
+tras reinicios. Respuestas conversacionales reconocibles como `ya te lo habia dich`,
+negativas a dar el nombre o `Tengo los ojos rojos` no se guardan como nombres:
+se conserva el horario y se pide aclarar el dato pendiente.
 
 Para activar Google Calendar para todas las operaciones, cambia
 `CALENDAR_PROVIDER=google` y configura:
@@ -177,6 +182,12 @@ Los horarios vencidos se consultan de nuevo. Una cancelacion o reprogramacion
 pausada requiere una confirmacion nueva; un `Si` durante otro tema no la ejecuta.
 `Ya no quiero agendar`, `No la modifiques` o `No quiero cancelarla` abandonan la
 operacion sin alterar la cita. Una nueva gestion explicita reemplaza la anterior.
+
+Al elegir el nuevo horario de una cita, puedes responder `quisiera cambiarla a las
+12 pm`, `me gustaría moverla a las 12 pm`, `ponla a las 12 pm`, `me viene bien a las
+12 pm` o `¿podrías cambiarla a las 12 pm?`. Tambien se reconoce `al mediodía`.
+El bot conserva la cita original y pide confirmar el cambio. Si recibio `12 p,`,
+pregunta por la hora completa con AM o PM; responder `12 pm` continua la gestion.
 
 La configuracion prevista usa `DOCTOR_WHATSAPP_NUMBERS`, una lista de numeros
 separados por comas. Todos los doctores configurados reciben una copia del mismo

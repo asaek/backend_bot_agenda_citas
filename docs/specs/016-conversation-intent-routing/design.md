@@ -33,10 +33,60 @@ confirmacion) con reglas normalizadas para distinguir continuacion, abandono, ac
 y cambio de tarea. Los saludos pausan; las peticiones de olvidar el flujo lo descartan.
 
 La seleccion de una hora o fecha reconocida continua hacia los validadores existentes.
+Despues de clasificar las interrupciones, los slots pendientes se resuelven antes
+de los detectores genericos de nueva disponibilidad/fecha. Asi `elijo el horario de
+las 12 del dia` no se confunde con otra reserva ni pierde la cita de origen.
 Una eleccion completa compatible con la gestion activa continua aunque incluya
 `agendame`. El reconocimiento exige una expresion completa de seleccion, no solo
 extraer una hora de otro comando. Las preguntas informativas pausan; las preguntas
 que solo expresan una eleccion incierta, como `¿11 am?`, piden aclaracion.
+En una reserva se reconocen tambien `quiero/quisiera/necesito/deseo/me gustaria`
+seguidos opcionalmente de un verbo de agendar y una referencia a la cita, mas la
+hora. Esto evita clasificar `quisiera una cita a las 9 am` como `switch` y eliminar
+la disponibilidad antes de capturar el nombre. La referencia `otra cita` no entra
+en el patron de seleccion y si se reconoce como gestion nueva; una fecha adicional
+tampoco se consume como eleccion del mismo dia.
+El grupo compartido `_BOOKING_REQUEST_PREFIX` mantiene esos verbos alineados
+entre seleccion contextual y deteccion de gestion nueva, tambien durante una pausa.
+Las preguntas que comienzan consultando costo/precio se clasifican como pausa antes
+de buscar una gestion nueva. Asi `Cual es el costo si deseo reservar una cita` no
+descarta la reserva por contener una peticion de agenda dentro de la pregunta.
+
+La aclaracion de reprogramacion recibe tambien el texto actual. Una seleccion
+completa con hora valida usa `PendingAppointmentAvailability.matching_slots()` para
+distinguir cero coincidencias de varias coincidencias AM/PM. Cero coincidencias
+explica que el horario esta ocupado o no disponible; varias solicitan AM/PM.
+`matching_slot()` sigue aceptando solo una coincidencia unica. La aclaracion no
+borra la disponibilidad ni crea una accion pendiente de confirmacion.
+
+Para reprogramacion, el reconocimiento completo admite verbos imperativos,
+`quiero/quisiera/necesito/deseo/prefiero/me gustaria` con un verbo de cambio,
+peticiones `puedes/podrias` y preferencias como `mejor`, `me sirve` o `me quedo con`.
+Puede incluir una referencia a la misma cita, el horario, un saludo y cortesia.
+El patron sigue anclado: no consume otra cita, una fecha adicional ni otra instruccion.
+Los signos de pregunta solo se admiten como seleccion directa cuando la expresion
+es una peticion cortes completa; `¿12 pm?` conserva la aclaracion tentativa.
+Los signos de apertura pueden aparecer despues de un saludo o `por favor`.
+Los verbos de seleccion y deteccion de gestion nueva comparten los mismos grupos
+de infinitivos e imperativos, para que otra cita o fecha no conserve la gestion anterior.
+`Dejar` exige una referencia directa a la cita/hora o el pronombre `la`, para no
+capturar preguntas como donde dejar el coche durante la cita. `Dejarla como esta`
+se reconoce primero como abandono. La cortesia despues del signo de cierre tambien
+se admite en una peticion completa, manteniendo fuera las preguntas tentativas.
+
+`parse_time_selection()` entiende mediodia y los periodos `del mediodia/del dia`.
+La deteccion de solicitud sin hora destino tambien normaliza acentos y periodos,
+para no reabrir la disponibilidad despues de aceptar una seleccion de mediodia.
+La fecha y zona horaria siguen procediendo del snapshot persistido.
+
+`allow_incomplete_period=True` se usa solo al clasificar y aclarar una seleccion
+de reprogramacion con `a` o `p` sin la `m`. La validacion de respuesta esperada
+mantiene el reconocimiento estricto: ese texto no produce accion pendiente.
+La aclaracion conserva los slots y pide AM/PM completo; una correccion posterior
+usa la misma transicion hacia `PendingAppointmentAction`, sin depender del LLM.
+La rama de aclaracion tambien se atiende directamente desde el snapshot pausado,
+sin reactivarlo ni renovar su vigencia. Una seleccion completa puede retomarlo.
+La hora 12 sin periodo considera tanto 00:00 como 12:00; la coincidencia debe ser unica.
 
 ## Transiciones seguras
 

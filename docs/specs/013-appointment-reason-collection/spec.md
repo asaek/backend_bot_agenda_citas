@@ -21,6 +21,8 @@ La aclaracion conservadora del nombre esta verificada en Raspberry Pi en
 `docs/verification/2026-10-08-patient-name-clarification.md`.
 La aceptacion de motivos generales y las aclaraciones diferenciadas estan verificadas
 en `docs/verification/2026-10-09-general-appointment-reasons.md`.
+La continuidad del nombre y el rechazo de respuestas conversacionales estan
+verificados en `docs/verification/2026-10-10-booking-name-continuity.md`.
 
 ## Objetivo
 
@@ -86,6 +88,21 @@ debe conservarse hasta recibir ambos datos. Un nombre no textual, vacio o fuera 
 limite permitido debe pedir una aclaracion y no debe crear la cita.
 La normalizacion solo ajusta espacios; no corrige letras, acentos, mayusculas ni
 elimina partes. La respuesta de aceptacion muestra el nombre completo guardado.
+Una vez aceptado para esa reserva, el siguiente mensaje debe procesarse como motivo
+sin solicitar el nombre de nuevo, incluso tras un reinicio con historial acotado.
+
+### RF-1317 - Respuestas conversacionales durante la captura del nombre
+
+Recordatorios reconocibles como `ya te lo habia dich`, `ya te lo habia dicho`,
+`ya te dije mi nombre` o `te lo acabo de decir` no entregan un nombre nuevo.
+Tampoco lo entregan negativas a dar el nombre, `no se`, `no recuerdo` o expresiones
+reconocibles de sintomas como `Tengo los ojos rojos` y `me duelen los ojos`.
+El backend debe pedir aclaracion sin guardar ese texto como nombre o candidato,
+sin reemplazar el nombre previo y sin crear una cita ni emitir una notificacion.
+Conserva el horario y cualquier candidato pendiente. Un nombre valido o una
+confirmacion explicita posterior permite continuar la misma solicitud.
+Las reglas comparan frases, no exigen un diccionario ni una identidad verificada;
+se mantienen nombres compuestos, acentos, apostrofos, guiones y otros alfabetos.
 
 ### RF-1313 - Parte sospechosa del nombre
 
@@ -278,6 +295,12 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
     completar la cita con `Revision general`, sin repetir nombre ni horario.
 29. Motivos negados o ajenos a la consulta no se aceptan por coincidencias aisladas
     de palabras del respaldo local.
+30. Los recordatorios, negativas y sintomas reconocibles recibidos mientras falta
+    el nombre conservan el horario, el candidato y el nombre previo sin crear citas.
+31. La secuencia lunes, `quisiera una cita a las 9 am`, `Asael Ponce Silva` y
+    `Tengo los ojos rojos` pide el nombre una sola vez y crea una cita en ese horario,
+    incluso tras reiniciar; los reintentos del webhook emiten una sola notificacion
+    al doctor con `Nombre: Asael Ponce Silva`.
 
 ## Fuera del alcance
 

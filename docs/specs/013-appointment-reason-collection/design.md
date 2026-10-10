@@ -88,6 +88,15 @@ secuencias completas de teclado, cuatro letras identicas seguidas o palabras de 
 menos ocho letras con como maximo 25% de vocales y una racha de cuatro consonantes.
 La `y` cuenta como vocal. No se usa esta heuristica para alfabetos no latinos.
 
+Antes de aceptar el texto, patrones de frases completas reconocen recordatorios
+de un dato ya enviado, negativas a proporcionar el nombre y expresiones de sintomas.
+Para comparar se ignoran acentos, mayusculas y puntuacion; el texto normalizado
+que se guarda sigue ajustando solamente espacios. Estos patrones no se aplican
+a palabras sueltas de nombres o apellidos. Un resultado `invalid` mantiene el
+paso de captura, el nombre previo y el candidato existente, sin efectos de agenda.
+La transaccion de aceptacion guarda `name_required=false` junto con `patients.name`;
+el motivo posterior no depende del historial ni de un agradecimiento textual del LLM.
+
 Una sospecha conserva el texto completo como candidato, sin modificar `patients.name`
 ni `name_required=true`. La aclaracion cita el candidato e indica como confirmarlo o
 escribir un nombre completo corregido. Una afirmacion completa como `Si, es correcto`

@@ -64,6 +64,9 @@ esten aprobados.
 - [Verificacion de reintentos seguros y recuperacion de autenticacion](./verification/2026-10-08-safe-webhook-retries.md)
 - [Local to raspberry y cierre de autenticacion de WhatsApp](./verification/2026-10-08-local-to-raspberry-retry-auth-recovery.md)
 - [Verificacion de motivos generales y aclaraciones diferenciadas](./verification/2026-10-09-general-appointment-reasons.md)
+- [Verificacion de hora de reprogramacion no disponible](./verification/2026-10-09-unavailable-reschedule-time.md)
+- [Verificacion de seleccion natural de reprogramacion](./verification/2026-10-09-natural-reschedule-selection.md)
+- [Verificacion de nombre unico por reserva y respuestas conversacionales](./verification/2026-10-10-booking-name-continuity.md)
 
 ## Funcionalidad implementada y verificada por cortes
 

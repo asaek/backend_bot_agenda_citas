@@ -61,6 +61,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Solicitar y persistir el nombre completo del paciente en cada cita nueva antes
   de continuar con el motivo; citar y conservar el texto pendiente ante una parte
   sospechosa, permitiendo su confirmacion o correccion sin recortar apellidos.
+- Rechazar respuestas conversacionales reconocibles como nombres y conservar el
+  nombre aceptado para la misma reserva, incluso tras un reinicio.
 - Separar señales operativas de prioridad de cualquier diagnostico y conservarlas sin
   cambiar el flujo de agendamiento.
 - Detectar ojos rojos como señal operativa y llevarla a la notificacion mediante el
@@ -77,6 +79,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   espera el dia y resolver respuestas como `hoy` directamente en el backend.
 - Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes
   de iniciar la recoleccion de nombre y motivo.
+- Reconocer selecciones naturales como `quisiera una cita a las 9 am` sin descartar
+  el dia ofrecido ni delegar la captura del nombre al texto del LLM.
 - Consultar y mostrar los horarios libres del dia destino antes de confirmar una
   reprogramacion, y aceptar solo una seleccion de esa lista.
 - Mostrar la disponibilidad del dia de una cita identificada antes de preguntar por una
@@ -259,6 +263,8 @@ lo valida y muestra integro al guardarlo en `patients.name`; despues pregunta el
 Si hay señales de texto de prueba, conserva el nombre completo pendiente y solicita
 confirmacion de su escritura o un nombre completo corregido. Un apellido inusual puede
 confirmarse sin cambios y el nombre anterior no se reemplaza mientras hay una duda.
+Recordatorios como `ya te lo habia dich`, negativas a dar el nombre y frases
+reconocibles de sintomas no sustituyen el nombre ni un candidato pendiente.
 El horario y el estado
 pendiente se conservan en el contexto de la conversacion. El validador local rechaza entradas
 evidentemente ilegibles sin perder ese estado. Un evaluador estructurado clasifica la
@@ -286,6 +292,9 @@ hora. El backend muestra los espacios libres, conserva la fecha y los slots en l
 conversacion y valida la seleccion del paciente antes de iniciar la recoleccion de
 nombre y motivo. Si primero falta el dia y no se indico una hora exacta, conserva la
 solicitud y procesa una respuesta relativa posterior, como `hoy`, sin depender del LLM.
+`Quisiera una cita a las 9 am` selecciona el horario ofrecido y conserva la misma
+reserva, su fecha y el nombre una vez aceptado. La lista invita a elegir un horario
+para continuar sin anunciar prematuramente el motivo como siguiente paso.
 Una solicitud con hora exacta continua hacia la recoleccion del motivo.
 
 ### Corte verificado: diagnostico seguro durante depuracion
@@ -307,6 +316,13 @@ del historial del LLM. Las expresiones ambiguas solicitan aclaracion y no altera
 el calendario. Una nueva gestion explicita o un abandono elimina la anterior.
 Al retomar se renueva la disponibilidad vencida y las cancelaciones/reprogramaciones
 requieren una confirmacion nueva. Un `Si` durante otro tema no ejecuta una accion pausada.
+En una reprogramacion, elegir una hora reconocida fuera de la disponibilidad ofrecida
+explica que esta ocupada o no disponible y conserva la gestion. Las respuestas sin
+hora valida y las ambiguedades AM/PM piden aclarar el dato correspondiente.
+Las selecciones naturales de reprogramacion, como `quisiera cambiarla a las 12 pm`,
+preferencias y peticiones corteses, continuan la misma gestion hacia confirmacion.
+Se admiten expresiones de mediodia; `12 p,` pide AM/PM completo conservando la cita
+y los horarios, para continuar con una respuesta corregida incluso tras reiniciar.
 
 ### Fase incremental: disponibilidad real
 

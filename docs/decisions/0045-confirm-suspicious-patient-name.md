@@ -24,6 +24,14 @@ motivo. La aceptacion muestra el nombre completo guardado. Los candidatos y mens
 de aclaracion repetidos no se convierten en motivos ni crean citas. Una pausa
 conserva el candidato, pero una afirmacion aislada no lo acepta mientras esta pausado.
 
+La calidad minima distingue tambien respuestas conversacionales reconocibles de
+un nombre. Se rechazan recordatorios como `ya te lo habia dich`, negativas a dar
+el nombre y expresiones completas de sintomas como `Tengo los ojos rojos`, aunque
+solo contengan letras. Las reglas locales normalizan acentos y mayusculas para
+comparar frases, sin alterar el nombre recibido ni usar diccionarios. Un rechazo
+no guarda un candidato nuevo, no reemplaza el nombre previo y no cambia de paso.
+Si ya habia un candidato sospechoso, sigue pendiente hasta su confirmacion o correccion.
+
 ## Consecuencias
 
 - Un apellido real puede requerir un turno de confirmacion; no queda rechazado por

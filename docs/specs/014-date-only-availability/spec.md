@@ -11,6 +11,8 @@ motivo. La evidencia de ejecucion se conserva en
 `docs/verification/2026-09-29-booking-date-and-llm-diagnostics.md`.
 La interrupcion de una seleccion pendiente se define en
 `specs/016-conversation-intent-routing/`.
+La seleccion natural del horario y su continuidad estan verificadas en
+`docs/verification/2026-10-10-booking-name-continuity.md`.
 
 ## Objetivo
 
@@ -49,6 +51,8 @@ zona horaria de agenda: `9:30 AM a 10:00 AM`, `11:30 AM a 12:00 PM` o
 `1:00 PM a 1:30 PM`. La hora no lleva cero inicial y los minutos tienen dos digitos.
 Medianoche es `12:00 AM` y mediodia `12:00 PM`. La misma presentacion se usa cuando
 se muestran horarios disponibles para reprogramar.
+La instruccion final invita a elegir un horario para continuar la solicitud;
+no anuncia el motivo como siguiente paso cuando aun falta capturar el nombre.
 
 ### RF-1403 - No mutacion prematura
 
@@ -68,6 +72,11 @@ solo es valida si coincide con uno de esos slots. Una seleccion valida debe crea
 estado pendiente de la cita y continuar con las preguntas fijas de nombre y motivo sin
 consultar al LLM. Una seleccion invalida debe conservar los slots y pedir que elija uno
 de la lista.
+Expresiones completas como `quisiera una cita a las 9 am` y variantes con
+`quiero`, `necesito`, `deseo` o `me gustaria` cuentan como seleccion contextual,
+no como una nueva reserva. Conservan el dia ofrecido y no invocan al LLM para
+preguntar el nombre. Una fecha adicional o `otra cita` conserva su enrutamiento
+como gestion nueva, segun `specs/016-conversation-intent-routing/`.
 
 ### RF-1406 - Fecha como continuacion de una reserva
 
@@ -94,7 +103,10 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
 10. `Quisiera agendar una` seguido de `hoy` consulta y muestra los horarios disponibles
     sin invocar al LLM en ninguno de esos dos turnos.
 11. Los slots de mañana, mediodia y tarde se muestran en 12 horas con AM/PM, y una
-    seleccion como `3:00 PM` sigue coincidiendo con el slot interno de las 15:00.
+     seleccion como `3:00 PM` sigue coincidiendo con el slot interno de las 15:00.
+12. El 10/10/2026, pedir lunes y elegir `quisiera una cita a las 9 am` conserva
+    el 12/10/2026 a las 9 AM. Recibir nombre y motivo crea una sola cita sin volver
+    a pedir el nombre, incluso tras reinicios del servicio.
 
 ## Fuera del alcance
 

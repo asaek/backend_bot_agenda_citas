@@ -98,3 +98,15 @@
 - [x] Ejecutar las regresiones y la suite completa en Raspberry Pi: 324 pruebas correctas.
 - [x] Recargar el backend y verificar las rutas locales/publicas y autenticacion;
       evidencia en `docs/verification/2026-10-09-general-appointment-reasons.md`.
+
+## Corte 11 - Nombre unico por reserva y respuestas conversacionales
+
+- [x] Reproducir la conversacion de lunes a las 9 AM y la aceptacion de `ya te lo habia dich`.
+- [x] Continuar una seleccion natural conservando la fecha y el estado backend de la reserva.
+- [x] Rechazar recordatorios, negativas y sintomas reconocibles como nombres sin reemplazar datos.
+- [x] Conservar candidatos completos y permitir confirmar nombres inusuales tras un rechazo.
+- [x] Verificar nombre y motivo tras reinicios con historial acotado.
+- [x] Cubrir el webhook hasta una sola cita/notificacion, incluidos duplicados de nombre y motivo.
+- [x] Completar revision, suite completa (346 pruebas), reinicio y verificaciones
+      HTTP/autenticacion en Raspberry Pi; evidencia en
+      `docs/verification/2026-10-10-booking-name-continuity.md`.

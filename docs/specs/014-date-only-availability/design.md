@@ -58,6 +58,8 @@ lleva cero inicial, y los minutos siempre tienen dos digitos. Un intervalo que
 cruza mediodia se presenta como `11:30 AM a 12:00 PM`. Este formato se comparte
 con las opciones de cita para reprogramar. La conversion afecta la presentacion;
 los timestamps ISO persistidos conservan la zona horaria para validar la seleccion.
+La instruccion final invita a continuar la solicitud sin prometer que el motivo
+sea el siguiente dato; sirve tambien si el nombre acompaña una lista renovada.
 
 En el siguiente mensaje, `ConversationService` interpreta la hora expresada por el
 paciente y la compara con los slots persistidos en la zona horaria de la agenda. Una
@@ -71,6 +73,10 @@ Antes de validar la seleccion, el router de
 `specs/016-conversation-intent-routing/` permite abandonar la reserva o procesar otra
 solicitud explicita. `cancela` sin objeto claro pide aclaracion y conserva la lista; una
 pregunta nueva se procesa sin quedar atrapada en la seleccion anterior.
+Las selecciones completas `quisiera una cita a las 9 am` y variantes se reconocen
+antes de las reglas de gestion nueva. Conservan la fecha de la lista y pasan
+directamente a `PendingAppointmentReason`, sin una captura textual del nombre
+decidida por el LLM. El reconocimiento completo excluye otra cita o fecha.
 
 El `SYSTEM_PROMPT` y el esquema de `check_availability` mantienen la misma regla para
 las fechas que no entren en el detector determinista. Estas instrucciones son una

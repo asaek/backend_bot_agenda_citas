@@ -195,18 +195,27 @@ class PendingAppointmentAvailability:
         *,
         timezone: ZoneInfo,
     ) -> PendingAvailabilitySlot | None:
+        matching_slots = self.matching_slots(text, timezone=timezone)
+        return matching_slots[0] if len(matching_slots) == 1 else None
+
+    def matching_slots(
+        self,
+        text: str,
+        *,
+        timezone: ZoneInfo,
+    ) -> tuple[PendingAvailabilitySlot, ...]:
+        """Distingue ausencia de disponibilidad de una eleccion ambigua AM/PM."""
         selected_time = parse_time_selection(text)
         if selected_time is None:
-            return None
+            return ()
         candidate_times = {selected_time}
-        if not _has_explicit_period(text) and selected_time[0] < 12:
-            candidate_times.add((selected_time[0] + 12, selected_time[1]))
-        matching_slots = [
+        if not _has_explicit_period(text) and selected_time[0] <= 12:
+            candidate_times.add(((selected_time[0] + 12) % 24, selected_time[1]))
+        return tuple(
             slot
             for slot in self.slots
             if _slot_local_time(slot, timezone) in candidate_times
-        ]
-        return matching_slots[0] if len(matching_slots) == 1 else None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,7 +391,7 @@ def format_availability_reply(
     *,
     timezone: ZoneInfo,
     selection_prompt: str = (
-        "Elige uno de estos horarios y te preguntare el motivo de la consulta."
+        "Elige uno de estos horarios para continuar con tu solicitud de cita."
     ),
 ) -> str:
     """Construye una lista de horarios sin exponer calendarios internos."""
@@ -419,7 +428,7 @@ _TIME_SELECTION_PATTERN = re.compile(
     r"\b(?:a\s+las?\s+)?(?P<hour>\d{1,2})"
     r"(?:(?:[:.])(?P<minute>\d{2}))?\s*"
     r"(?P<period>a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"
-    r"de\s+la\s+(?:manana|tarde|noche))?\b"
+    r"de\s+la\s+(?:manana|tarde|noche)|del\s+(?:mediodia|dia))?\b"
 )
 
 
@@ -430,6 +439,8 @@ def parse_time_selection(text: str) -> tuple[int, int] | None:
     normalized = _normalize(text)
     match = _TIME_SELECTION_PATTERN.search(normalized)
     if match is None:
+        if re.search(r"\bmediodia\b", normalized):
+            return (12, 0)
         return None
 
     hour = int(match.group("hour"))
@@ -447,6 +458,8 @@ def parse_time_selection(text: str) -> tuple[int, int] | None:
         if not 1 <= hour <= 12:
             return None
         return (12 if hour == 12 else hour + 12, minute)
+    if compact_period in {"delmediodia", "deldia"}:
+        return (12, minute) if hour == 12 else None
 
     if not 1 <= hour <= 12:
         return None
@@ -517,7 +530,7 @@ def _has_explicit_period(text: str) -> bool:
     return bool(
         re.search(
             r"\b(?:a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"
-            r"de\s+la\s+(?:manana|tarde|noche))\b",
+            r"de\s+la\s+(?:manana|tarde|noche)|mediodia|del\s+dia)\b",
             normalized,
         )
     )

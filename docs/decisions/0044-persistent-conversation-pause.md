@@ -17,6 +17,21 @@ no ofrecida pide aclaracion y conserva el estado. Las preguntas informativas y s
 pausan; una nueva gestion explicita de agenda o una peticion de olvidar la anterior
 la reemplaza; el abandono explicito elimina la solicitud.
 
+La seleccion contextual de reserva admite tambien `quisiera una cita a las 9 am`
+y variantes con `quiero`, `necesito`, `deseo` o `me gustaria`, con o sin verbo de
+agendar. El reconocimiento sigue anclado a una expresion completa: una fecha
+adicional o `otra cita` no se consume como eleccion del mismo dia. Esta regla
+evita perder la disponibilidad y recibir una captura textual del nombre del LLM
+sin estado persistido. El nombre aceptado pertenece a esa reserva y no se vuelve
+a pedir al recibir el motivo, incluso tras reiniciar con historial acotado.
+
+La seleccion contextual de reprogramacion tambien reconoce expresiones completas
+como `quisiera cambiarla a las 12 pm`, preferencias, verbos de movimiento y peticiones
+corteses. Estas referencias a la cita activa no inician otra gestion. Los periodos
+incompletos, como `12 p,`, solo piden aclaracion y conservan la disponibilidad;
+no generan una confirmacion. Mediodia se interpreta como 12:00 PM en el dia ofrecido.
+Otra cita o fecha sigue siendo una gestion nueva, y `¿12 pm?` expresa incertidumbre.
+
 El backend mueve un snapshot tipado a `paused_conversation_workflow` dentro del
 contexto SQLite existente. Conserva una sola gestion, el paso y datos recibidos,
 sin ampliar el historial del LLM ni incorporar memoria semantica. El prompt recibe

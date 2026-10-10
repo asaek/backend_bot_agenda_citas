@@ -296,6 +296,9 @@ disponibilidad del dia de destino completo. La respuesta conserva los slots ofre
 el ID de la cita y el ID de llamada en el contexto por 10 minutos. Solo una seleccion
 coincidente produce una accion pendiente de confirmacion; el intento de seleccionar una
 hora fuera de la lista no genera una mutacion.
+Una hora reconocida sin coincidencias explica que esta ocupada o no disponible,
+en vez de afirmar que no se entendio. `matching_slots()` distingue esa ausencia
+de una ambiguedad AM/PM; ambas conservan la cita y la lista pendiente.
 
 Si el paciente solicita cambiar solo la hora, `ConversationService` identifica la cita
 en el ultimo listado persistido y presenta la disponibilidad de ese dia antes de pedir
@@ -314,11 +317,23 @@ como `cancela` solicita aclaracion y no borra estado ni ejecuta una mutacion. Un
 confirmacion descartada no puede ejecutarse con un `Si` posterior.
 Una expresion completa de seleccion, como `agendame a las 11 am`, continua el flujo
 si corresponde a la lista; una hora dentro de otra instruccion no cuenta como eleccion.
+Tambien se reconocen `quisiera una cita a las 9 am`, `necesito una cita a las 9 am`
+y `me gustaria una cita a las 9 am`, con saludo y cortesia opcionales. El patron
+completo conserva la fecha ofrecida y la transicion backend hacia nombre y motivo;
+una fecha adicional o una solicitud de `otra cita` sigue iniciando otra gestion.
 Los saludos y preguntas informativas mueven el snapshot tipado de
 `conversation_workflow.py` a `paused_conversation_workflow` dentro del mismo contexto
 SQLite. La transaccion conserva solo una gestion activa o pausada y el agente recibe
 un recordatorio operativo independiente del historial recortado. Sus solicitudes de
 mutacion se interceptan mientras responde otro tema con una gestion pausada.
+
+La seleccion contextual de reprogramacion admite verbos de cambio, preferencias
+y peticiones corteses completas, sin confundir `quisiera cambiarla a las 12 pm`
+con otra gestion. El reconocimiento anclado mantiene fuera otras citas, fechas
+adicionales y comandos. `appointment_availability.py` interpreta mediodia como
+12:00 PM y conserva la comparacion en la zona horaria de agenda. Un periodo
+incompleto solo activa aclaracion; no se considera respuesta esperada ni borra
+el snapshot. Las selecciones validas llegan al flujo existente de confirmacion.
 
 Retomar restaura el paso pendiente y los datos recibidos. Las fechas y selecciones
 claras pueden retomarlo implicitamente; un `Si` no reactiva una confirmacion pausada.
@@ -353,6 +368,12 @@ pregunta desde el segundo intento; no se añade una migracion de persistencia.
 El validador del nombre distingue entradas invalidas de partes que necesitan
 confirmacion; no usa un diccionario ni modifica la escritura. Las señales de texto
 de prueba se aplican por palabra latina y no se extrapolan a otros alfabetos.
+Antes de aceptar un nombre, reglas de frase normalizadas por acentos y mayusculas
+descartan recordatorios como `ya te lo habia dich`, negativas a proporcionarlo y
+expresiones reconocibles de sintomas como `Tengo los ojos rojos`. Estas reglas
+no se aplican a palabras sueltas de un apellido ni corrigen el texto guardado.
+Un rechazo conserva el nombre previo, el candidato y el horario. El nombre aceptado
+y `name_required=false` siguen siendo autoritativos en esa reserva tras un reinicio.
 `PendingAppointmentReason` conserva `name_candidate`, `name_required=true` y el
 ultimo `name_clarification_message_id` en el mismo JSON. Una afirmacion explicita
 acepta ese candidato completo; un nuevo nombre se valida de nuevo y una negativa

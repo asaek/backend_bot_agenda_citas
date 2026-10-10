@@ -8,6 +8,18 @@ import unicodedata
 from appointment_confirmation import ConfirmationDecision
 
 
+_CONVERSATIONAL_NAME_PATTERNS = (
+    r"^(?:ya\s+)?(?:te|se)\s+(?:lo\s+)?"
+    r"(?:(?:he|habia)\s+|acabo\s+de\s+)?(?:dich[oa]?|dije|decir|di|enviado|mande)\b",
+    r"^ya\s+lo\s+(?:dich[oa]?|dije|he\s+dicho|habia\s+dicho)\b",
+    r"^no\s+(?:se|recuerdo)(?:\s|$)",
+    r"^no\s+quiero\s+(?:dar(?:te)?|decir(?:te)?|compartir)\s+(?:mi\s+)?nombre\b",
+    r"^(?:tengo|siento|padezco)\s+(?:los?|las?|un[oa]s?|dolor|molestias?|problemas?)\b",
+    r"^me\s+(?:duelen?|arden?|molestan?|pican?)\b",
+    r"^veo\s+(?:borroso|mal|doble|oscuro)\b",
+)
+
+
 class PatientNameValidationCode(StrEnum):
     ACCEPTED = "accepted"
     INVALID = "invalid"
@@ -20,11 +32,16 @@ class PatientNameValidationResult:
     code: PatientNameValidationCode
 
 
-def classify_patient_name_confirmation(text: str) -> ConfirmationDecision:
-    """Reconoce respuestas completas a la pregunta por el nombre recibido."""
+def _normalize_name_reply(text: str) -> str:
+    """Normaliza para comparar frases, nunca para guardar el nombre."""
     normalized = unicodedata.normalize("NFD", text.casefold())
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    normalized = " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
+    return " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
+
+
+def classify_patient_name_confirmation(text: str) -> ConfirmationDecision:
+    """Reconoce respuestas completas a la pregunta por el nombre recibido."""
+    normalized = _normalize_name_reply(text)
     if normalized in {
         "si", "si es correcto", "si esta correcto", "si esta bien",
         "si ese es mi nombre", "correcto", "es correcto", "esta correcto",
@@ -58,6 +75,7 @@ def validate_patient_name(text: str) -> PatientNameValidationResult:
         or any(not any(c.isalpha() for c in part) for part in normalized.split())
         or classify_patient_name_confirmation(normalized) is not ConfirmationDecision.UNKNOWN
         or normalized.casefold() in {"ok", "okay", "gracias", "claro"}
+        or _is_conversational_name_reply(normalized)
     ):
         return PatientNameValidationResult(normalized, PatientNameValidationCode.INVALID)
 
@@ -67,6 +85,11 @@ def validate_patient_name(text: str) -> PatientNameValidationResult:
         normalized,
         PatientNameValidationCode.NEEDS_CONFIRMATION if suspicious else PatientNameValidationCode.ACCEPTED,
     )
+
+
+def _is_conversational_name_reply(text: str) -> bool:
+    normalized = _normalize_name_reply(text)
+    return any(re.search(pattern, normalized) for pattern in _CONVERSATIONAL_NAME_PATTERNS)
 
 
 def _is_suspicious_latin_word(word: str) -> bool:

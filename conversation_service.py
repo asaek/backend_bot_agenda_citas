@@ -383,6 +383,9 @@ class ConversationService:
         )
         if pending_reply is not None:
             return pending_reply
+        pending_reply = await self._resolve_pending_appointment_availability(context)
+        if pending_reply is not None:
+            return pending_reply
         reschedule_reply = await self._resolve_reschedule_request_without_target_time(
             context,
         )
@@ -397,9 +400,6 @@ class ConversationService:
         date_question = self._begin_pending_appointment_date(context)
         if date_question is not None:
             return date_question
-        pending_reply = await self._resolve_pending_appointment_availability(context)
-        if pending_reply is not None:
-            return pending_reply
         return await self._generate_agent_reply(context, appointment_event_sink)
 
     async def _generate_agent_reply(
@@ -480,6 +480,7 @@ class ConversationService:
             return self._pending_interruption_clarification(
                 workflow,
                 expected_reply=expected_reply,
+                incoming_text=context.incoming_text,
             )
         if interruption is PendingInterruption.PAUSE:
             self._replace_workflow_context(
@@ -567,6 +568,10 @@ class ConversationService:
             return self._abandoned_workflow_reply(workflow)
         if interruption is PendingInterruption.AMBIGUOUS_CANCEL:
             return self._ambiguous_cancel_reply(workflow)
+        if interruption is PendingInterruption.CLARIFY and not explicit_resume:
+            return self._pending_interruption_clarification(
+                workflow, expected_reply=expected, incoming_text=context.incoming_text,
+            )
         can_resume_with_data = (
             expected and interruption is PendingInterruption.NONE
             and workflow.action is None
@@ -837,11 +842,12 @@ class ConversationService:
             "tienes? Todavía no se ha creado una cita nueva."
         )
 
-    @staticmethod
     def _pending_interruption_clarification(
+        self,
         workflow: PendingConversationWorkflow,
         *,
         expected_reply: bool,
+        incoming_text: str,
     ) -> str:
         if workflow.action is not None:
             return CONFIRMATION_RESPONSE_INSTRUCTIONS
@@ -851,6 +857,41 @@ class ConversationService:
                     "¿Quieres elegir ese horario? Escribe la hora para seleccionarlo, "
                     "o dime si prefieres dejar tu cita como está."
                 )
+            selected_time = parse_time_selection(incoming_text)
+            if is_pending_slot_selection(
+                incoming_text, workflow.flow, allow_incomplete_period=True,
+            ) and not is_pending_slot_selection(incoming_text, workflow.flow):
+                if selected_time == (12, 0) and re.search(
+                    r"\b12\s*p[.,]?(?:\s|$)", incoming_text.casefold(),
+                ):
+                    return (
+                        "¿Te refieres a las 12 del mediodía? Escribe la hora completa "
+                        "con AM o PM, por ejemplo ‘12 pm’, para seleccionarla."
+                    )
+                return (
+                    "La indicación AM o PM quedó incompleta. Escribe la hora completa, "
+                    "por ejemplo ‘12 pm’, para seleccionar el horario."
+                )
+            if (
+                is_pending_slot_selection(incoming_text, workflow.flow)
+                and selected_time is not None
+                and 0 <= selected_time[1] < 60
+                and workflow.availability is not None
+            ):
+                matching_slots = workflow.availability.matching_slots(
+                    incoming_text, timezone=self._timezone,
+                )
+                if not matching_slots:
+                    return (
+                        "Ese horario ya está ocupado o no está disponible. "
+                        "Elige uno de los horarios ofrecidos o dime si prefieres "
+                        "dejar tu cita como está."
+                    )
+                if len(matching_slots) > 1:
+                    return (
+                        "Hay más de un horario que coincide. Indica AM o PM "
+                        "para elegir el que prefieres."
+                    )
             return (
                 "No identifiqué una hora de la lista. Elige uno de los horarios ofrecidos "
                 "o dime si prefieres dejar tu cita como está."

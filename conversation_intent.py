@@ -24,7 +24,7 @@ class PendingInterruption(StrEnum):
 
 
 _ABANDON_PATTERNS = (
-    r"\b(?:dejala|dejalo|deja\s+la\s+cita|deja\s+la\s+reserva)\s+"
+    r"\b(?:dejala|dejalo|dejarla|dejarlo|deja\s+la\s+cita|deja\s+la\s+reserva)\s+"
     r"(?:asi|como\s+esta|tal\s+cual|igual)\b",
     r"\b(?:mejor\s+no|no\s+gracias|no\s+quiero\s+seguir|"
     r"no\s+quiero\s+continuar|no\s+quiero\s+agendar|"
@@ -36,11 +36,12 @@ _ABANDON_PATTERNS = (
     r"abandonar|para)\b.{0,30}\b(?:esta\s+)?(?:solicitud|reserva|"
     r"busqueda|cambio|reprogramacion|agendamiento)\b",
 )
+_BOOKING_REQUEST_PREFIX = r"(?:quiero|quisiera|necesito|deseo|me\s+gustaria)"
 _BOOKING_PATTERNS = (
     r"\b(?:agendame|reservame|programame|sacar\s+(?:una\s+)?cita)\b",
-    r"\b(?:quiero|quisiera|necesito|busco|solicito)\s+(?:agendar|"
+    rf"\b(?:{_BOOKING_REQUEST_PREFIX}|busco|solicito)\s+(?:agendar|"
     r"reservar|programar)\b",
-    r"\b(?:quiero|quisiera|necesito|busco)\s+(?:una\s+)?cita\b",
+    rf"\b(?:{_BOOKING_REQUEST_PREFIX}|busco)\s+(?:(?:una|otra)\s+)?cita\b",
 )
 _APPOINTMENT_LIST_PATTERNS = (
     r"\bmis\s+citas\b",
@@ -48,14 +49,25 @@ _APPOINTMENT_LIST_PATTERNS = (
     r"\bcitas?\s+(?:tengo|programadas|agendadas)\b",
     r"\b(?:ver|consultar|revisar|mostrar|listar)\s+(?:mis\s+)?citas?\b",
 )
-_RESCHEDULE_PATTERN = r"\b(?:cambiar|modificar|reprogramar|mover)\w*\b"
+_RESCHEDULE_INFINITIVE_VERB = r"(?:cambiar|modificar|reprogramar|mover|pasar|poner)"
+_RESCHEDULE_IMPERATIVE_VERB = r"(?:cambia|modifica|reprograma|mueve|pasa|pon)"
+_RESCHEDULE_LEAVE_REQUEST = (
+    r"\b(?:dejarla|dejala|(?:dejar|deja)\s+(?:(?:la|mi|esa|otra)\s+)?"
+    r"(?:cita|hora|horario))\b"
+)
+_RESCHEDULE_PATTERN = (
+    rf"\b(?:{_RESCHEDULE_INFINITIVE_VERB}\w*|{_RESCHEDULE_IMPERATIVE_VERB}(?:la|me)?)\b|"
+    rf"{_RESCHEDULE_LEAVE_REQUEST}"
+)
 _RESCHEDULE_REFERENCE_PATTERN = (
     r"\b(?:cita|hora|horario)\b|"
-    r"\b(?:cambiarla|modificarla|reprogramarla|moverla)\b"
+    rf"\b(?:{_RESCHEDULE_INFINITIVE_VERB}|{_RESCHEDULE_IMPERATIVE_VERB})(?:la|me)\b|"
+    rf"{_RESCHEDULE_LEAVE_REQUEST}"
 )
 _RESCHEDULE_TARGET_TIME_PATTERNS = (
     r"\b(?:a|para)\s+(?:las?\s+)?\d{1,2}(?::\d{2})?\b",
-    r"\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b",
+    r"\b\d{1,2}(?::\d{2})?\s*(?:a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"
+    r"del\s+(?:mediodia|dia)|de\s+la\s+(?:manana|tarde|noche))\b",
     r"\b(?:mediodia|medianoche)\b",
 )
 _CANCEL_PATTERN = r"\b(?:cancela\w*|cancelar|cancelame)\b"
@@ -82,34 +94,71 @@ _QUESTION_START = re.compile(
     r"^(?:que|quien|quienes|como|cuando|donde|cual|cuales|cuanto|"
     r"cuanta|por\s+que|puedes|podrias|tienen|hay|me\s+puedes)\b"
 )
+_COST_QUESTION_START = re.compile(
+    r"^(?:(?:cual|que)\s+(?:(?:es|seria|sera)\s+)?(?:el\s+)?(?:costo|precio)|"
+    r"cuanto\s+(?:cuesta|costaria|vale))\b"
+)
 _TIME_REPLY = (
-    r"(?:(?:a|para)\s+)?(?:las?\s+)?\d{1,2}"
+    r"(?:(?:(?:a|para)\s+)?(?:las?\s+)?\d{1,2}"
     r"(?:[:.]\d{2})?\s*(?:a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"
-    r"de\s+la\s+(?:manana|tarde|noche))?"
+    r"de\s+la\s+(?:manana|tarde|noche)|del\s+(?:mediodia|dia))?|"
+    r"(?:(?:a|para)\s+)?(?:el\s+)?mediodia|al\s+mediodia)"
+)
+_INCOMPLETE_TIME_REPLY = (
+    r"(?:(?:a|para)\s+)?(?:las?\s+)?\d{1,2}(?:[:.]\d{2})?\s*[ap]\.?"
+)
+_RESCHEDULE_SELECTION_VERB = rf"(?:{_RESCHEDULE_INFINITIVE_VERB}|dejar)(?:la|me)?"
+_POLITE_RESCHEDULE_PREFIX = (
+    rf"(?:me\s+)?(?:puedes|podrias)\s+{_RESCHEDULE_SELECTION_VERB}"
+)
+_RESCHEDULE_SELECTION_PREFIX = (
+    rf"(?:{_RESCHEDULE_IMPERATIVE_VERB}(?:la|me)?|deja(?:la|me)?|"
+    rf"(?:quiero|quisiera|necesito|deseo|prefiero|me\s+gustaria)\s+{_RESCHEDULE_SELECTION_VERB}|"
+    rf"{_POLITE_RESCHEDULE_PREFIX}|"
+    r"elijo|prefiero|mejor|que\s+sea|me\s+sirve|me\s+viene\s+bien|me\s+quedo\s+con)"
 )
 
 
-def is_pending_slot_selection(text: str, flow: PendingConversationFlow) -> bool:
-    """Reconoce una eleccion completa, no una hora dentro de otra instruccion."""
+def is_pending_slot_selection(
+    text: str,
+    flow: PendingConversationFlow,
+    *,
+    allow_incomplete_period: bool = False,
+) -> bool:
+    """Reconoce una seleccion contextual; un periodo incompleto solo sirve para aclarar."""
     if flow not in {
         PendingConversationFlow.BOOKING_AVAILABILITY,
         PendingConversationFlow.RESCHEDULE_AVAILABILITY,
     }:
         return False
     prefix = (
-        r"(?:agendame|reservame|programame|damela|dame|quiero|elijo|prefiero|"
-        r"(?:quiero|quisiera)\s+(?:agendar|reservar|programar))"
+        r"(?:agendame|reservame|programame|damela|dame|elijo|prefiero|"
+        rf"{_BOOKING_REQUEST_PREFIX}"
+        r"(?:\s+(?:agendar|reservar|programar))?)"
     )
+    time_reply = _TIME_REPLY
     if flow is PendingConversationFlow.RESCHEDULE_AVAILABILITY:
-        prefix = r"(?:cambiala|muevela|reprogramala|quiero\s+cambiar|elijo|prefiero)"
+        prefix = _RESCHEDULE_SELECTION_PREFIX
+        if allow_incomplete_period:
+            time_reply = rf"(?:{_TIME_REPLY}|{_INCOMPLETE_TIME_REPLY})"
     # Conservar ':' y '.' para la hora, normalizando solamente acentos y espacios.
     normalized = unicodedata.normalize("NFD", text.casefold())
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    normalized = " ".join(normalized.split()).strip(" .")
+    normalized = re.sub(r"[,;]\s*(?=(?:por\s+favor|gracias)\b)", " ", normalized)
+    normalized = " ".join(normalized.split()).strip(" .!,")
+    if "?" in normalized or "¿" in normalized:
+        unwrapped = normalized.replace("¿", "").rstrip("?").strip()
+        if flow is not PendingConversationFlow.RESCHEDULE_AVAILABILITY or re.match(
+            rf"(?:hola[,\s]+)?(?:por\s+favor[,\s]+)?{_POLITE_RESCHEDULE_PREFIX}\s+",
+            unwrapped,
+        ) is None:
+            return False
+        normalized = unwrapped.replace("?", "")
     return re.fullmatch(
         rf"(?:hola[,\s]+)?(?:por\s+favor[,\s]+)?"
-        rf"(?:{prefix}\s+(?:(?:una|la|esa)\s+cita\s+)?)?"
-        rf"{_TIME_REPLY}(?:\s+por\s+favor)?",
+        rf"(?:{prefix}\s+(?:(?:una|la|esa|mi)\s+cita\s+)?)?"
+        rf"(?:(?:el|ese)\s+horario\s+(?:de\s+)?)?"
+        rf"{time_reply}(?:\s+(?:por\s+favor|gracias))?",
         normalized,
     ) is not None
 
@@ -131,8 +180,11 @@ def classify_pending_interruption(
     if _is_abandonment(normalized):
         return PendingInterruption.ABANDON
 
-    if is_pending_slot_selection(text, flow):
+    if is_pending_slot_selection(text, flow, allow_incomplete_period=True):
         return PendingInterruption.NONE if expected_reply else PendingInterruption.CLARIFY
+
+    if _COST_QUESTION_START.search(normalized) is not None:
+        return PendingInterruption.PAUSE
 
     if _starts_new_appointment_task(normalized):
         return PendingInterruption.SWITCH
@@ -194,7 +246,7 @@ def is_reschedule_request_without_target_time(text: str) -> bool:
         return False
     if not _matches_any(normalized, (_RESCHEDULE_REFERENCE_PATTERN,)):
         return False
-    return not _matches_any(text.casefold(), _RESCHEDULE_TARGET_TIME_PATTERNS)
+    return not _matches_any(normalized, _RESCHEDULE_TARGET_TIME_PATTERNS)
 
 
 def _is_abandonment(normalized: str) -> bool:

@@ -113,7 +113,7 @@ class WebhookTests(unittest.TestCase):
         app.state.availability_provider = provider
         app.state.tool_executor = create_tool_executor(provider, environment)
 
-    def set_fixed_calendar_runtime(self) -> None:
+    def set_fixed_calendar_runtime(self, now: datetime | None = None) -> None:
         provider = FakeCalendarProvider()
         business_hours = BusinessHours(
             timezone_name="UTC",
@@ -128,7 +128,7 @@ class WebhookTests(unittest.TestCase):
             provider=provider,
             business_hours=business_hours,
             default_timezone="UTC",
-            now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
+            now=now or datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
         )
 
     def test_google_calendar_provider_requires_explicit_runtime_selection(self) -> None:
@@ -268,6 +268,8 @@ class WebhookTests(unittest.TestCase):
             "LLM_API_KEY": "test-key",
             "LLM_MODEL": "test-model",
             "LLM_REASON_EVALUATION_ENABLED": "false",
+            "DOCTOR_NOTIFICATIONS_ENABLED": "false",
+            "DOCTOR_WHATSAPP_NUMBERS": "",
             "DEBUG_MODE": "false",
             "DEBUG_WHATSAPP_NUMBERS": "",
         }
@@ -1191,6 +1193,54 @@ class WebhookTests(unittest.TestCase):
         self.assertNotIn("junajusndqwd", doctor_bodies[0])
         self.assertEqual(len(app.state.calendar_provider.appointments), 1)
         self.assertEqual(app.state.calendar_provider.appointments[0].start_at.hour, 11)
+
+    def test_natural_booking_rejects_a_name_reminder_and_notifies_once_on_retries(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(replies=(
+            "¡Hola, buenos días! ¿En qué puedo ayudarte?",
+            '{"summary":"Solicitud de cita por ojos rojos.","priority_signals":[]}',
+        ))
+        name_payload = self.text_payload(message_id="wamid.natural-name", text="Asael Ponce Silva")
+        reason_payload = self.text_payload(message_id="wamid.natural-reason", text="Tengo los ojos rojos")
+        with self.configured_runtime(
+            fake_client,
+            tool_provider,
+            {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"},
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.natural-hello", text="Hola buenos dias"),
+                    self.text_payload(message_id="wamid.natural-day", text="quisiera agendar una cita para el dia lunes"),
+                    self.text_payload(message_id="wamid.natural-slot", text="quisiera una cita a las 9 am"),
+                    self.text_payload(message_id="wamid.natural-reminder", text="ya te lo habia dich"),
+                )
+                self.assertEqual([response.status_code for response in responses], [200] * 4)
+                self.assertIn("nombre completo", fake_client.sent_messages[2][1])
+                self.assertNotIn("Guardé", fake_client.sent_messages[3][1])
+                self.assertEqual(app.state.calendar_provider.appointments, ())
+                self.assertTrue(all(recipient == "5491100000000" for recipient, _ in fake_client.sent_messages))
+                with open_database(self.database_path) as connection:
+                    self.assertIsNone(connection.execute("SELECT name FROM patients").fetchone()[0])
+                responses = self.post_messages(client, name_payload, name_payload, reason_payload, reason_payload)
+        self.assertEqual([response.status_code for response in responses], [200] * 4)
+        patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+        self.assertEqual(len(patient_bodies), 6)
+        self.assertIn("Asael Ponce Silva", patient_bodies[4])
+        self.assertIn("motivo", patient_bodies[4])
+        self.assertIn("confirmada", patient_bodies[5])
+        self.assertNotIn("nombre completo", patient_bodies[5])
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertEqual(len(doctor_bodies), 1)
+        self.assertIn("Nombre: Asael Ponce Silva", doctor_bodies[0])
+        self.assertIn("Tengo los ojos rojos", doctor_bodies[0])
+        self.assertNotIn("ya te lo habia dich", doctor_bodies[0])
+        self.assertEqual(tool_provider.call_count, 2)
+        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+        appointment = app.state.calendar_provider.appointments[0]
+        self.assertEqual(appointment.start_at, datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
+        self.assertEqual(appointment.reason, "Tengo los ojos rojos")
 
     def test_invalid_appointment_reason_does_not_notify_the_doctor(self) -> None:
         self.set_fixed_calendar_runtime()

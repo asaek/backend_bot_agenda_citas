@@ -98,6 +98,40 @@ class PatientNameCollectionTests(unittest.TestCase):
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
 
+    def test_conversational_replies_are_not_saved_as_names_or_used_to_book(self) -> None:
+        self.start_booking()
+        with self.database.transaction() as connection:
+            self.service.patients.update_name(
+                connection, self.context.patient_id, "Ana Prueba", self.now.isoformat(),
+            )
+        for text in (
+            "ya te lo habia dich",
+            "ya te lo había dicho",
+            "ya te dije mi nombre",
+            "te lo acabo de decir",
+            "no quiero darte mi nombre",
+            "no recuerdo",
+            "no sé",
+            "Tengo los ojos rojos",
+            "me duelen los ojos",
+        ):
+            with self.subTest(text=text):
+                reply = self.send(text)
+                self.assertNotIn("Guardé", reply)
+                self.assertIn("nombre completo", reply)
+                self.assertEqual(self.stored_name(), "Ana Prueba")
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+                self.service = self.new_service()
+        self.assertIn("Asael Ponce Silva", self.send("Asael Ponce Silva"))
+        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertEqual(self.stored_name(), "Asael Ponce Silva")
+        self.assertEqual(len(self.provider.appointments), 1)
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+        self.assertEqual(self.provider.appointments[0].reason, "Tengo los ojos rojos")
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 0)
+
     def test_corrected_name_replaces_candidate_and_keeps_the_selected_slot(self) -> None:
         self.start_booking()
         self.send("Asael Ponce jhbashkda")
@@ -145,6 +179,23 @@ class PatientNameCollectionTests(unittest.TestCase):
         self.assertIn(name, self.send("Sí"))
         self.assertEqual(self.stored_name(), name)
         self.assertEqual(self.provider.appointments, ())
+
+    def test_conversational_reply_keeps_the_full_candidate_until_confirmed(self) -> None:
+        self.start_booking()
+        name = "Jan Chrząszcz"
+        self.send(name)
+        for text in ("ya te lo habia dich", "Tengo los ojos rojos"):
+            with self.subTest(text=text):
+                self.service = self.new_service()
+                self.assertIn(f"Recibí ‘{name}’", self.send(text))
+                self.assertIsNone(self.stored_name())
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+        self.assertIn(name, self.send("Sí, es correcto"))
+        self.assertEqual(self.stored_name(), name)
+        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
+        self.assertEqual(len(self.events), 1)
 
     def test_negative_confirmation_requests_full_name_without_abandoning_booking(self) -> None:
         self.start_booking()

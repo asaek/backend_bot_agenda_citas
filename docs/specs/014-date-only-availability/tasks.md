@@ -37,3 +37,12 @@
 - [x] Ejecutar suite completa, reiniciar backend y verificar las rutas HTTP.
 
 Evidencia: `docs/verification/2026-10-07-twelve-hour-lists.md`.
+
+## Ampliacion - Seleccion natural de una reserva
+
+- [x] Reproducir `quisiera una cita a las 9 am` despues de la disponibilidad del lunes.
+- [x] Conservar el dia y transferir la seleccion al flujo backend de nombre y motivo.
+- [x] Ajustar la instruccion de la lista al flujo real y a reservas con nombre ya recibido.
+- [x] Cubrir la fecha 12/10/2026, reinicios, nombre persistido y motivo original.
+- [x] Completar revision, suite de 346 pruebas y verificaciones del runtime en
+      Raspberry Pi; evidencia en `docs/verification/2026-10-10-booking-name-continuity.md`.
