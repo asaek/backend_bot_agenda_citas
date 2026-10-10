@@ -45,3 +45,14 @@
 - [x] Mostrar disponibilidad del dia de la cita antes de preguntar por una hora destino.
 - [x] Resolver la cita desde la lista recientemente mostrada y aclarar si hay varias.
 - [x] Ejecutar la suite completa y verificar los endpoints en Raspberry Pi.
+
+## Corte 6 - Una confirmacion de cancelacion desde la primera pregunta
+
+- [x] Reproducir el listado del lunes a las 10 y 12 y la segunda pregunta tras el primer `si por favor`.
+- [x] Confirmar que la afirmacion se reconoce y la primera pregunta del LLM carecia de estado backend.
+- [x] Resolver la cancelacion directa en agenda y guardar la accion antes de preguntar.
+- [x] Filtrar fecha, hora, minutos y periodo sin elegir otra cita si la referencia no coincide.
+- [x] Mantener la aclaracion de identidad para varios objetivos y las negativas sin mutacion.
+- [x] Sustituir preguntas textuales reconocibles sin estado y bloquear afirmaciones aisladas del LLM.
+- [x] Verificar reinicio, cancelacion de una sola cita y una notificacion en reintentos del webhook.
+- [ ] Completar revision y despliegue verificado en Raspberry Pi.

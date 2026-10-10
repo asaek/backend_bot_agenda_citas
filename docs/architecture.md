@@ -291,6 +291,18 @@ lectura falla, devuelve el error publico de agenda y no guarda accion pendiente.
 respuesta negativa o vencida no llama a una mutacion del calendario. Solo la ejecucion
 confirmada puede producir un evento de cita y una notificacion al doctor.
 
+Para una cancelacion directa, `is_cancellation_request()` dirige el mensaje a una
+lectura backend de agenda antes del agente. La referencia de fecha explicita prevalece
+sobre el ultimo listado; hora, minutos y AM/PM filtran candidatos sin sustitucion
+silenciosa. Una coincidencia unica vuelve a resolverse y se persiste como accion
+antes de mostrar la primera pregunta. El primer `si por favor` ejecuta esa misma
+accion tras un reinicio; no inicia otra confirmacion. Candidatas ambiguas o ausentes
+reciben una aclaracion de identidad sin mutacion.
+Una pregunta textual reconocible del LLM sin accion pendiente se reemplaza por
+una solicitud de dia/horario, y una afirmacion aislada no permite al agente crear
+una cancelacion desde el historial. Las pausas, expiracion y entrega idempotente
+siguen conservando sus fronteras existentes.
+
 Antes de crear una confirmacion de reprogramacion, `ConversationService` consulta la
 disponibilidad del dia de destino completo. La respuesta conserva los slots ofrecidos,
 el ID de la cita y el ID de llamada en el contexto por 10 minutos. Solo una seleccion

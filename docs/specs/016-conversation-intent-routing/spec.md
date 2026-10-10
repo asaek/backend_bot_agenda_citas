@@ -58,6 +58,8 @@ reprogramar, cancelar una cita u olvidar la tarea actual debe limpiar el estado
 pendiente anterior y procesar el mensaje nuevo por su flujo normal. Una seleccion
 contextual de la lista, incluso con `agendame`, continua la misma reserva. Una
 solicitud real de cancelacion conserva la confirmacion explicita ya definida.
+Una solicitud directa que referencia `la de las 10 am` sin repetir la palabra
+cita tambien inicia la gestion de cancelacion; un `cancela` aislado sigue siendo ambiguo.
 La seleccion de reserva tambien admite `quisiera una cita a las 9 am` y variantes
 con `quiero`, `necesito`, `deseo` o `me gustaria`, con saludo/cortesia opcionales.
 Una expresion completa conserva el dia ofrecido; una fecha adicional o una solicitud

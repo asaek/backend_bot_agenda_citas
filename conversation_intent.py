@@ -243,6 +243,23 @@ def is_resume_request(text: str) -> bool:
     ) is not None
 
 
+def is_cancellation_request(text: str) -> bool:
+    """Reconoce una peticion directa de cancelar una cita, no una pregunta informativa."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(_normalize(text).split())
+    return (
+        re.match(
+            r"^(?:hola\s+)?(?:por\s+favor\s+)?"
+            r"(?:(?:quiero|quisiera|necesito|deseo|me\s+gustaria)\s+)?"
+            r"(?:cancelar(?:la)?|cancela(?:la|me)?|"
+            r"(?:me\s+)?(?:puedes|podrias)\s+cancelar(?:la)?)\b",
+            normalized,
+        ) is not None
+        and re.search(r"\b(?:cita|cancelarla|cancelala|la\s+de\s+(?:las?\s+)?\d{1,2})\b", normalized) is not None
+    )
+
+
 def is_reschedule_request_without_target_time(text: str) -> bool:
     """Reconoce una peticion explicita de cambio que aun no elige hora destino."""
     if not isinstance(text, str):
@@ -266,6 +283,8 @@ def _is_abandonment(normalized: str) -> bool:
 
 
 def _starts_new_appointment_task(normalized: str) -> bool:
+    if is_cancellation_request(normalized):
+        return True
     if _matches_any(normalized, _BOOKING_PATTERNS + _APPOINTMENT_LIST_PATTERNS):
         return True
     if (

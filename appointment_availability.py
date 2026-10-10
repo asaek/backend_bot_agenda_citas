@@ -209,7 +209,7 @@ class PendingAppointmentAvailability:
         if selected_time is None:
             return ()
         candidate_times = {selected_time}
-        if not _has_explicit_period(text) and selected_time[0] <= 12:
+        if not has_explicit_time_period(text) and selected_time[0] <= 12:
             candidate_times.add(((selected_time[0] + 12) % 24, selected_time[1]))
         return tuple(
             slot
@@ -530,7 +530,8 @@ def _slot_local_time(
     return start_at.hour, start_at.minute
 
 
-def _has_explicit_period(text: str) -> bool:
+def has_explicit_time_period(text: str) -> bool:
+    """Indica si el texto expresa AM/PM o un periodo del dia de forma explicita."""
     normalized = _normalize(normalize_time_selection_punctuation(text))
     return bool(
         re.search(

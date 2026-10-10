@@ -155,6 +155,11 @@ paciente, los ultimos 10 digitos del telefono, el resumen conversacional y las
 señales de prioridad disponibles. El resumen sera contenido obligatorio de esos
 tres mensajes y no se enviara de forma independiente.
 
+Una solicitud directa como `quisiera cancelar la de las 10 am` se resuelve en
+agenda y guarda su accion antes de preguntar. El primer `si por favor` cancela
+esa cita; una referencia ambigua o no coincidente pide precisar dia y horario.
+Una pregunta textual del modelo sin accion guardada no cuenta como confirmacion.
+
 Las solicitudes para cancelar o reprogramar una cita requieren una confirmacion
 explicita del paciente. La primera solicitud no modifica la agenda y muestra la
 fecha, el horario y el motivo de la cita sin exponer su ID interno; la operacion se

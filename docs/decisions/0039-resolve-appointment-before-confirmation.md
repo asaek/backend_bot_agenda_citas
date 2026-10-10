@@ -20,6 +20,15 @@ la cita exacta dentro del alcance del paciente. Si no existe, devuelve
 al proveedor. En ambos casos no pide confirmacion y no permite una mutacion posterior.
 El modo debug puede añadir el codigo publico de agenda solo al remitente autorizado.
 
+La misma frontera controla la primera pregunta de cancelacion. Solicitudes directas
+como `quisiera cancelar la de las 10 am` se resuelven en el backend contra la agenda,
+con fecha explicita o contexto del listado y una hora que conserva minutos y periodo.
+Solo una coincidencia permite guardar la accion y preguntar. Referencias no coincidentes
+o ambiguas se aclaran sin sustituirlas por otra cita. La pregunta textual del modelo
+no crea estado ni autoriza usar una afirmacion posterior para iniciar la gestion.
+El respaldo de respuesta sustituye preguntas reconocibles sin estado por una aclaracion,
+y las afirmaciones aisladas no permiten al LLM reconstruir una cancelacion del historial.
+
 ## Consecuencias
 
 - Toda confirmacion pendiente contiene una cita resuelta y sus datos visibles.

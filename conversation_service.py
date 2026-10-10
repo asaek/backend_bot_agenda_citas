@@ -20,6 +20,7 @@ from conversation_intent import (
     is_reschedule_request_without_target_time,
     is_pending_slot_selection,
     is_resume_request,
+    is_cancellation_request,
 )
 from conversation_workflow import (
     PAUSED_CONVERSATION_WORKFLOW_KEY,
@@ -41,6 +42,8 @@ from appointment_availability import (
     format_availability_reply,
     format_patient_time,
     parse_time_selection,
+    has_explicit_time_period,
+    normalize_time_selection_punctuation,
 )
 from appointment_reason_evaluation import (
     AppointmentReasonCategory,
@@ -169,6 +172,9 @@ SYSTEM_PROMPT = "\n".join(
         "paciente.",
         "Nunca inventar un motivo ni usar un motivo predeterminado.",
         "Nunca cancelar ni reprogramar una cita sin confirmación explícita del paciente.",
+        "Para solicitar una cancelacion, usa cancel_appointment con el ID de la cita. "
+        "Esa llamada inicia la confirmacion controlada por el backend, no cancela aun. "
+        "La pregunta de confirmacion solo debe salir del backend con la accion pendiente guardada.",
         "Cuando el paciente proponga una fecha y hora para reprogramar, solicita "
         "reschedule_appointment con la cita y el horario preferido; el backend consultara "
         "la disponibilidad del dia y mostrara las opciones antes de pedir confirmacion. "
@@ -221,6 +227,17 @@ _LISTED_APPOINTMENT_START_TIME_PATTERN = re.compile(
 _SOURCE_APPOINTMENT_TIME_PATTERN = re.compile(
     r"\b(?:de\s+las?|la\s+de\s+las?)\s+"
     r"(?P<time>\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?)\b",
+    flags=re.IGNORECASE,
+)
+_CANCELLATION_APPOINTMENT_TIME_PATTERN = re.compile(
+    r"\b(?:(?:de|a|para)\s+(?:(?:las?|el)\s+)?|al\s+)"
+    r"(?P<time>\d{1,2}(?:[:.]\d{2})?(?:\s*(?:[ap]\s*\.?\s*m\.?|"
+    r"de\s+la\s+(?:manana|mañana|tarde|noche)|del\s+(?:mediodia|mediodía|dia)))?|"
+    r"mediodia|mediodía|medianoche)\b(?!/)",
+    flags=re.IGNORECASE,
+)
+_UNTRACKED_CANCELLATION_CONFIRMATION_PATTERN = re.compile(
+    r"(?:^|[¿\n])\s*[*_]*(?:me\s+)?confirm\w*\b[^\n?]{0,180}\bcancel\w*\b",
     flags=re.IGNORECASE,
 )
 
@@ -386,6 +403,9 @@ class ConversationService:
         pending_reply = await self._resolve_pending_appointment_availability(context)
         if pending_reply is not None:
             return pending_reply
+        cancellation_reply = await self._resolve_cancellation_request(context)
+        if cancellation_reply is not None:
+            return cancellation_reply
         reschedule_reply = await self._resolve_reschedule_request_without_target_time(
             context,
         )
@@ -428,6 +448,17 @@ class ConversationService:
             )
         else:
             reply = await self.llm_provider.generate(messages)
+        if (
+            isinstance(reply, str)
+            and _UNTRACKED_CANCELLATION_CONFIRMATION_PATTERN.search(reply)
+            and self._load_pending_appointment_action(context.conversation_id) is None
+        ):
+            if self._load_paused_workflow(context.conversation_id) is not None:
+                return (
+                    "Tu gestión está pausada. Escribe ‘retomemos la cita’ para recibir "
+                    "una confirmación nueva."
+                )
+            return "Para cancelar una cita, indica el día y horario de la cita."
         return format_whatsapp_reply(reply)
 
     def _resolve_pending_interruption(
@@ -921,6 +952,90 @@ class ConversationService:
     def _clear_pending_conversation_workflow(self, conversation_id: int) -> None:
         self._replace_workflow_context(conversation_id)
 
+    async def _resolve_cancellation_request(self, context: ConversationContext) -> str | None:
+        if self.tool_executor is None or not is_cancellation_request(context.incoming_text):
+            return None
+        result = await self.tool_executor.execute(
+            ToolRequest(
+                tool_name=ToolName.LIST_APPOINTMENTS,
+                arguments={}, patient_scope=context.patient_scope,
+            )
+        )
+        if not result.ok or not isinstance(result.data, ListAppointmentsOutput):
+            if result.error is not None:
+                return self._calendar_error_reply(context, result.error, error_type="ToolError")
+            return "No pude consultar tus citas. Intenta nuevamente."
+        if not result.data.appointments:
+            return "No encontré citas vigentes para cancelar."
+        candidates = self._cancellation_target_candidates(context, result.data.appointments)
+        if len(candidates) != 1:
+            return self._format_appointment_target_selection(candidates, operation="cancelar")
+        return await self._request_appointment_confirmation(
+            context,
+            ToolCall(
+                name=ToolName.CANCEL_APPOINTMENT.value,
+                arguments={"appointment_id": candidates[0].id},
+                call_id=f"backend-cancellation-{context.incoming_message_id}",
+            ),
+            context.patient_scope,
+        )
+
+    def _cancellation_target_candidates(
+        self, context: ConversationContext, appointments: Sequence[Appointment],
+    ) -> tuple[Appointment, ...]:
+        text = normalize_time_selection_punctuation(context.incoming_text)
+        time_matches = tuple(_CANCELLATION_APPOINTMENT_TIME_PATTERN.finditer(text))
+        if len(time_matches) > 1:
+            return ()
+        time_match = time_matches[0] if time_matches else None
+        remaining = text if time_match is None else text[:time_match.start()] + text[time_match.end():]
+        date_matches = tuple(re.finditer(r"\b(?:\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})\b", remaining))
+        if len(date_matches) > 1:
+            return ()
+        target_date = None
+        if date_matches:
+            date_match = date_matches[0]
+            try:
+                target_date = datetime.strptime(
+                    date_match.group(), "%d/%m/%Y" if "/" in date_match.group() else "%Y-%m-%d",
+                ).date()
+            except ValueError:
+                return ()
+            remaining = remaining[:date_match.start()] + remaining[date_match.end():]
+        relative_date = date_only_availability_follow_up_request(
+            remaining, now=self._current_local_time(), timezone=self._timezone,
+        )
+        if relative_date is not None:
+            requested_date = relative_date.start_at.astimezone(self._timezone).date()
+            if target_date is not None and target_date != requested_date:
+                return ()
+            target_date = requested_date
+        if re.search(r"\d", remaining):
+            return ()
+        listed = (
+            self._recently_listed_appointment_candidates(context, appointments)
+            if target_date is None else None
+        )
+        candidates = tuple(appointments) if listed is None else listed
+        if target_date is not None:
+            candidates = tuple(
+                appointment for appointment in candidates
+                if appointment.start_at.astimezone(self._timezone).date() == target_date
+            )
+        if time_match is not None:
+            source_text = time_match.group("time")
+            source_time = parse_time_selection(source_text)
+            if source_time is None or not 0 <= source_time[1] < 60:
+                return ()
+            times = {source_time}
+            if not has_explicit_time_period(source_text) and source_time[0] <= 12:
+                times.add(((source_time[0] + 12) % 24, source_time[1]))
+            candidates = tuple(
+                appointment for appointment in candidates
+                if self._appointment_local_time(appointment) in times
+            )
+        return candidates
+
     async def _resolve_reschedule_request_without_target_time(
         self,
         context: ConversationContext,
@@ -953,7 +1068,7 @@ class ConversationService:
 
         candidates = self._reschedule_target_candidates(context, appointments)
         if len(candidates) != 1:
-            return self._format_reschedule_target_selection(candidates)
+            return self._format_appointment_target_selection(candidates)
 
         appointment = candidates[0]
         requested_date = date_only_availability_follow_up_request(
@@ -1090,12 +1205,14 @@ class ConversationService:
         local_start = appointment.start_at.astimezone(self._timezone)
         return local_start.hour, local_start.minute
 
-    def _format_reschedule_target_selection(
+    def _format_appointment_target_selection(
         self,
         appointments: Sequence[Appointment],
+        *,
+        operation: str = "modificar",
     ) -> str:
         if not appointments:
-            return "No pude identificar la cita que quieres modificar."
+            return f"No pude identificar la cita que quieres {operation}."
         options = []
         for appointment in appointments:
             start_at = appointment.start_at.astimezone(self._timezone)
@@ -1105,7 +1222,7 @@ class ConversationService:
                 f"{format_patient_time(start_at)} a {format_patient_time(end_at)}"
             )
         return (
-            "¿Cuál cita quieres modificar? Indica el día y horario de una de estas:\n"
+            f"¿Cuál cita quieres {operation}? Indica el día y horario de una de estas:\n"
             + "\n".join(options)
         )
 
@@ -1288,6 +1405,12 @@ class ConversationService:
                 "Tu gestión sigue pausada. Para continuar, escribe ‘retomemos la cita’, "
                 "o indica qué nueva gestión quieres realizar."
             )
+        if (
+            tool_call.name == ToolName.CANCEL_APPOINTMENT.value
+            and classify_confirmation(context.incoming_text) is ConfirmationDecision.CONFIRMED
+            and re.search(r"\bcanc[eé]l\w*\b", context.incoming_text.casefold()) is None
+        ):
+            return "No hay una cancelación pendiente. Indica el día y horario de la cita que quieres cancelar."
         pending_reason = PendingAppointmentReason.from_tool_call(
             tool_call,
             source_message_id=context.incoming_message_id,

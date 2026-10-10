@@ -1288,6 +1288,62 @@ class WebhookTests(unittest.TestCase):
             {datetime(2026, 10, 12, hour, tzinfo=timezone.utc) for hour in (9, 10)},
         )
 
+    def test_cancellation_has_one_confirmation_and_one_notification_on_webhook_retries(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(replies=(
+            ToolCall(name="list_appointments", arguments={}, call_id="call-cancel-list"),
+            "- Horario: 10:00 AM a 10:30 AM\n  Motivo de consulta:\n  Tengo los ojos rojos\n\n"
+            "- Horario: 12:00 PM a 12:30 PM\n  Motivo de consulta:\n  tengo un ojo rojo",
+            '{"summary":"Cancelacion de la cita de las 10 AM.","priority_signals":[]}',
+        ))
+        request_payload = self.text_payload(message_id="wamid.cancel-single-request", text="quisiera cancelar la de las 10 am")
+        confirmation_payload = self.text_payload(message_id="wamid.cancel-single-confirm", text="si por favor")
+        with self.configured_runtime(fake_client, tool_provider):
+            with TestClient(app) as client:
+                for index, (selection, reason) in enumerate((
+                    ("10 am", "Tengo los ojos rojos"), ("12 pm", "tengo un ojo rojo"),
+                )):
+                    responses = self.post_messages(
+                        client,
+                        self.text_payload(message_id=f"wamid.cancel-book-day-{index}", text="Quiero agendar para el lunes"),
+                        self.text_payload(message_id=f"wamid.cancel-book-slot-{index}", text=selection),
+                        self.text_payload(message_id=f"wamid.cancel-book-name-{index}", text="Asael Ponce Silva"),
+                        self.text_payload(message_id=f"wamid.cancel-book-reason-{index}", text=reason),
+                    )
+                    self.assertTrue(all(response.status_code == 200 for response in responses))
+                first, second = app.state.calendar_provider.appointments
+                with patch.dict(os.environ, {
+                    "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                    "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+                }):
+                    responses = self.post_messages(
+                        client,
+                        self.text_payload(message_id="wamid.cancel-single-list", text="Dime las citas que tengo para el lunes"),
+                        request_payload, request_payload,
+                    )
+                    self.assertTrue(all(response.status_code == 200 for response in responses))
+                    self.assertEqual(app.state.calendar_provider.appointments, (first, second))
+                    self.assertIn("Confirmas", fake_client.sent_messages[-1][1])
+                    self.assertEqual(tool_provider.call_count, 2)
+                    self.assertTrue(all(recipient == "5491100000000" for recipient, _ in fake_client.sent_messages))
+                    responses = self.post_messages(
+                        client, confirmation_payload, confirmation_payload, request_payload,
+                        self.text_payload(message_id="wamid.cancel-single-resume", text="Retomemos la cita"),
+                    )
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+        self.assertEqual(sum("¿Confirmas que deseas cancelar" in body for body in patient_bodies), 1)
+        self.assertEqual(sum(body == "Tu cita ha sido cancelada." for body in patient_bodies), 1)
+        self.assertIn("No hay una gestión pendiente", patient_bodies[-1])
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertEqual(len(doctor_bodies), 1)
+        self.assertIn("Cita cancelada", doctor_bodies[0])
+        self.assertIn("Tengo los ojos rojos", doctor_bodies[0])
+        self.assertEqual(app.state.calendar_provider.appointments[0].status.value, "cancelled")
+        self.assertEqual(app.state.calendar_provider.appointments[1], second)
+        self.assertEqual(tool_provider.call_count, 3)
+
     def test_invalid_appointment_reason_does_not_notify_the_doctor(self) -> None:
         self.set_fixed_calendar_runtime()
         fake_client = FakeWhatsAppClient()

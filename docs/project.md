@@ -245,6 +245,12 @@ HTTP del health check y de ambos metodos del webhook esta en
 
 ### Corte verificado: confirmacion de cambios de citas
 
+La cancelacion directa se inicia en el backend: resuelve una cita vigente con la
+fecha/hora indicada o el contexto del listado, guarda la accion y muestra una
+sola confirmacion. El primer `si por favor` cancela esa cita, incluso tras reiniciar.
+Una referencia ambigua/no coincidente no se sustituye por otra cita; el texto del
+LLM y una afirmacion aislada no crean estado de cancelacion.
+
 La funcionalidad definida en `specs/012-appointment-change-confirmation/` exige una
 confirmacion explicita antes de cancelar o reprogramar una cita. Las acciones
 pendientes se conservan por conversacion durante 10 minutos; una respuesta

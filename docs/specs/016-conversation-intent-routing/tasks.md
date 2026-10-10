@@ -12,6 +12,8 @@
 - [x] Incorporar el recordatorio de pausa al contexto del modelo y bloquear mutaciones.
 - [x] Reconsultar disponibilidad vencida conservando el nombre de la misma reserva.
 - [x] Generar confirmaciones nuevas al retomar cancelaciones o reprogramaciones.
+- [x] Reconocer una solicitud directa de cancelar `la de las 10 am` como gestion
+      nueva, sin consumirla como respuesta al flujo de reserva anterior.
 
 ## Pruebas y verificacion
 

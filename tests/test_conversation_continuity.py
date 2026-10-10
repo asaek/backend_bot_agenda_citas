@@ -105,6 +105,103 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(appointment.reason, "Revisión general")
         self.assertEqual(len(self.events), 1)
 
+    def test_reported_cancellation_uses_one_confirmation_after_listing_monday_appointments(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        for selection, reason in (("10 am", "Tengo los ojos rojos"), ("12 pm", "tengo un ojo rojo")):
+            self.send("Quiero agendar para el lunes")
+            self.send(selection)
+            self.send("Asael Ponce Silva")
+            self.assertIn("confirmada", self.send(reason))
+        first, second = self.provider.appointments
+        self.events.clear()
+        self.llm.replies = (
+            ToolCall(name=ToolName.LIST_APPOINTMENTS.value, arguments={}, call_id="call-monday-list"),
+            "- Horario: 10:00 AM a 10:30 AM\n  Motivo de consulta:\n  Tengo los ojos rojos\n\n"
+            "- Horario: 12:00 PM a 12:30 PM\n  Motivo de consulta:\n  tengo un ojo rojo",
+            "¿Confirmas que deseas cancelar esta cita?\n\nFecha: 12/10/2026\n"
+            "Hora: 10:00 AM a 10:30 AM\nMotivo: Tengo los ojos rojos\n\n"
+            "Responde Sí para confirmar o No para mantenerla.",
+            ToolCall(
+                name=ToolName.CANCEL_APPOINTMENT.value,
+                arguments={"appointment_id": first.id}, call_id="call-delayed-cancel",
+            ),
+        )
+        self.assertIn("10:00 AM", self.send("Dime las citas que tengo para el lunes"))
+        self.assertIn("Confirmas", self.send("quisiera cancelar la de las 10 am"))
+        self.assertEqual(self.provider.appointments, (first, second))
+        self.assertEqual(self.events, [])
+        self.service = self.new_service()
+
+        reply = self.send("si por favor")
+
+        self.assertEqual(reply, "Tu cita ha sido cancelada.")
+        self.assertEqual(self.llm.call_count, 2)
+        self.assertEqual(self.provider.appointments[0].id, first.id)
+        self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
+        self.assertEqual(self.provider.appointments[1], second)
+        self.assertEqual(len(self.events), 1)
+
+    def test_cancellation_does_not_fall_back_to_a_different_date_time_or_multiple_targets(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        self.target_date = (self.now + timedelta(days=1)).date()
+        self.book()
+        original = self.provider.appointments[0]
+        for text in (
+            "Cancela mi cita del lunes de las 11 am",
+            "Cancela mi cita de las 11.30 am",
+            "Cancela mi cita de las 11 am y la de las 12 pm",
+        ):
+            with self.subTest(text=text):
+                reply = self.send(text)
+                self.assertNotIn("Confirmas", reply)
+                self.assertIn("identificar", reply)
+                self.assertEqual(self.provider.appointments, (original,))
+                self.assertEqual(self.events, [])
+        self.assertEqual(self.llm.call_count, 0)
+
+    def test_cancellation_uses_the_explicit_day_and_rejection_preserves_both_appointments(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        for day in ("lunes", "martes"):
+            self.send(f"Quiero agendar para el {day}")
+            self.send("10 am")
+            self.send("Asael Ponce Silva")
+            self.assertIn("confirmada", self.send("Revisión general"))
+        first, second = self.provider.appointments
+        self.events.clear()
+        ambiguous = self.send("Cancela mi cita de las 10 am")
+        self.assertIn("¿Cuál cita quieres cancelar?", ambiguous)
+        self.assertNotIn("Confirmas", ambiguous)
+        prompt = self.send("Quiero cancelar mi cita del martes a las 10 am")
+        self.assertIn("13/10/2026", prompt)
+        self.assertIn("Confirmas", prompt)
+        self.assertIn("ningún cambio", self.send("No, gracias"))
+        self.assertEqual(self.provider.appointments, (first, second))
+        self.assertEqual(self.events, [])
+        self.service = self.new_service()
+        self.assertIn("12/10/2026", self.send("Cancela la de 12/10/2026 a las 10 am"))
+        self.assertEqual(self.send("si por favor"), "Tu cita ha sido cancelada.")
+        self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
+        self.assertEqual(self.provider.appointments[1], second)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 0)
+
+    def test_model_cannot_display_a_cancellation_confirmation_without_pending_action(self) -> None:
+        self.book()
+        original = self.provider.appointments[0]
+        self.llm.replies = (
+            "¿Confirmas que deseas cancelar esta cita? Responde Sí o No.",
+            ToolCall(name=ToolName.CANCEL_APPOINTMENT.value, arguments={"appointment_id": original.id}),
+        )
+        reply = self.send("Podrías dar de baja mi cita")
+        self.assertNotIn("Confirmas", reply)
+        self.assertIn("día y horario", reply)
+        reply = self.send("si por favor")
+        self.assertNotIn("Confirmas", reply)
+        self.assertIn("No hay una cancelación pendiente", reply)
+        self.assertIn("No hay una gestión pendiente", self.send("Retomemos la cita"))
+        self.assertEqual(self.provider.appointments, (original,))
+        self.assertEqual(self.events, [])
+
     def test_reported_monday_booking_collects_the_name_once_and_survives_restart(self) -> None:
         self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
         self.llm.reply = "¡Hola, buenos días! ¿En qué puedo ayudarte?"

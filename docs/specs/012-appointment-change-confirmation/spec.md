@@ -92,6 +92,24 @@ Si quedan varias citas candidatas, el backend pregunta cual desea cambiar antes 
 consultar disponibilidad. El horario elegido queda vinculado a la misma cita y llamada
 que originaron la consulta. La lista vence a los 10 minutos.
 
+### RF-1208 - Una confirmacion de cancelacion controlada por el backend
+
+Una peticion directa como `quisiera cancelar la de las 10 am` debe consultar las
+citas vigentes del paciente, resolver una sola cita y guardar la accion exacta antes
+de mostrar la primera pregunta de confirmacion. Si no hay un dia explicito, puede
+usar el ultimo listado mostrado; un dia expresado en la solicitud tiene prioridad.
+Se admiten `hoy`, `mañana`, `pasado mañana`, dias de la semana y fechas `DD/MM/YYYY` o `YYYY-MM-DD`, junto
+con una hora que conserva minutos y AM/PM. Una referencia reconocida que no coincide, contiene
+varios objetivos o sigue siendo ambigua pide aclarar la cita sin elegir otra por defecto.
+
+Despues de esa primera pregunta, `si por favor` ejecuta la cancelacion guardada
+sin solicitar una segunda confirmacion, incluso tras reiniciar con historial acotado.
+Una pregunta textual reconocible del LLM que imite la confirmacion sin una accion
+pendiente debe sustituirse por una solicitud de dia/horario; no cuenta como estado
+de cancelacion. Una afirmacion aislada sin accion pendiente no permite al LLM iniciar
+una cancelacion usando el historial. Las preguntas informativas, negativas y abandono
+mantienen su enrutamiento; la pausa o expiracion siguen exigiendo una confirmacion nueva.
+
 ## Criterios de aceptacion
 
 1. `Deseo cancelarla` solicita confirmacion y no cambia el estado de la cita.
@@ -117,6 +135,15 @@ que originaron la consulta. La lista vence a los 10 minutos.
      preferida.
 14. Si el listado reciente contiene varias citas, el backend identifica la mencionada; si
     no puede resolver una sola, pregunta cuál antes de mostrar horarios o cambiarla.
+15. Listar las citas del lunes a las 10 AM y 12 PM, pedir cancelar la de las 10 AM y
+    responder una vez `si por favor` cancela solo la de las 10 AM, con una sola pregunta.
+16. Reintentar la solicitud o la afirmacion en el webhook no repite la pregunta,
+    la cancelacion ni la notificacion y no vuelve a abrir la gestion terminada.
+17. Una fecha/hora no coincidente, minutos distintos o varios objetivos no preparan
+    la cancelacion de una cita diferente. Un dia explicito prevalece sobre el contexto
+    de listado, y una negativa conserva todas las citas.
+18. Una pregunta textual de confirmacion sin accion pendiente y un `Si` aislado no
+    permiten reconstruir una cancelacion desde el historial del LLM.
 
 ## Fuera del alcance
 

@@ -6,10 +6,39 @@ from conversation_intent import (
     classify_pending_interruption,
     is_reschedule_request_without_target_time,
     is_pending_slot_selection,
+    is_cancellation_request,
 )
 
 
 class PendingConversationIntentTests(unittest.TestCase):
+    def test_direct_cancellation_requests_are_distinct_from_questions_and_withdrawal(self) -> None:
+        for text in (
+            "quisiera cancelar la de las 10 am",
+            "Cancela mi cita de las 10:30 am",
+            "Deseo cancelarla",
+            "¿Podrías cancelar mi cita?",
+            "Hola, por favor cancela mi cita del lunes",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(is_cancellation_request(text))
+        for text in (
+            "No quiero cancelarla",
+            "¿Qué pasa si quiero cancelar mi cita?",
+            "¿Cuánto cuesta cancelar mi cita?",
+            "Quisiera saber cómo cancelar mi cita",
+            "Cancela",
+            "Cancela esta solicitud",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(is_cancellation_request(text))
+        self.assertEqual(
+            classify_pending_interruption(
+                "quisiera cancelar la de las 10 am",
+                flow=PendingConversationFlow.BOOKING_AVAILABILITY,
+            ),
+            PendingInterruption.SWITCH,
+        )
+
     def test_punctuation_and_acceptance_suffix_keep_a_complete_slot_selection(self) -> None:
         for text in (
             "QUisiera.a las 10 am",

@@ -13,15 +13,21 @@ Mensaje del paciente
     v
 ConversationService
     |
-    +-- accion pendiente existente?
-    |       |
-    |       +-- Si -> ejecutar la accion exacta
-    |       +-- No -> continuar con el agente
+    +-- accion pendiente existente --> clasificar Si/No/ambiguedad y vigencia
+    |                                  +-- Si -> ejecutar la accion exacta
+    |                                  +-- No/vencida -> descartar sin mutacion
+    |                                  +-- ambigua -> pedir aclaracion
+    |
+    +-- cancelacion directa --> leer agenda y resolver una cita exacta
+    |                            +-- ambigua/no coincide -> pedir dia/horario
+    |                            +-- resuelta -> guardar accion y pedir Si/No
     |
     v
 AgentOrchestrator
     |
-    +-- cancel/reschedule -> resolver cita en alcance
+    +-- cancel -> resolver cita en alcance y guardar accion antes de preguntar
+    |
+    +-- reschedule -> resolver cita en alcance
      |                        |-- ausente/fallo -> error publico, sin estado pendiente
      |                        +-- encontrada -> consultar disponibilidad del dia destino
      |                                             |
@@ -51,6 +57,30 @@ La accion pendiente conserva el nombre de la herramienta, sus argumentos permiti
 el ID de la llamada, los tiempos de creacion y expiracion y los datos recuperados de la
 cita. Se almacena dentro de `conversations.context_json`, preservando cualquier otro
 contexto existente. No existe una accion pendiente si la consulta no recupera una cita.
+
+## Inicio backend de la cancelacion
+
+`conversation_intent.is_cancellation_request()` identifica una solicitud directa,
+incluida una referencia a `la de las 10 am` sin repetir la palabra cita. Se atiende
+antes del agente en `ConversationService._resolve_cancellation_request()`.
+El backend consulta `list_appointments` en el alcance del paciente, aplica la fecha
+explicita o el contexto del listado y filtra la hora con minutos y periodo AM/PM.
+Usa `normalize_time_selection_punctuation()` y `has_explicit_time_period()` para
+conservar el significado temporal. Fechas numericas invalidas, datos temporales
+numericos no interpretados o varios objetivos no se reducen a la primera cita disponible.
+
+`_request_appointment_confirmation()` recupera la cita seleccionada y guarda el
+`PendingAppointmentAction` antes de devolver la pregunta canonica con fecha, hora
+y motivo. El LLM no decide esa pregunta para una solicitud reconocida. Un error
+de lectura devuelve su respuesta publica; cero o varias candidatas reciben una
+aclaracion de identidad sin accion pendiente. El formato de candidatos se comparte
+con reprogramacion, conservando la operacion solicitada en el texto.
+
+Como respaldo, una pregunta textual reconocible de confirmacion de cancelacion
+del agente sin accion pendiente se sustituye por la solicitud de dia/horario.
+Durante una pausa, ese respaldo solicita retomar antes de confirmar. Una llamada
+de cancelacion propuesta por el LLM en respuesta a una afirmacion aislada se bloquea:
+el historial no crea ni reactiva una accion que el backend no tiene guardada.
 
 Cuando el paciente solicita cambiar la hora sin dar un destino, `ConversationService`
 recupera las citas vigentes y resuelve la referencia usando primero la lista de citas
