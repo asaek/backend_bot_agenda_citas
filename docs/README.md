@@ -67,6 +67,7 @@ esten aprobados.
 - [Verificacion de hora de reprogramacion no disponible](./verification/2026-10-09-unavailable-reschedule-time.md)
 - [Verificacion de seleccion natural de reprogramacion](./verification/2026-10-09-natural-reschedule-selection.md)
 - [Verificacion de nombre unico por reserva y respuestas conversacionales](./verification/2026-10-10-booking-name-continuity.md)
+- [Verificacion de seleccion con puntuacion y horarios no disponibles](./verification/2026-10-10-booking-slot-selection.md)
 
 ## Funcionalidad implementada y verificada por cortes
 

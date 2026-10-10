@@ -5,10 +5,33 @@ from conversation_intent import (
     PendingInterruption,
     classify_pending_interruption,
     is_reschedule_request_without_target_time,
+    is_pending_slot_selection,
 )
 
 
 class PendingConversationIntentTests(unittest.TestCase):
+    def test_punctuation_and_acceptance_suffix_keep_a_complete_slot_selection(self) -> None:
+        for text in (
+            "QUisiera.a las 10 am",
+            "Quisiera, a las 10 am",
+            "a las 10 am esta bien",
+            "a las 10 am está bien, gracias",
+            "a las 10.30 am está bien",
+            "a las 10 a. m., está bien",
+            "a las 10, está bien",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(is_pending_slot_selection(text, PendingConversationFlow.BOOKING_AVAILABILITY))
+        for text in (
+            "¿a las 10 am está bien?",
+            "a las 10 am está bien mañana",
+            "a las 10 am o a las 11 am está bien",
+            "a las 10 am está bien y cancela mi otra cita",
+            "no quiero agendar a las 10 am está bien",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(is_pending_slot_selection(text, PendingConversationFlow.BOOKING_AVAILABILITY))
+
     def test_explicit_abandonment_beats_the_pending_slot_selection(self) -> None:
         interruption = classify_pending_interruption(
             "no cancela mejor dejala asi",

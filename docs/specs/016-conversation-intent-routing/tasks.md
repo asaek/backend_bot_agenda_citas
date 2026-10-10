@@ -71,3 +71,16 @@
       la reserva y su nombre aceptado durante una pausa y despues de reiniciar.
 - [x] Completar revision, suite de 346 pruebas y despliegue verificado en Raspberry Pi;
       evidencia en `docs/verification/2026-10-10-booking-name-continuity.md`.
+
+## Puntuacion y cierres de seleccion; no disponibilidad en reservas
+
+- [x] Reproducir el bucle con `QUisiera.a las 10 am` y `a las 10 am esta bien`.
+- [x] Distinguir la lectura correcta de las 10 AM del rechazo de la frase completa.
+- [x] Reparar separadores entre palabras y admitir cierres de aceptacion sin alterar horas.
+- [x] Compartir aclaracion de slots entre reserva y reprogramacion.
+- [x] Compartir reparacion de puntuacion entre reconocimiento, lectura de hora y
+      periodo explicito; reproducir y corregir la perdida de `de.la.noche`.
+- [x] Cubrir no disponibilidad, entradas invalidas, AM/PM ambiguo, pausa/reinicio y
+      continuidad; mantener la confirmacion obligatoria en reprogramacion.
+- [x] Completar revision, suite de 353 pruebas y despliegue verificado en Raspberry Pi;
+      evidencia en `docs/verification/2026-10-10-booking-slot-selection.md`.

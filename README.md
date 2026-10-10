@@ -110,6 +110,10 @@ reiniciar la reserva. El nombre aceptado se conserva para esa solicitud, incluso
 tras reinicios. Respuestas conversacionales reconocibles como `ya te lo habia dich`,
 negativas a dar el nombre o `Tengo los ojos rojos` no se guardan como nombres:
 se conserva el horario y se pide aclarar el dato pendiente.
+Las selecciones admiten separadores accidentales entre palabras, como
+`QUisiera.a las 10 am`, y cierres como `a las 10 am está bien`. Una hora reconocida
+fuera de los horarios ofrecidos recibe una respuesta de no disponibilidad; una
+hora ambigua pide AM/PM y un texto sin hora valida pide aclaracion.
 
 Para activar Google Calendar para todas las operaciones, cambia
 `CALENDAR_PROVIDER=google` y configura:

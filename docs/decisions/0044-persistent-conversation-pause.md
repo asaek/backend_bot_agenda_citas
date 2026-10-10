@@ -32,6 +32,20 @@ incompletos, como `12 p,`, solo piden aclaracion y conservan la disponibilidad;
 no generan una confirmacion. Mediodia se interpreta como 12:00 PM en el dia ofrecido.
 Otra cita o fecha sigue siendo una gestion nueva, y `¿12 pm?` expresa incertidumbre.
 
+La seleccion completa admite tambien puntuacion accidental entre palabras, como
+`QUisiera.a las 10 am`, y los cierres `esta bien/me parece bien`. Se reparan esos
+separadores para reconocer la frase sin modificar horas como `10.30`, ni quitar
+signos de pregunta o instrucciones adicionales. La comparacion usa la hora del
+texto original y los slots persistidos.
+El reconocimiento, la lectura de hora y la deteccion del periodo comparten la
+misma reparacion de puntuacion; `10 de.la.noche` conserva las 10 PM aunque la
+lista solo ofrezca las 10 AM.
+Tanto reserva como reprogramacion distinguen
+hora reconocida no ofrecida, ambiguedad AM/PM y ausencia de hora valida; no disponibilidad
+no equivale a no comprender la hora. Estas aclaraciones conservan el estado y no
+crean una cita ni autorizan una reprogramacion. Elegir un horario para cambiar una
+cita sigue requiriendo una confirmacion posterior.
+
 El backend mueve un snapshot tipado a `paused_conversation_workflow` dentro del
 contexto SQLite existente. Conserva una sola gestion, el paso y datos recibidos,
 sin ampliar el historial del LLM ni incorporar memoria semantica. El prompt recibe

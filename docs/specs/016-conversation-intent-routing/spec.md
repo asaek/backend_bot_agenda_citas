@@ -15,6 +15,8 @@ con HTTP 200 tras actualizar la configuracion local; evidencia en
 `docs/verification/2026-10-09-natural-reschedule-selection.md`.
 La seleccion natural de una reserva y las preguntas de costo con verbos de agenda
 estan verificadas en `docs/verification/2026-10-10-booking-name-continuity.md`.
+La puntuacion, los cierres de seleccion y la no disponibilidad en reserva estan
+verificados en `docs/verification/2026-10-10-booking-slot-selection.md`.
 
 ## Objetivo
 
@@ -107,15 +109,19 @@ Si la lectura falla, la confirmacion anterior sigue inactiva.
 
 ### RF-1610 - Hora reconocida pero no disponible
 
-Durante la seleccion de reprogramacion, una hora valida y reconocible que no coincide
-con ninguno de los horarios ofrecidos debe responder de forma comprensible:
+Durante la seleccion de reserva o reprogramacion, una hora valida y reconocible
+que no coincide con ninguno de los horarios ofrecidos debe responder de forma comprensible:
 `Ese horario ya está ocupado o no está disponible. Elige uno de los horarios ofrecidos
 o dime si prefieres dejar tu cita como está.`
 No debe tratarse como una hora incomprensible ni como una nueva gestion. Se conserva
-la lista y la cita original hasta seleccionar otra hora y confirmar el cambio.
+la lista y, en una reprogramacion, la cita original hasta elegir y confirmar el cambio.
 Una respuesta sin hora valida pide elegir una hora; si una hora sin AM/PM coincide
 con dos opciones, se aclara el periodo sin afirmar que este ocupada. Estas respuestas
 no modifican la agenda ni emiten eventos de cita.
+En reserva, la salida propone elegir un horario ofrecido o abandonar la solicitud,
+sin preguntar aun el nombre. En reprogramacion, conserva la cita original y exige
+confirmacion despues de una seleccion valida. Ambas aclaraciones se atienden
+tambien desde una disponibilidad pausada, incluso despues de reiniciar.
 
 ### RF-1611 - Selecciones naturales de reprogramacion
 
@@ -149,6 +155,20 @@ motivo y duracion, y solo su ejecucion exitosa emite el evento de cita.
 Las aclaraciones tambien se resuelven desde el snapshot cuando la disponibilidad
 esta pausada. Si medianoche y mediodia estan ofrecidos, `a las 12` pide AM o PM;
 `12 am` selecciona medianoche y `12 pm` selecciona mediodia.
+
+### RF-1614 - Puntuacion accidental y cierre de una seleccion
+
+Una seleccion completa como `QUisiera.a las 10 am` debe reconocer las 10 AM.
+`a las 10 am esta bien` y `a las 10 am está bien, gracias` tambien seleccionan esa
+hora si esta ofrecida. Se admiten puntos, comas o punto y coma entre palabras,
+sin cambiar separadores numericos como `10.30` ni perder un periodo como `a. m.`.
+`esta bien/me parece bien` acompaña la seleccion; no es una confirmacion de mutacion.
+Preguntas tentativas, otra fecha, dos horas u otra instruccion permanecen fuera
+del reconocimiento de una seleccion completa.
+La normalizacion se comparte con la lectura de hora y periodo: `a las 10 de.la.noche`
+expresa las 10 PM. Si solo las 10 AM estan ofrecidas, informa no disponibilidad;
+si estan ambos periodos, selecciona unicamente las 10 PM. Esta distincion se
+mantiene tras pausar y reiniciar el servicio.
 
 ## Criterios de aceptacion
 
@@ -198,3 +218,9 @@ esta pausada. Si medianoche y mediodia estan ofrecidos, `a las 12` pide AM o PM;
 24. `Quisiera una cita a las 9 am` continua la lista de reserva y llega a la captura
     backend del nombre; otra cita, otra fecha, preguntas informativas y abandonos
     mantienen su enrutamiento y no se consumen como eleccion del horario ofrecido.
+25. Las dos frases reportadas reconocen las 10 AM ofrecidas y no responden
+    `No identifique una hora`; una seleccion de las 9 AM ocupadas si informa no disponibilidad.
+26. Puntuacion, minutos, AM/PM y cierres de aceptacion mantienen su significado;
+    preguntas, dos horas y otras instrucciones no se convierten en selecciones.
+27. Un periodo nocturno con puntuacion conserva las 10 PM; no se sustituye por las
+    10 AM ni se considera ambiguo por haber ambos periodos ofrecidos.

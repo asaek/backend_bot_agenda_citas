@@ -81,6 +81,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   de iniciar la recoleccion de nombre y motivo.
 - Reconocer selecciones naturales como `quisiera una cita a las 9 am` sin descartar
   el dia ofrecido ni delegar la captura del nombre al texto del LLM.
+- Admitir puntuacion accidental entre palabras y cierres como `a las 10 am esta bien`;
+  distinguir hora no disponible, periodo ambiguo y texto sin hora valida durante la seleccion.
 - Consultar y mostrar los horarios libres del dia destino antes de confirmar una
   reprogramacion, y aceptar solo una seleccion de esa lista.
 - Mostrar la disponibilidad del dia de una cita identificada antes de preguntar por una
@@ -295,6 +297,9 @@ solicitud y procesa una respuesta relativa posterior, como `hoy`, sin depender d
 `Quisiera una cita a las 9 am` selecciona el horario ofrecido y conserva la misma
 reserva, su fecha y el nombre una vez aceptado. La lista invita a elegir un horario
 para continuar sin anunciar prematuramente el motivo como siguiente paso.
+`QUisiera.a las 10 am` y `a las 10 am esta bien` seleccionan las 10 AM si estan
+ofrecidas. Si la hora no coincide con la lista, el backend explica que esta ocupada
+o no disponible y conserva la solicitud; una coincidencia AM/PM ambigua pide aclaracion.
 Una solicitud con hora exacta continua hacia la recoleccion del motivo.
 
 ### Corte verificado: diagnostico seguro durante depuracion

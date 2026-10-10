@@ -851,11 +851,19 @@ class ConversationService:
     ) -> str:
         if workflow.action is not None:
             return CONFIRMATION_RESPONSE_INSTRUCTIONS
-        if workflow.flow is PendingConversationFlow.RESCHEDULE_AVAILABILITY:
+        if workflow.flow in {
+            PendingConversationFlow.RESCHEDULE_AVAILABILITY,
+            PendingConversationFlow.BOOKING_AVAILABILITY,
+        }:
+            exit_action = (
+                "dejar tu cita como está"
+                if workflow.flow is PendingConversationFlow.RESCHEDULE_AVAILABILITY
+                else "abandonar la solicitud"
+            )
             if expected_reply:
                 return (
                     "¿Quieres elegir ese horario? Escribe la hora para seleccionarlo, "
-                    "o dime si prefieres dejar tu cita como está."
+                    f"o dime si prefieres {exit_action}."
                 )
             selected_time = parse_time_selection(incoming_text)
             if is_pending_slot_selection(
@@ -885,7 +893,7 @@ class ConversationService:
                     return (
                         "Ese horario ya está ocupado o no está disponible. "
                         "Elige uno de los horarios ofrecidos o dime si prefieres "
-                        "dejar tu cita como está."
+                        f"{exit_action}."
                     )
                 if len(matching_slots) > 1:
                     return (
@@ -894,17 +902,7 @@ class ConversationService:
                     )
             return (
                 "No identifiqué una hora de la lista. Elige uno de los horarios ofrecidos "
-                "o dime si prefieres dejar tu cita como está."
-            )
-        if workflow.flow is PendingConversationFlow.BOOKING_AVAILABILITY:
-            if expected_reply:
-                return (
-                    "¿Quieres elegir ese horario? Escribe la hora para seleccionarlo, "
-                    "o dime si prefieres abandonar la solicitud."
-                )
-            return (
-                "No identifiqué una hora de la lista. Elige uno de los horarios ofrecidos "
-                "o dime si prefieres abandonar la solicitud."
+                f"o dime si prefieres {exit_action}."
             )
         if workflow.flow is PendingConversationFlow.BOOKING_DATE:
             if expected_reply:

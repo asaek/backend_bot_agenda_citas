@@ -46,3 +46,16 @@ Evidencia: `docs/verification/2026-10-07-twelve-hour-lists.md`.
 - [x] Cubrir la fecha 12/10/2026, reinicios, nombre persistido y motivo original.
 - [x] Completar revision, suite de 346 pruebas y verificaciones del runtime en
       Raspberry Pi; evidencia en `docs/verification/2026-10-10-booking-name-continuity.md`.
+
+## Ampliacion - Puntuacion, cierres de seleccion y no disponibilidad
+
+- [x] Reproducir las dos selecciones de las 10 AM despues de una cita a las 9 AM.
+- [x] Aceptar puntuacion entre palabras y `esta bien`, conservando horas y AM/PM.
+- [x] Distinguir no disponibilidad de una hora no reconocida o ambigua en reserva.
+- [x] Conservar la lista activa/pausada y permitir una eleccion valida tras reiniciar.
+- [x] Reproducir y corregir el hallazgo de revision: conservar el periodo en
+      `10 de.la.noche` con solo 10 AM ofrecidas o ambos periodos, incluso tras una pausa.
+- [x] Verificar el webhook hasta dos citas distintas y una notificacion por cita,
+      incluso al reintentar el motivo de la segunda reserva.
+- [x] Completar revision, suite de 353 pruebas y despliegue verificado en Raspberry Pi;
+      evidencia en `docs/verification/2026-10-10-booking-slot-selection.md`.

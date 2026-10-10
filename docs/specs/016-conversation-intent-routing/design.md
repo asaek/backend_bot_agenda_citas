@@ -52,12 +52,24 @@ Las preguntas que comienzan consultando costo/precio se clasifican como pausa an
 de buscar una gestion nueva. Asi `Cual es el costo si deseo reservar una cita` no
 descarta la reserva por contener una peticion de agenda dentro de la pregunta.
 
-La aclaracion de reprogramacion recibe tambien el texto actual. Una seleccion
+La aclaracion de reserva y reprogramacion recibe tambien el texto actual. Una seleccion
 completa con hora valida usa `PendingAppointmentAvailability.matching_slots()` para
 distinguir cero coincidencias de varias coincidencias AM/PM. Cero coincidencias
 explica que el horario esta ocupado o no disponible; varias solicitan AM/PM.
 `matching_slot()` sigue aceptando solo una coincidencia unica. La aclaracion no
 borra la disponibilidad ni crea una accion pendiente de confirmacion.
+Ambos flujos comparten esa rama y solo cambia la salida de abandono: dejar la cita
+como esta o abandonar la solicitud nueva. Horas invalidas o frases no reconocidas
+no se presentan como horarios ocupados.
+
+El reconocimiento de seleccion normaliza separadores de puntuacion entre letras
+y comas/punto y coma antes de cortesia o aceptacion. Mantiene puntos entre digitos
+y signos de pregunta, y admite `esta bien/me parece bien` como cierre antes de
+`por favor/gracias`. `normalize_time_selection_punctuation()` se comparte con
+`parse_time_selection()` y la deteccion de periodo explicito; la misma reparacion
+preserva las 10 PM en `10 de.la.noche` tanto al reconocer como al comparar los slots.
+El patron completo no consume dos horas, otra fecha o instrucciones
+adicionales. Una seleccion de reprogramacion solo prepara su confirmacion habitual.
 
 Para reprogramacion, el reconocimiento completo admite verbos imperativos,
 `quiero/quisiera/necesito/deseo/prefiero/me gustaria` con un verbo de cambio,

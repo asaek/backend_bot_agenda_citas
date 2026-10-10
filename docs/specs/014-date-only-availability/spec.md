@@ -13,6 +13,8 @@ La interrupcion de una seleccion pendiente se define en
 `specs/016-conversation-intent-routing/`.
 La seleccion natural del horario y su continuidad estan verificadas en
 `docs/verification/2026-10-10-booking-name-continuity.md`.
+La seleccion con puntuacion y la distincion de no disponibilidad estan verificadas
+en `docs/verification/2026-10-10-booking-slot-selection.md`.
 
 ## Objetivo
 
@@ -77,6 +79,14 @@ Expresiones completas como `quisiera una cita a las 9 am` y variantes con
 no como una nueva reserva. Conservan el dia ofrecido y no invocan al LLM para
 preguntar el nombre. Una fecha adicional o `otra cita` conserva su enrutamiento
 como gestion nueva, segun `specs/016-conversation-intent-routing/`.
+Se admiten separadores accidentales entre palabras (`QUisiera.a las 10 am`) y
+cierres como `a las 10 am esta bien`, sin convertir una pregunta tentativa ni
+una frase con otra fecha, dos horas u otra instruccion en una seleccion.
+La coincidencia con un slot debe ser unica. Una hora valida sin coincidencias
+explica que esta ocupada o no disponible y conserva la lista para elegir otra;
+varias coincidencias piden AM/PM. Una hora invalida o un texto sin hora valida
+pide aclaracion sin afirmar que este ocupado. No se crea una cita ni se solicitan
+nombre y motivo hasta seleccionar un horario ofrecido de forma unica.
 
 ### RF-1406 - Fecha como continuacion de una reserva
 
@@ -107,6 +117,12 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
 12. El 10/10/2026, pedir lunes y elegir `quisiera una cita a las 9 am` conserva
     el 12/10/2026 a las 9 AM. Recibir nombre y motivo crea una sola cita sin volver
     a pedir el nombre, incluso tras reinicios del servicio.
+13. Tras reservar las 9 AM del lunes 12/10/2026, las 10 AM siguen ofrecidas.
+    `QUisiera.a las 10 am` y `a las 10 am esta bien` inician la captura del nombre
+    para una segunda cita a las 10, conservando la primera a las 9.
+14. Elegir las 9 AM ocupadas, una hora fuera de la lista o un periodo AM/PM ambiguo
+    recibe su aclaracion especifica. Elegir las 10 AM despues completa la reserva
+    original, incluso si la lista estaba pausada y se reinicio el servicio.
 
 ## Fuera del alcance
 

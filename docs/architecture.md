@@ -321,6 +321,16 @@ Tambien se reconocen `quisiera una cita a las 9 am`, `necesito una cita a las 9 
 y `me gustaria una cita a las 9 am`, con saludo y cortesia opcionales. El patron
 completo conserva la fecha ofrecida y la transicion backend hacia nombre y motivo;
 una fecha adicional o una solicitud de `otra cita` sigue iniciando otra gestion.
+El reconocimiento repara puntos, comas o punto y coma entre palabras y acepta
+`esta bien/me parece bien` al final de una seleccion completa. Conserva los
+separadores numericos de horas como `10.30` y los signos de pregunta.
+`normalize_time_selection_punctuation()` se comparte con la lectura de hora y
+la deteccion de periodo explicito: `10 de.la.noche` conserva las 10 PM y nunca
+se sustituye por una opcion disponible a las 10 AM.
+La aclaracion de reserva y reprogramacion comparte la comparacion de slots:
+una hora valida con cero coincidencias informa no disponibilidad, varias
+coincidencias piden AM/PM y una hora invalida recibe la aclaracion de formato.
+Estas respuestas conservan la lista activa o pausada sin efectos de agenda.
 Los saludos y preguntas informativas mueven el snapshot tipado de
 `conversation_workflow.py` a `paused_conversation_workflow` dentro del mismo contexto
 SQLite. La transaccion conserva solo una gestion activa o pausada y el agente recibe

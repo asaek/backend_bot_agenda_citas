@@ -136,6 +136,133 @@ class ConversationContinuityTests(unittest.TestCase):
             patient = self.service.patients.get_by_id(connection, appointment.patient_scope.patient_id)
         self.assertEqual(patient.name, "Asael Ponce Silva")
 
+    def test_reported_ten_am_choices_select_an_available_slot_after_a_nine_am_booking(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        self.send("Quiero agendar para el lunes")
+        self.send("quisiera a las 9 am")
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("tengo un ojo rojo"))
+        original = self.provider.appointments[0]
+        self.events.clear()
+
+        for expression in ("QUisiera.a las 10 am", "a las 10 am esta bien"):
+            with self.subTest(expression=expression):
+                offered = self.send("Buenos dias quisiera agendar para el dia lunes")
+                self.assertNotIn("- 9:00 AM a 9:30 AM", offered)
+                self.assertIn("- 10:00 AM a 10:30 AM", offered)
+                self.service = self.new_service()
+                self.assertEqual(self.send(expression), APPOINTMENT_NAME_REPLY)
+                self.assertEqual(self.provider.appointments, (original,))
+                self.assertEqual(self.events, [])
+
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertEqual(len(self.provider.appointments), 2)
+        self.assertIn(original, self.provider.appointments)
+        self.assertEqual(self.provider.appointments[1].start_at, datetime(2026, 10, 12, 10, tzinfo=timezone.utc))
+        self.assertEqual(self.provider.appointments[1].reason, "Revisión general")
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 0)
+
+    def test_booking_explains_an_unavailable_hour_and_keeps_active_or_paused_slots(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        self.provider.register_busy_period(
+            calendar_id="calendar-1",
+            start_at=datetime(2026, 10, 12, 9, tzinfo=timezone.utc),
+            end_at=datetime(2026, 10, 12, 9, 30, tzinfo=timezone.utc),
+        )
+        offered = self.send("Quiero agendar para el lunes")
+        self.assertNotIn("- 9:00 AM a 9:30 AM", offered)
+        self.assertIn("- 10:00 AM a 10:30 AM", offered)
+        for expression in ("9 am", "QUisiera.a las 9 am", "a las 9 am esta bien", "8 am", "5 pm"):
+            with self.subTest(expression=expression):
+                reply = self.send(expression)
+                self.assertIn("no está disponible", reply)
+                self.assertNotIn("No identifiqué", reply)
+                self.assertNotIn("nombre completo", reply)
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+        self.assertEqual(self.llm.call_count, 0)
+        self.send("¿Cuánto cuesta la consulta?")
+        self.service = self.new_service()
+        self.assertIn("no está disponible", self.send("a las 9 am esta bien"))
+        self.assertEqual(self.send("a las 10 am está bien, gracias"), APPOINTMENT_NAME_REPLY)
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertEqual(len(self.provider.appointments), 1)
+        self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 10, tzinfo=timezone.utc))
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 1)
+
+    def test_booking_distinguishes_invalid_and_ambiguous_times_from_unavailability(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        self.executor = ToolExecutor(
+            provider=self.provider, default_timezone="UTC", now=lambda: self.now,
+            business_hours=BusinessHours(
+                timezone_name="UTC",
+                windows_by_weekday={day: (TimeWindow(time(0), time(23)),) for day in range(7)},
+            ),
+        )
+        self.service = self.new_service()
+        self.send("Quiero agendar para el lunes")
+        for text in ("10:99 am", "25 am", "no sé cuál horario", "a las 10 am o a las 11 am esta bien"):
+            with self.subTest(text=text):
+                reply = self.send(text)
+                self.assertNotIn("ocupado", reply)
+                self.assertNotIn("no está disponible", reply)
+                self.assertNotIn("nombre completo", reply)
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+        ambiguous = self.send("a las 12 esta bien")
+        self.assertIn("Indica AM o PM", ambiguous)
+        self.assertNotIn("ocupado", ambiguous)
+        self.assertEqual(self.send("a las 12 pm está bien"), APPOINTMENT_NAME_REPLY)
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 0)
+
+    def test_punctuated_night_period_is_not_replaced_by_an_available_morning(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        for paused in (False, True):
+            with self.subTest(paused=paused):
+                offered = self.send("Quiero agendar para el lunes")
+                self.assertIn("- 10:00 AM a 10:30 AM", offered)
+                if paused:
+                    self.send("¿Cuánto cuesta la consulta?")
+                self.service = self.new_service()
+                reply = self.send("a las 10 de.la.noche está bien")
+                self.assertIn("no está disponible", reply)
+                self.assertNotIn("nombre completo", reply)
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+        self.assertEqual(self.send("a las 10 a.m. está bien"), APPOINTMENT_NAME_REPLY)
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertEqual(self.provider.appointments[0].start_at.hour, 10)
+        self.assertEqual(len(self.events), 1)
+
+    def test_punctuated_night_period_selects_night_when_both_periods_are_offered(self) -> None:
+        self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+        self.executor = ToolExecutor(
+            provider=self.provider, default_timezone="UTC", now=lambda: self.now,
+            business_hours=BusinessHours(
+                timezone_name="UTC",
+                windows_by_weekday={day: (TimeWindow(time(0), time(23)),) for day in range(7)},
+            ),
+        )
+        self.service = self.new_service()
+        offered = self.send("Quiero agendar para el lunes")
+        self.assertIn("- 10:00 AM a 10:30 AM", offered)
+        self.assertIn("- 10:00 PM a 10:30 PM", offered)
+        self.assertEqual(self.send("a las 10 de.la.noche está bien"), APPOINTMENT_NAME_REPLY)
+        self.send("Asael Ponce Silva")
+        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 22, tzinfo=timezone.utc))
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.llm.call_count, 0)
+
     def test_new_booking_prefixes_replace_a_paused_list_with_the_requested_day(self) -> None:
         self.now = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
         for expression in (
@@ -254,6 +381,8 @@ class ConversationContinuityTests(unittest.TestCase):
         original = self.provider.appointments[0]
         expressions = (
             "Quisiera cambiarla a las 12 pm",
+            "Quisiera.cambiarla a las 12 pm",
+            "a las 12 pm está bien",
             "Quiero modificarla a las 12 pm",
             "Me gustaría moverla a las 12 pm",
             "Quisiera reprogramar mi cita para las 12 pm",

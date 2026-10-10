@@ -77,6 +77,15 @@ Las selecciones completas `quisiera una cita a las 9 am` y variantes se reconoce
 antes de las reglas de gestion nueva. Conservan la fecha de la lista y pasan
 directamente a `PendingAppointmentReason`, sin una captura textual del nombre
 decidida por el LLM. El reconocimiento completo excluye otra cita o fecha.
+La normalizacion de seleccion de `conversation_intent.py` repara separadores entre
+palabras y admite cierres de aceptacion; no cambia separadores entre digitos ni
+quita signos de pregunta. `normalize_time_selection_punctuation()` se comparte
+con la lectura de hora y la deteccion del periodo explicito antes de comparar
+slots; una expresion como `10 de.la.noche` no pierde su periodo nocturno.
+`_pending_interruption_clarification()` comparte la logica con
+reprogramacion: cero coincidencias de una hora valida devuelve no disponibilidad,
+varias piden AM/PM y una entrada invalida pide una hora de la lista. La salida
+permite abandonar la solicitud de reserva sin modificar el calendario.
 
 El `SYSTEM_PROMPT` y el esquema de `check_availability` mantienen la misma regla para
 las fechas que no entren en el detector determinista. Estas instrucciones son una

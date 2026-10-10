@@ -4,6 +4,8 @@ from enum import StrEnum
 import re
 import unicodedata
 
+from appointment_availability import normalize_time_selection_punctuation
+
 
 class PendingConversationFlow(StrEnum):
     NONE = "none"
@@ -141,10 +143,13 @@ def is_pending_slot_selection(
         prefix = _RESCHEDULE_SELECTION_PREFIX
         if allow_incomplete_period:
             time_reply = rf"(?:{_TIME_REPLY}|{_INCOMPLETE_TIME_REPLY})"
-    # Conservar ':' y '.' para la hora, normalizando solamente acentos y espacios.
-    normalized = unicodedata.normalize("NFD", text.casefold())
+    # Reparar separadores entre palabras sin cambiar '10.30' ni los signos de pregunta.
+    normalized = unicodedata.normalize("NFD", normalize_time_selection_punctuation(text).casefold())
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    normalized = re.sub(r"[,;]\s*(?=(?:por\s+favor|gracias)\b)", " ", normalized)
+    normalized = re.sub(
+        r"[,;]\s*(?=(?:por\s+favor|gracias|esta\s+bien|me\s+parece\s+bien)\b)",
+        " ", normalized,
+    )
     normalized = " ".join(normalized.split()).strip(" .!,")
     if "?" in normalized or "¿" in normalized:
         unwrapped = normalized.replace("¿", "").rstrip("?").strip()
@@ -158,7 +163,8 @@ def is_pending_slot_selection(
         rf"(?:hola[,\s]+)?(?:por\s+favor[,\s]+)?"
         rf"(?:{prefix}\s+(?:(?:una|la|esa|mi)\s+cita\s+)?)?"
         rf"(?:(?:el|ese)\s+horario\s+(?:de\s+)?)?"
-        rf"{time_reply}(?:\s+(?:por\s+favor|gracias))?",
+        rf"{time_reply}(?:\s+(?:esta\s+bien|me\s+parece\s+bien))?"
+        rf"(?:\s+(?:por\s+favor|gracias))?",
         normalized,
     ) is not None
 

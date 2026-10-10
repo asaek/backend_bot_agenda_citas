@@ -424,6 +424,11 @@ def format_availability_reply(
     )
 
 
+def normalize_time_selection_punctuation(text: str) -> str:
+    """Repara separadores entre palabras sin alterar digitos ni signos de pregunta."""
+    return re.sub(r"(?<=[^\W\d_])[.,;]+(?=\s*[^\W\d_])", " ", text)
+
+
 _TIME_SELECTION_PATTERN = re.compile(
     r"\b(?:a\s+las?\s+)?(?P<hour>\d{1,2})"
     r"(?:(?:[:.])(?P<minute>\d{2}))?\s*"
@@ -436,7 +441,7 @@ def parse_time_selection(text: str) -> tuple[int, int] | None:
     """Extrae una hora expresada por el paciente para compararla con un slot."""
     if not isinstance(text, str):
         return None
-    normalized = _normalize(text)
+    normalized = _normalize(normalize_time_selection_punctuation(text))
     match = _TIME_SELECTION_PATTERN.search(normalized)
     if match is None:
         if re.search(r"\bmediodia\b", normalized):
@@ -526,7 +531,7 @@ def _slot_local_time(
 
 
 def _has_explicit_period(text: str) -> bool:
-    normalized = _normalize(text)
+    normalized = _normalize(normalize_time_selection_punctuation(text))
     return bool(
         re.search(
             r"\b(?:a\s*\.?\s*m\.?|p\s*\.?\s*m\.?|"

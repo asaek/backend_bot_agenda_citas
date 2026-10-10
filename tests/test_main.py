@@ -1242,6 +1242,52 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(appointment.start_at, datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
         self.assertEqual(appointment.reason, "Tengo los ojos rojos")
 
+    def test_booking_distinguishes_an_occupied_slot_from_a_typo_and_notifies_once(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(reply='{"summary":"Solicitud de cita.","priority_signals":[]}')
+        reason_payload = self.text_payload(message_id="wamid.typo-second-reason", text="Revisión general")
+        with self.configured_runtime(
+            fake_client, tool_provider,
+            {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"},
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.typo-first-day", text="Quiero agendar para el lunes"),
+                    self.text_payload(message_id="wamid.typo-first-slot", text="quisiera a las 9 am"),
+                    self.text_payload(message_id="wamid.typo-first-name", text="Asael Ponce Silva"),
+                    self.text_payload(message_id="wamid.typo-first-reason", text="tengo un ojo rojo"),
+                    self.text_payload(message_id="wamid.typo-second-day", text="Buenos dias quisiera agendar para el dia lunes"),
+                    self.text_payload(message_id="wamid.typo-occupied", text="a las 9 am esta bien"),
+                )
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                self.assertIn("no está disponible", fake_client.sent_messages[-1][1])
+                self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.typo-second-slot", text="QUisiera.a las 10 am"),
+                    self.text_payload(message_id="wamid.typo-second-name", text="Asael Ponce Silva"),
+                    reason_payload, reason_payload,
+                )
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+        self.assertIn("nombre completo", patient_bodies[-3])
+        self.assertIn("Asael Ponce Silva", patient_bodies[-2])
+        self.assertIn("confirmada", patient_bodies[-1])
+        self.assertIn("10:00", patient_bodies[-1])
+        self.assertFalse(any("No identifiqué" in body for body in patient_bodies))
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertEqual(len(doctor_bodies), 2)
+        self.assertIn("Nombre: Asael Ponce Silva", doctor_bodies[-1])
+        self.assertIn("Revisión general", doctor_bodies[-1])
+        self.assertEqual(tool_provider.call_count, 2)
+        self.assertEqual(len(app.state.calendar_provider.appointments), 2)
+        self.assertEqual(
+            {appointment.start_at for appointment in app.state.calendar_provider.appointments},
+            {datetime(2026, 10, 12, hour, tzinfo=timezone.utc) for hour in (9, 10)},
+        )
+
     def test_invalid_appointment_reason_does_not_notify_the_doctor(self) -> None:
         self.set_fixed_calendar_runtime()
         fake_client = FakeWhatsAppClient()
