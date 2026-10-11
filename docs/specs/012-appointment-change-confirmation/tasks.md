@@ -55,4 +55,9 @@
 - [x] Mantener la aclaracion de identidad para varios objetivos y las negativas sin mutacion.
 - [x] Sustituir preguntas textuales reconocibles sin estado y bloquear afirmaciones aisladas del LLM.
 - [x] Verificar reinicio, cancelacion de una sola cita y una notificacion en reintentos del webhook.
-- [ ] Completar revision y despliegue verificado en Raspberry Pi.
+- [x] Completar revision directa, suite de 359 pruebas y compilacion en Raspberry Pi.
+- [x] Sincronizar proyecto/configuracion y verificar recarga, igualdad de `.env`, modo 600 y rutas HTTP.
+- [x] Actualizar el token local expirado y completar autenticacion de WhatsApp:
+      Meta responde 200 el 11/10/2026 tras copiar y verificar el `.env` completo.
+
+Evidencia: `docs/verification/2026-10-10-single-cancellation-confirmation.md`.

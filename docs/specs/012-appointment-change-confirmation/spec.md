@@ -11,6 +11,11 @@ pedir confirmacion. La evidencia del inicio de reprogramacion sin hora esta en
 expresiones naturales claras y conserva la aclaracion para respuestas contradictorias o
 inciertas. El enrutamiento de intenciones nuevas y abandono durante una confirmacion se
 define en `specs/016-conversation-intent-routing/`.
+El inicio backend de cancelacion esta implementado y verificado con 359 pruebas;
+el runtime esta recargado y las rutas responden 200. La autenticacion de envio
+quedo restablecida el 11/10/2026 con Meta 200 tras actualizar la configuracion local;
+evidencia del bloqueo inicial y su recuperacion en
+`docs/verification/2026-10-10-single-cancellation-confirmation.md`.
 
 ## Objetivo
 
