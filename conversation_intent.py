@@ -147,7 +147,7 @@ def is_pending_slot_selection(
     normalized = unicodedata.normalize("NFD", normalize_time_selection_punctuation(text).casefold())
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
     normalized = re.sub(
-        r"[,;]\s*(?=(?:por\s+favor|gracias|esta\s+bien|me\s+parece\s+bien)\b)",
+        r"[,;]\s*(?=(?:por\s+favor|gracias|(?:esta|estaria)\s+bien|me\s+parece\s+bien)\b)",
         " ", normalized,
     )
     normalized = " ".join(normalized.split()).strip(" .!,")
@@ -160,10 +160,10 @@ def is_pending_slot_selection(
             return False
         normalized = unwrapped.replace("?", "")
     return re.fullmatch(
-        rf"(?:hola[,\s]+)?(?:por\s+favor[,\s]+)?"
+        rf"(?:hola[,\s]+)?(?:si[,\s]+)?(?:por\s+favor[,\s]+)?"
         rf"(?:{prefix}\s+(?:(?:una|la|esa|mi)\s+cita\s+)?)?"
         rf"(?:(?:el|ese)\s+horario\s+(?:de\s+)?)?"
-        rf"{time_reply}(?:\s+(?:esta\s+bien|me\s+parece\s+bien))?"
+        rf"{time_reply}(?:\s+(?:(?:esta|estaria)\s+bien|me\s+parece\s+bien))?"
         rf"(?:\s+(?:por\s+favor|gracias))?",
         normalized,
     ) is not None

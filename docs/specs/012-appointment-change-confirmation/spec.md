@@ -16,6 +16,15 @@ el runtime esta recargado y las rutas responden 200. La autenticacion de envio
 quedo restablecida el 11/10/2026 con Meta 200 tras actualizar la configuracion local;
 evidencia del bloqueo inicial y su recuperacion en
 `docs/verification/2026-10-10-single-cancellation-confirmation.md`.
+La confirmacion contextual de ADR 0049 esta implementada; su verificacion y el
+alcance de sincronizacion sin recarga del backend se registran en
+`docs/verification/2026-10-11-contextual-cancellation-confirmation.md`.
+Activada en el backend el 12/10/2026 mediante `local to raspberry`, con configuracion
+completa, 370 pruebas correctas y HTTP 200 en rutas locales/publicas y Meta; evidencia
+en `docs/verification/2026-10-12-contextual-cancellation-deployment.md`.
+La etapa 1 de afirmaciones naturales y aclaracion contextual de reprogramacion esta
+verificada con 377 pruebas, backend recargado y rutas/autenticacion HTTP 200;
+evidencia en `docs/verification/2026-10-12-natural-reschedule-stage-one.md`.
 
 ## Objetivo
 
@@ -62,7 +71,8 @@ fecha, horario y motivo. No debe mostrar el ID interno de la cita.
 ### RF-1203 - Respuesta negativa
 
 Una respuesta negativa debe descartar la accion pendiente y conservar la cita sin
-modificaciones.
+modificaciones. La respuesta debe indicar que no hubo cambios y que la cita sigue
+agendada, incluyendo fecha y hora originales cuando estan guardadas.
 
 ### RF-1204 - Confirmacion ambigua o vencida
 
@@ -71,6 +81,16 @@ coincidencia exacta con `Si` o `No`. Se permiten palabras de cortesia y variante
 afirmativas directas como `Si, por favor`, `Claro` y `Adelante`. Una respuesta
 contradictoria, incierta o sin una intencion reconocible debe solicitar aclaracion.
 Una confirmacion vencida debe descartarse y no ejecutar la accion.
+Se reconocen tambien `Si es correcto`, `Si esta bien` y `Correcto, por favor`, con
+mayusculas, acentos y puntuacion. La respuesta completa debe referirse a la accion
+pendiente. Una condicion como `Si, si esta bien` o `Correcto, si es correcto` no
+autoriza la mutacion: un `si` sin acento despues de otra clausula se trata de forma
+conservadora como posible condicion; un `sí` afirmativo explicito conserva su significado.
+
+Ante una respuesta incierta, el backend pregunta por la operacion guardada, incluyendo
+la fecha/hora de la cita original y el destino de reprogramacion. Por ejemplo:
+`No me quedo claro. ¿Confirmas cambiar tu cita de hoy a las 11:00 AM para las 4:00 PM?`
+La aclaracion permite confirmar o conservar la cita y no renueva la vigencia.
 
 ### RF-1205 - Notificacion posterior
 
@@ -115,6 +135,24 @@ de cancelacion. Una afirmacion aislada sin accion pendiente no permite al LLM in
 una cancelacion usando el historial. Las preguntas informativas, negativas y abandono
 mantienen su enrutamiento; la pausa o expiracion siguen exigiendo una confirmacion nueva.
 
+### RF-1209 - Respuesta contextual a la accion pendiente
+
+Tras mostrar una cancelacion concreta, `Si cancelala`, `Cancela la cita por favor`,
+`Si, quiero cancelar la cita` y `Si, cancelar` autorizan esa misma accion sin
+reiniciar la solicitud. El reconocimiento es local, completo y dependiente de la
+herramienta; una instruccion de cancelacion no confirma una reprogramacion.
+
+Otras citas, fechas, horas o instrucciones adicionales requieren aclaracion o una
+nueva solicitud, nunca autorizan la accion anterior por contener `Si`. Las
+condiciones no reconocidas, respuestas truncadas como `Si, pero...`, contradicciones
+y preguntas tentativas no modifican la agenda. La contradiccion reconocida conserva
+la accion para una respuesta clara posterior, incluso tras reiniciar.
+
+Una respuesta contextual no renueva una accion vencida ni reactiva una pausada.
+Durante una cancelacion activa, `cancela` aislado solo pregunta si desea cancelar
+esa cita, con respuestas explicitas `Si, cancelar` o `No, mantenerla`; mantiene el
+estado y no ejecuta por si solo. Rechazar o abandonar la solicitud conserva la cita.
+
 ## Criterios de aceptacion
 
 1. `Deseo cancelarla` solicita confirmacion y no cambia el estado de la cita.
@@ -148,7 +186,22 @@ mantienen su enrutamiento; la pausa o expiracion siguen exigiendo una confirmaci
     la cancelacion de una cita diferente. Un dia explicito prevalece sobre el contexto
     de listado, y una negativa conserva todas las citas.
 18. Una pregunta textual de confirmacion sin accion pendiente y un `Si` aislado no
-    permiten reconstruir una cancelacion desde el historial del LLM.
+     permiten reconstruir una cancelacion desde el historial del LLM.
+19. Las frases de RF-1209 cancelan la cita mostrada una sola vez y sin llamadas al LLM,
+    tambien con historial corto y despues de recrear el servicio.
+20. `Si, pero mejor no`, `Tal vez quiero cancelarla` y `¿Si cancelala?` piden aclarar,
+    no descartan ni ejecutan la accion y permiten confirmar claramente despues.
+21. Otra fecha/cita exige una confirmacion nueva; una accion pausada o vencida no
+    se ejecuta con las nuevas variantes. Una respuesta condicionada no autoriza la accion.
+22. Una negativa informa que la cita original sigue agendada; `cancela` aislado no
+    mezcla abandonar la solicitud con cancelar la reserva en una pregunta de dos opciones.
+23. Tras elegir las 4 PM para una cita de hoy a las 11 AM, `Si es correcto` modifica
+    la cita en la primera respuesta, una sola vez y con una sola notificacion.
+24. Las tres afirmaciones de RF-1204 funcionan con variantes de mayusculas, acentos y
+    puntuacion. Dudas, contradicciones, condiciones y referencias a otra fecha/cita
+    no ejecutan la accion anterior y reciben su aclaracion o enrutamiento correspondiente.
+25. La aclaracion de un cambio pendiente muestra la cita original y el destino guardado,
+    sobrevive al reinicio y permite continuar sin repetir una lista generica de frases.
 
 ## Fuera del alcance
 

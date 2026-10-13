@@ -26,6 +26,12 @@ Periodo de 30 minutos de la agenda del medico que puede utilizarse para crear un
 cita porque no se superpone con ningun periodo ocupado.
 _Evitar_: Hueco, evento libre
 
+**Seleccion de horario**:
+Preferencia del paciente por uno de los espacios disponibles ofrecidos para la
+gestion actual. Al reprogramar, todavia requiere confirmar el cambio concreto;
+elegir un horario no significa que la cita ya haya sido modificada.
+_Evitar_: Confirmacion del cambio, cita modificada
+
 **Fuente de verdad de agenda**:
 Calendario o sistema autoritativo que determina la disponibilidad y el estado de
 una cita. La memoria conversacional no reemplaza esta fuente.

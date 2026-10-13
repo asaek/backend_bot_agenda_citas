@@ -69,6 +69,8 @@ esten aprobados.
 - [Verificacion de nombre unico por reserva y respuestas conversacionales](./verification/2026-10-10-booking-name-continuity.md)
 - [Verificacion de seleccion con puntuacion y horarios no disponibles](./verification/2026-10-10-booking-slot-selection.md)
 - [Verificacion de una confirmacion de cancelacion y recuperacion de autenticacion](./verification/2026-10-10-single-cancellation-confirmation.md)
+- [Etapa 1 de confirmacion natural y aclaracion de reprogramacion](./verification/2026-10-12-natural-reschedule-stage-one.md)
+- [Seleccion hibrida de horarios y cierre de autenticacion Meta](./verification/2026-10-12-hybrid-slot-selection.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -80,6 +82,7 @@ esten aprobados.
 - [016 - Enrutamiento de intencion con flujos pendientes](./specs/016-conversation-intent-routing/spec.md)
 - [017 - Espejo de proyecto y configuracion en Raspberry Pi](./specs/017-local-to-raspberry/spec.md)
 - [018 - Reintentos de webhook sin reabrir gestiones antiguas](./specs/018-safe-webhook-retries/spec.md)
+- [019 - Seleccion hibrida de horarios](./specs/019-hybrid-slot-selection/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
@@ -100,3 +103,4 @@ esten aprobados.
 - [ADR 0046 - Copiar .env completo en local to raspberry](./decisions/0046-full-env-in-local-to-raspberry.md)
 - [ADR 0047 - Preparar respuestas antes de reintentar WhatsApp](./decisions/0047-persist-replies-before-whatsapp-retries.md)
 - [ADR 0048 - Motivos generales comprensibles y aclaraciones diferenciadas](./decisions/0048-understandable-general-appointment-reasons.md)
+- [ADR 0050 - Interpretacion hibrida de la seleccion pendiente](./decisions/0050-hybrid-pending-slot-selection.md)

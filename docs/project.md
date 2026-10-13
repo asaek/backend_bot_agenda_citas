@@ -83,12 +83,20 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   el dia ofrecido ni delegar la captura del nombre al texto del LLM.
 - Admitir puntuacion accidental entre palabras y cierres como `a las 10 am esta bien`;
   distinguir hora no disponible, periodo ambiguo y texto sin hora valida durante la seleccion.
+- Entender `a las 9 am estaria bien` y `si a las 9 am esta bien` localmente, y usar
+  interpretacion estructurada de IA para selecciones naturales no reconocidas u
+  ordinales. El backend valida la referencia ofrecida y comparte el resultado entre
+  enrutamiento y seleccion, sin delegar la confirmacion final ni la disponibilidad.
 - Consultar y mostrar los horarios libres del dia destino antes de confirmar una
   reprogramacion, y aceptar solo una seleccion de esa lista.
 - Mostrar la disponibilidad del dia de una cita identificada antes de preguntar por una
   hora destino para reprogramarla.
 - Clasificar la intencion nueva antes de continuar un flujo pendiente, permitiendo
   abandonarlo o cambiar de tarea sin mutaciones accidentales.
+- Interpretar primero las respuestas completas sobre la accion pendiente: `Si cancelala`
+  y `Cancela la cita por favor` confirman la misma cancelacion sin reiniciarla.
+  Contradicciones, otras citas/fechas, condiciones, pausas y expiracion no autorizan
+  la accion anterior; rechazarla informa que la cita original sigue agendada.
 - Integrar el LLM en el ciclo de respuesta y conservar en SQLite el tipo de fallo y,
   cuando exista, el codigo HTTP del proveedor sin copiar contenido sensible al log.
 - Alternar entre Groq y OpenAI mediante `LLM_PROVIDER`, con credenciales y modelos
@@ -106,6 +114,15 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 
 El proyecto se construira y verificara una seccion a la vez. No se comenzara un
 corte nuevo hasta cerrar el corte activo.
+
+### Incremento: seleccion hibrida de horarios
+
+`specs/019-hybrid-slot-selection/` amplía la interpretacion del mensaje sobre una
+lista pendiente, activa o pausada. Las expresiones simples usan reglas; el resto
+puede consultar el proveedor LLM existente en modo texto sin herramientas, con
+referencias efimeras y evidencia literal. Condiciones, alternativas, errores del
+modelo y estados vencidos conservan los controles del backend. Una reprogramacion
+siempre solicita confirmacion local explicita antes de ejecutarse.
 
 ### Incremento: reintentos seguros del webhook
 
@@ -261,6 +278,11 @@ solo despues de una operacion confirmada y exitosa. La pregunta muestra la fecha
 horario y motivo recuperados sin exponer el ID interno. Si no se encuentra la cita o
 falla la lectura de agenda, no crea una confirmacion pendiente ni permite ejecutar la
 mutacion.
+
+La etapa 1 de confirmaciones naturales amplia ese reconocimiento con `Si es correcto`,
+`Si esta bien` y `Correcto, por favor`, y aclara dudas sobre el cambio concreto
+guardado. Condiciones, otras referencias, pausas, expiracion y duplicados no
+autorizan ni repiten la mutacion anterior. La resolucion permanece local y determinista.
 
 ### Corte implementado: motivo antes de crear una cita
 

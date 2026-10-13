@@ -437,6 +437,12 @@ _TIME_SELECTION_PATTERN = re.compile(
 )
 
 
+def time_selection_references(text: str) -> tuple[str, ...]:
+    """Conserva minutos y periodo de cada referencia numerica expresada."""
+    normalized = _normalize(normalize_time_selection_punctuation(text))
+    return tuple(match.group() for match in _TIME_SELECTION_PATTERN.finditer(normalized))
+
+
 def parse_time_selection(text: str) -> tuple[int, int] | None:
     """Extrae una hora expresada por el paciente para compararla con un slot."""
     if not isinstance(text, str):

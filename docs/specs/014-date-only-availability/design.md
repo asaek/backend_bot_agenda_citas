@@ -65,8 +65,10 @@ En el siguiente mensaje, `ConversationService` interpreta la hora expresada por 
 paciente y la compara con los slots persistidos en la zona horaria de la agenda. Una
 seleccion valida se transforma en una solicitud pendiente de `create_appointment`
 generada por el backend, que reutiliza la frontera de recoleccion de nombre y motivo.
-El LLM no recibe ese turno y no puede reemplazar la pregunta fija con una respuesta
-natural que pierda el estado. Una seleccion invalida conserva el estado y devuelve una
+Las selecciones reconocidas localmente no invocan al LLM. ADR 0050 y
+`specs/019-hybrid-slot-selection/` agregan un evaluador estructurado para lenguaje
+no reconocido; ese evaluador solo interpreta un slot y no puede reemplazar la
+pregunta fija ni perder el estado. Una seleccion invalida conserva el estado y devuelve una
 aclaracion controlada. El estado vencido se elimina sin modificar el calendario.
 
 Antes de validar la seleccion, el router de

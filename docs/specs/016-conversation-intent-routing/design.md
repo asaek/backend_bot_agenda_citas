@@ -26,11 +26,28 @@ conversation_intent clasifica el mensaje
 
 ## Frontera de clasificacion
 
+ADR 0050 y `specs/019-hybrid-slot-selection/` amplían la seleccion pendiente con
+un resultado unico de reglas o IA. Ese resultado se obtiene antes del router y
+se comparte con la recuperacion y la resolucion del slot. El lenguaje reconocido
+conserva las rutas descritas abajo; el lenguaje restante puede evaluarse en modo
+texto sin herramientas. El modelo no recibe confirmaciones finales ni sustituye
+el snapshot. Una aclaracion conserva tanto las listas activas como las pausadas.
+
 `ConversationService.build_reply()` consulta primero el snapshot pendiente de la
 conversacion. `conversation_intent.classify_pending_interruption()` combina el tipo de
 flujo (`booking_date`, disponibilidad de reserva o reprogramacion, datos de reserva o
 confirmacion) con reglas normalizadas para distinguir continuacion, abandono, aclaracion
 y cambio de tarea. Los saludos pausan; las peticiones de olvidar el flujo lo descartan.
+Para acciones pendientes, `classify_action_confirmation()` reconoce antes una
+respuesta completa respecto de la herramienta. Asi el router generico no intercepta
+`Si cancelala` como cancelacion ambigua ni `Cancela la cita por favor` como tarea
+nueva. Una contradiccion reconocida se dirige a la aclaracion sin limpiar la accion.
+El mismo reconocimiento durante una pausa no autoriza ni reactiva la mutacion;
+solo una negativa clara elimina la gestion sin cambios.
+La etapa 1 incluye `Si es correcto` y distingue condiciones antes de normalizar
+acentos, de modo que `Si, si esta bien` llega a una aclaracion contextual sin
+ejecutar ni pausar por accidente la accion. Esa aclaracion usa los argumentos
+guardados, no una interpretacion nueva del historial.
 
 La seleccion de una hora o fecha reconocida continua hacia los validadores existentes.
 Despues de clasificar las interrupciones, los slots pendientes se resuelven antes
@@ -112,6 +129,10 @@ La expresion aislada `cancela` no se trata como confirmacion ni como abandono au
 El backend pregunta que quiso cancelar y conserva la tarea hasta recibir una respuesta
 clara. En todos los casos, el router solo dirige la conversacion: las mutaciones siguen
 protegidas por sus confirmaciones existentes.
+Durante una cancelacion activa, esa aclaracion formula una unica pregunta sobre
+cancelar la cita mostrada y mantiene la accion activa. Para una reprogramacion,
+indica las frases que distinguen abandonar el cambio de solicitar una cancelacion;
+no pide responder `si/no` a dos alternativas distintas.
 
 ## Estado de pausa y recuperacion
 

@@ -4,6 +4,9 @@
 
 Aceptada.
 
+Ampliada por ADR 0049: las mutaciones usan reconocimiento completo de la respuesta
+respecto de la accion pendiente, sin respaldo permisivo del clasificador generico.
+
 ## Contexto
 
 El clasificador de cambios de citas solo reconocia unas cuantas respuestas por
@@ -19,6 +22,9 @@ respuesta permanece ambigua y no autoriza ninguna mutacion.
 
 La autorizacion sigue limitada a la accion exacta almacenada previamente. La
 interpretacion permanece local y determinista; no se delega al LLM.
+La etapa 1 de ADR 0049 agrega `Si es correcto` al vocabulario completo y contextualiza
+la aclaracion sobre la operacion guardada. Condiciones, otras referencias y expiracion
+mantienen las protecciones de esa decision.
 
 ## Consecuencias
 

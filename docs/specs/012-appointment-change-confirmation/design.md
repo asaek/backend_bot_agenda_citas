@@ -99,18 +99,38 @@ esa accion es la unica que puede ejecutar la mutacion.
 
 ## Resolucion
 
-En el siguiente mensaje, `ConversationService` clasifica la intencion de la respuesta
-normalizada como afirmativa, negativa o ambigua. Reconoce expresiones afirmativas y
-negativas claras aunque incluyan cortesia, por ejemplo `Si, por favor` o `No,
-gracias`. Si encuentra señales contradictorias o de incertidumbre, conserva la
+En el siguiente mensaje, `ConversationService` usa `classify_action_confirmation()`
+con la herramienta pendiente antes del router generico y tambien al resolver la accion.
+Reconoce respuestas completas normalizadas, con cortesia, como `Si cancelala`,
+`Cancela la cita por favor`, `Si, por favor` o `No, gracias`. Una fecha, hora, otra
+cita o instruccion adicional queda fuera del reconocimiento. `None` deja ese texto
+al router; `UNKNOWN` conserva la accion y pide aclaracion. No existe un respaldo
+permisivo por encontrar `Si` dentro de cualquier texto adicional.
+La frase `es correcto` forma parte del vocabulario, por lo que `Si es correcto`
+supera el reconocimiento completo. `Si esta bien` y `Correcto, por favor` mantienen
+la misma ruta determinista. Antes de quitar acentos, un `si` posterior a otra clausula
+en una respuesta afirmativa se conserva como posible condicion y devuelve `UNKNOWN`;
+las preguntas informativas siguen al router y un `sí` explicito no se
+confunde con ese conector. Asi `Si, si esta bien` no autoriza la accion aunque sus
+palabras individuales esten permitidas.
+Si encuentra señales contradictorias o de incertidumbre, conserva la
 accion y pide aclaracion. Una afirmacion reconstruye la llamada almacenada y la
 ejecuta mediante `AgentOrchestrator.execute_confirmed_tool()`; una respuesta
-negativa limpia el estado sin tocar el calendario.
+negativa limpia el estado sin tocar el calendario. `unchanged_reply()` comunica
+que la cita sigue agendada usando la fecha y hora original del snapshot.
+`PendingAppointmentAction.clarification_prompt(now=...)` construye una aclaracion
+desde ese mismo snapshot: fecha/hora original, operacion y destino de reprogramacion.
+Usa el reloj y zona de agenda para `hoy` y AM/PM. Tanto la aclaracion del router
+como la resolucion desconocida usan ese metodo; no consultan al LLM, no cambian
+argumentos ni renuevan `expires_at`. Si el destino cambia de dia, incluye su fecha.
 
 Antes de esta resolucion, el router transversal de
 `specs/016-conversation-intent-routing/` permite descartar una confirmacion si el paciente
 cambia explicitamente de tarea. La nueva solicitud se atiende sin dejar una mutacion
 antigua esperando un `Si` posterior.
+Las respuestas contextuales durante una pausa solo piden retomar y no restauran
+una autorizacion antigua. `cancela` aislado durante una cancelacion activa conserva
+la accion y pregunta unicamente si desea cancelar esa misma cita.
 
 La confirmacion expira a los 10 minutos. El estado se limpia antes de una ejecucion
 confirmada para evitar reutilizar la misma autorizacion.

@@ -7,6 +7,7 @@ from enum import StrEnum
 import re
 import unicodedata
 
+from appointment_availability import format_patient_time
 from calendar_domain import Appointment, ToolName
 from llm_provider import ToolCall
 
@@ -34,6 +35,7 @@ _AFFIRMATIVE_CONFIRMATION_PHRASES = (
     "ok",
     "okay",
     "correcto",
+    "es correcto",
     "hazlo",
     "claro",
     "por supuesto",
@@ -317,6 +319,43 @@ class PendingAppointmentAction:
             )
         )
 
+    def unchanged_reply(self) -> str:
+        reply = "No se realizó ningún cambio en tu cita."
+        if self.appointment_details is None:
+            return reply + " Tu cita sigue agendada."
+        start_at = datetime.fromisoformat(self.appointment_details.start_at)
+        return (
+            f"{reply} Tu cita del {start_at:%d/%m/%Y} a las "
+            f"{format_patient_time(start_at)} sigue agendada."
+        )
+
+    def clarification_prompt(self, *, now: datetime) -> str:
+        """Aclara la accion guardada sin renovarla ni reconstruirla desde el historial."""
+        reference = "tu cita"
+        original_start = None
+        if self.appointment_details is not None:
+            original_start = datetime.fromisoformat(self.appointment_details.start_at).astimezone(now.tzinfo)
+            day = "de hoy" if original_start.date() == now.date() else f"del {original_start:%d/%m/%Y}"
+            reference = f"tu cita {day} a las {format_patient_time(original_start)}"
+        if self.tool_name is ToolName.RESCHEDULE_APPOINTMENT:
+            try:
+                target = datetime.fromisoformat(self.arguments["new_start_at"])
+                target = target.replace(tzinfo=now.tzinfo) if target.tzinfo is None else target.astimezone(now.tzinfo)
+                destination = f"las {format_patient_time(target)}"
+                if original_start is None or target.date() != original_start.date():
+                    destination += f" del {target:%d/%m/%Y}"
+                question = f"¿Confirmas cambiar {reference} para {destination}?"
+            except ValueError:
+                question = f"¿Confirmas el cambio de horario pendiente de {reference}?"
+            operation = "el cambio"
+        else:
+            question = f"¿Confirmas cancelar {reference}?"
+            operation = "la cancelación"
+        return (
+            f"No me quedó claro. {question} "
+            f"Responde ‘Sí’ para confirmar {operation} o ‘No’ para conservarla."
+        )
+
 
 def classify_confirmation(value: str) -> ConfirmationDecision:
     normalized = _normalize(value)
@@ -344,6 +383,61 @@ def classify_confirmation(value: str) -> ConfirmationDecision:
     if affirmative:
         return ConfirmationDecision.CONFIRMED
     return ConfirmationDecision.UNKNOWN
+
+
+def classify_action_confirmation(
+    value: str,
+    *,
+    tool_name: ToolName,
+) -> ConfirmationDecision | None:
+    """Clasifica una respuesta completa sobre la operacion pendiente.
+
+    None deja el mensaje al router; UNKNOWN conserva la accion y pide aclaracion.
+    """
+    if tool_name not in DESTRUCTIVE_APPOINTMENT_TOOLS:
+        return None
+    normalized = _normalize(value)
+    raw_reply = value.strip().casefold()
+    lead_reply = re.sub(r"^(?:por favor|muchas gracias|gracias)\s+", "", normalized)
+    starts_affirmative = any(
+        lead_reply == phrase or lead_reply.startswith(phrase + " ")
+        for phrase in _AFFIRMATIVE_CONFIRMATION_PHRASES
+    )
+    # Un 'si' posterior sin acento puede introducir una condicion. Conservar la
+    # distincion antes de normalizar; 'Sí es correcto' sigue siendo una afirmacion.
+    if starts_affirmative and any(
+        re.search(r"\w", raw_reply[:match.start()]) is not None
+        for match in re.finditer(r"\bsi\b", raw_reply)
+    ):
+        return ConfirmationDecision.UNKNOWN
+    phrases = (
+        *_AFFIRMATIVE_CONFIRMATION_PHRASES,
+        *(phrase for phrase in _NEGATIVE_CONFIRMATION_PHRASES if phrase != "cancelar"),
+        *_UNCERTAIN_CONFIRMATION_PHRASES,
+        "por favor", "gracias", "muchas gracias",
+    )
+    alternatives = "|".join(re.escape(phrase) for phrase in phrases)
+    request = None
+    negative_request = None
+    if tool_name is ToolName.CANCEL_APPOINTMENT:
+        request = (
+            r"(?:(?:quiero|quisiera|deseo|necesito)\s+)?"
+            r"(?:cancelala|cancelarla|(?:cancela|cancelar|cancelame)\s+"
+            r"(?:(?:la|mi|esa|esta)\s+)?cita)"
+        )
+        negative_request = rf"no\s+(?:{request}|(?:la\s+)?canceles)"
+        alternatives = rf"{negative_request}|{request}|si\s+cancelar|{alternatives}"
+    clause = rf"(?:{alternatives})"
+    # Limitar clausulas evita backtracking exponencial con fragmentos repetidos.
+    if re.fullmatch(rf"{clause}(?:\s+(?:(?:pero|de|y)\s+)?{clause}){{0,7}}", normalized) is None:
+        return None
+    if "?" in value or "¿" in value:
+        return ConfirmationDecision.UNKNOWN
+    if request is not None and negative_request is not None:
+        # Un verbo de cancelacion afirma esa accion, no la rechaza.
+        normalized = re.sub(rf"\b{negative_request}\b", "no", normalized)
+        normalized = re.sub(rf"\b(?:{request}|si\s+cancelar)\b", "si", normalized)
+    return classify_confirmation(normalized)
 
 
 def confirmation_reply(tool_name: ToolName) -> str:

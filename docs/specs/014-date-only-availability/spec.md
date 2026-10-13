@@ -34,7 +34,9 @@ La funcionalidad cubre:
 - Persistencia de la fecha, slots ofrecidos y expiracion en `conversations.context_json`.
 - Validacion backend de la seleccion del paciente contra los slots ofrecidos.
 - Espera de la seleccion del paciente antes de iniciar la creacion.
-- Transferencia directa a la solicitud controlada de nombre y motivo sin invocar al LLM.
+- Transferencia directa a la solicitud controlada de nombre y motivo, sin delegar
+  esas preguntas al LLM. Las selecciones simples no requieren IA; el lenguaje
+  no reconocido puede usar el evaluador de `specs/019-hybrid-slot-selection/`.
 - Conservacion del flujo existente cuando la hora ya fue indicada.
 
 ## Requisitos funcionales
@@ -72,7 +74,9 @@ Despues de mostrar horarios, el backend debe conservar la fecha y los slots ofre
 en `conversations.context_json` durante 10 minutos. Una hora expresada por el paciente
 solo es valida si coincide con uno de esos slots. Una seleccion valida debe crear el
 estado pendiente de la cita y continuar con las preguntas fijas de nombre y motivo sin
-consultar al LLM. Una seleccion invalida debe conservar los slots y pedir que elija uno
+delegar esas preguntas al LLM. Las selecciones simples se interpretan localmente;
+ADR 0050 permite evaluar estructuradamente el lenguaje restante. Una seleccion
+invalida debe conservar los slots y pedir que elija uno
 de la lista.
 Expresiones completas como `quisiera una cita a las 9 am` y variantes con
 `quiero`, `necesito`, `deseo` o `me gustaria` cuentan como seleccion contextual,
@@ -106,7 +110,7 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
    invocar al LLM.
 7. `Hola quisiera agendar una cita para el lunes`, `damela a las 10 am` y `Siento rara
    la vista` solicitan el motivo una sola vez y crean una sola cita con ese texto.
-8. La seleccion valida no invoca al LLM, conserva el estado entre mensajes y elimina el
+8. La seleccion simple valida no invoca al LLM, conserva el estado entre mensajes y elimina el
    estado de disponibilidad despues de iniciar la recoleccion de datos.
 9. Una hora no ofrecida, una solicitud sin hora o una disponibilidad vencida no crea la
    cita ni pierde los controles del backend.

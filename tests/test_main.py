@@ -131,6 +131,131 @@ class WebhookTests(unittest.TestCase):
             now=now or datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
         )
 
+    def test_stage_one_reschedule_affirmatives_and_retries_notify_the_doctor_once(self) -> None:
+        for text in ("Sí es correcto", "SÍ ESTÁ BIEN!", "Correcto, por favor"):
+            with self.subTest(text=text):
+                scenario = WebhookTests()
+                scenario.setUp()
+                self.addCleanup(scenario.doCleanups)
+                scenario.set_fixed_calendar_runtime(datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
+                fake_client = FakeWhatsAppClient()
+                provider = FakeLLMProvider()
+                with scenario.configured_runtime(fake_client, provider):
+                    with TestClient(app) as client:
+                        responses = scenario.post_messages(
+                            client,
+                            scenario.text_payload(message_id="wamid.stage-one-day", text="Quiero agendar para hoy"),
+                            scenario.text_payload(message_id="wamid.stage-one-slot", text="11 am"),
+                            scenario.text_payload(message_id="wamid.stage-one-name", text="Asael Ponce Silva"),
+                            scenario.text_payload(message_id="wamid.stage-one-reason", text="Revisión general"),
+                        )
+                        self.assertTrue(all(response.status_code == 200 for response in responses))
+                        original = app.state.calendar_provider.appointments[0]
+                        provider.replies = (
+                            ToolCall(
+                                name="reschedule_appointment",
+                                arguments={"appointment_id": original.id, "new_start_at": "2026-10-12T16:00:00+00:00"},
+                                call_id="call-stage-one-http",
+                            ),
+                            '{"summary":"Reprogramacion de la cita a las 4 PM.","priority_signals":[]}',
+                        )
+                        with patch.dict(os.environ, {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"}):
+                            responses = scenario.post_messages(
+                                client,
+                                scenario.text_payload(message_id="wamid.stage-one-change", text="Quiero cambiar mi cita de hoy a las 4 pm"),
+                                scenario.text_payload(message_id="wamid.stage-one-new-slot", text="4 pm"),
+                                scenario.text_payload(message_id="wamid.stage-one-doubt", text="No sé"),
+                            )
+                            self.assertTrue(all(response.status_code == 200 for response in responses))
+                            self.assertIn("No me quedó claro", fake_client.sent_messages[-1][1])
+                            self.assertIn("4:00 PM", fake_client.sent_messages[-1][1])
+                            self.assertEqual(app.state.calendar_provider.appointments, (original,))
+                            confirmation = scenario.text_payload(message_id="wamid.stage-one-confirm", text=text)
+                            responses = scenario.post_messages(client, confirmation, confirmation)
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+                self.assertEqual(sum(body == "Tu cita ha sido modificada." for body in patient_bodies), 1)
+                doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+                self.assertEqual(len(doctor_bodies), 1)
+                self.assertIn("Cita modificada", doctor_bodies[0])
+                self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+                changed = app.state.calendar_provider.appointments[0]
+                self.assertEqual(changed.id, original.id)
+                self.assertEqual(changed.start_at, datetime(2026, 10, 12, 16, tzinfo=timezone.utc))
+                self.assertEqual(changed.reason, original.reason)
+                self.assertEqual(provider.call_count, 2)
+
+    def test_hybrid_reschedule_selection_and_confirmation_are_not_repeated_by_webhooks(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
+        fake_client = FakeWhatsAppClient()
+        provider = FakeLLMProvider()
+        selection = self.text_payload(
+            message_id="wamid.hybrid-selection", text="Sí, ese de las nueve me queda perfecto",
+        )
+        confirmation = self.text_payload(message_id="wamid.hybrid-confirm", text="si confirmo")
+        with self.configured_runtime(fake_client, provider):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.hybrid-day", text="Quiero agendar para hoy"),
+                    self.text_payload(message_id="wamid.hybrid-slot", text="4 pm"),
+                    self.text_payload(message_id="wamid.hybrid-name", text="Asael Ponce Silva"),
+                    self.text_payload(message_id="wamid.hybrid-reason", text="Revisión general"),
+                    self.text_payload(message_id="wamid.hybrid-change", text="quisiera cambiar esa cita para ma;ana"),
+                )
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                original = app.state.calendar_provider.appointments[0]
+                provider.replies = (
+                    json.dumps({"intent": "select", "slot_id": "slot-1", "evidence": "ese de las nueve"}),
+                    '{"summary":"Cambio de cita para mañana a las 9 AM.","priority_signals":[]}',
+                )
+                responses = self.post_messages(client, selection, selection)
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                self.assertIn("Confirmas", fake_client.sent_messages[-1][1])
+                self.assertEqual(app.state.calendar_provider.appointments, (original,))
+                self.assertEqual(provider.call_count, 1)
+                with patch.dict(os.environ, {
+                    "DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+                }):
+                    responses = self.post_messages(client, confirmation, confirmation, selection)
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        changed = app.state.calendar_provider.appointments[0]
+        self.assertEqual(changed.id, original.id)
+        self.assertEqual(changed.start_at, datetime(2026, 10, 13, 9, tzinfo=timezone.utc))
+        self.assertEqual(changed.reason, original.reason)
+        patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+        self.assertEqual(sum("¿Confirmas que deseas reprogramar" in body for body in patient_bodies), 1)
+        self.assertEqual(sum(body == "Tu cita ha sido modificada." for body in patient_bodies), 1)
+        doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        self.assertEqual(len(doctor_bodies), 1)
+        self.assertIn("Cita modificada", doctor_bodies[0])
+        self.assertEqual(provider.call_count, 2)
+
+    def test_slot_model_failure_is_recorded_once_and_pending_slots_can_be_recovered(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
+        fake_client = FakeWhatsAppClient()
+        provider = FakeLLMProvider(error=LLMHTTPError(503))
+        selection = self.text_payload(message_id="wamid.hybrid-failed-selection", text="Ese de las nueve me queda perfecto")
+        with self.configured_runtime(fake_client, provider):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.hybrid-failed-day", text="Quiero agendar para mañana"),
+                    selection, selection,
+                )
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                self.assertNotIn("Confirmas", fake_client.sent_messages[-1][1])
+                self.assertEqual(app.state.calendar_provider.appointments, ())
+                with open_database(self.database_path) as connection:
+                    failures = connection.execute("SELECT error_type, http_status_code FROM llm_failures").fetchall()
+                self.assertEqual(failures, [("LLMHTTPError", 503)])
+                response = client.post("/webhook/whatsapp", json=self.text_payload(
+                    message_id="wamid.hybrid-failed-recovery", text="9 am",
+                ))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("nombre completo", fake_client.sent_messages[-1][1])
+                self.assertEqual(provider.call_count, 1)
+
     def test_google_calendar_provider_requires_explicit_runtime_selection(self) -> None:
         expected_provider = object()
         environment = {
@@ -1298,7 +1423,7 @@ class WebhookTests(unittest.TestCase):
             '{"summary":"Cancelacion de la cita de las 10 AM.","priority_signals":[]}',
         ))
         request_payload = self.text_payload(message_id="wamid.cancel-single-request", text="quisiera cancelar la de las 10 am")
-        confirmation_payload = self.text_payload(message_id="wamid.cancel-single-confirm", text="si por favor")
+        confirmation_payload = self.text_payload(message_id="wamid.cancel-single-confirm", text="Si cancelala")
         with self.configured_runtime(fake_client, tool_provider):
             with TestClient(app) as client:
                 for index, (selection, reason) in enumerate((

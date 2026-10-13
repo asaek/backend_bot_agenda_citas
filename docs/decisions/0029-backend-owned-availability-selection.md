@@ -4,6 +4,10 @@
 
 Aceptada.
 
+Ampliada por ADR 0050: las expresiones no resueltas localmente pueden usar un
+evaluador de IA acotado. La validacion, el estado y las preguntas siguen controlados
+por el backend; las selecciones simples conservan la via sin LLM.
+
 ## Contexto
 
 La consulta de disponibilidad ya mostraba slots reales, pero solo esperaba que el LLM

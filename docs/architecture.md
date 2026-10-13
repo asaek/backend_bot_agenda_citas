@@ -152,6 +152,39 @@ solicitud pendiente de cita directamente, por lo que las preguntas de nombre y m
 no dependen de una respuesta textual del LLM. Las solicitudes con hora exacta continúan
 por el flujo normal y conservan la interceptacion de `create_appointment` como defensa.
 
+### Interpretacion hibrida de la seleccion pendiente
+
+`appointment_slot_selection.PendingSlotSelectionInterpreter` obtiene una sola
+interpretacion por turno sobre el snapshot activo o pausado. Las selecciones
+completas reconocidas, incluido `si a las 9 am estaria bien`, usan la via local.
+El router conserva sus rutas para abandono, gestiones nuevas y preguntas informativas.
+Solo el lenguaje restante consulta `LLMProvider.generate_text`, que no publica
+herramientas. El JSON contiene `intent`, `slot_id` y evidencia literal; el prompt
+recibe fecha, zona y slots con referencias efimeras, sin IDs de cita/paciente,
+historial ni motivo de consulta. No se agregan dependencias o configuracion.
+
+El backend exige un esquema exacto, evidencia presente en el mensaje y pertenencia
+del slot al snapshot. Si hay una hora numerica o una referencia reconocible como
+`las nueve`, tambien comprueba su coincidencia
+unica y valida minutos y AM/PM; el modelo no sustituye una hora no disponible por
+otra. Condiciones, negaciones, varias horas, preguntas tentativas y referencias a
+otras fechas se excluyen localmente del evaluador. Una respuesta invalida o un
+fallo del proveedor pide aclaracion sin modificar el estado o la agenda.
+El servicio registra el tipo de fallo y codigo HTTP en `llm_failures`; las
+respuestas estructuradas invalidas se registran como `InvalidSlotSelectionResponse`,
+sin copiar el mensaje o el contenido del proveedor. Las afirmaciones aisladas
+no permiten escoger un horario. Las cantidades y representaciones redundantes
+de una misma hora no se confunden con dos opciones distintas.
+Las comparaciones conservan minutos y AM/PM, mediante el patron compartido de
+`time_selection_references()`; no deduplican 9:00/9:30 ni mañana/noche.
+
+`ConversationService` pasa el resultado explicitamente a recuperacion, enrutamiento
+y seleccion. No existe un cache mutable compartido entre pacientes ni una segunda
+interpretacion del mismo mensaje. Las listas vencidas no invocan al modelo; retomar
+refresca su disponibilidad. La seleccion valida prepara el nombre/motivo o una
+confirmacion nueva, y las confirmaciones de cambios siguen siendo locales.
+Detalle en `specs/019-hybrid-slot-selection/` y ADR 0050.
+
 ### Modelo de dominio de citas
 
 `calendar_domain.py` define `Appointment`, `AvailableSlot`, `PatientScope`,
@@ -281,15 +314,27 @@ enviar al paciente. El incremento se define en `specs/018-safe-webhook-retries/`
 La funcionalidad definida en `specs/012-appointment-change-confirmation/` intercepta
 las solicitudes de cancelacion y reprogramacion antes de `ToolExecutor`. La accion
 exacta queda pendiente en `conversations.context_json` hasta que el paciente
-responde afirmativamente. `classify_confirmation()` interpreta marcadores de
-intencion en texto normalizado y acepta cortesia alrededor de afirmaciones o
-negaciones claras; señales contradictorias o inciertas siguen siendo ambiguas.
+responde afirmativamente. `classify_action_confirmation()` interpreta respuestas
+completas respecto de la herramienta pendiente y acepta cortesia alrededor de
+afirmaciones o negaciones claras. `Si cancelala` y `Cancela la cita por favor`
+confirman una cancelacion ya mostrada; no crean una accion por si mismas.
+Señales contradictorias, preguntas tentativas y texto no reconocido no autorizan
+mutaciones. El reconocimiento completo excluye otras citas, fechas, horas y
+comandos adicionales; no se usa el clasificador generico como respaldo permisivo.
+`Si es correcto`, `Si esta bien` y `Correcto, por favor` resuelven esa accion en
+el primer turno claro. Un `si` posterior sin acento se considera posible condicion
+antes de normalizar; no autoriza una mutacion por coincidencia de frases.
+Las dudas usan `PendingAppointmentAction.clarification_prompt()` con el reloj de
+agenda para mostrar la cita original y el destino guardado. Ese texto conserva
+el snapshot y su vigencia, y se construye sin llamadas al LLM.
 Antes de preguntar, `ConversationService` usa una lectura
 del `ToolExecutor` para conservar fecha, horario y motivo de la cita en el snapshot
 de la accion; esos datos se muestran sin el ID interno. Si no recupera la cita o la
 lectura falla, devuelve el error publico de agenda y no guarda accion pendiente. Una
 respuesta negativa o vencida no llama a una mutacion del calendario. Solo la ejecucion
 confirmada puede producir un evento de cita y una notificacion al doctor.
+Rechazar o abandonar una accion informa que no hubo cambios y que la cita original
+sigue agendada, con su fecha y hora cuando estan disponibles en el snapshot.
 
 Para una cancelacion directa, `is_cancellation_request()` dirige el mensaje a una
 lectura backend de agenda antes del agente. La referencia de fecha explicita prevalece
@@ -327,6 +372,12 @@ de agenda en una sola actualizacion de contexto; una intencion nueva vuelve al f
 normal y conserva las confirmaciones de seguridad existentes. Una expresion ambigua
 como `cancela` solicita aclaracion y no borra estado ni ejecuta una mutacion. Una
 confirmacion descartada no puede ejecutarse con un `Si` posterior.
+Antes del router generico, una respuesta completa sobre la accion pendiente va a
+su resolucion: el verbo de cancelar no significa una tarea nueva si confirma esa
+misma cancelacion. Una contradiccion conserva la accion y pide aclarar, sin
+confundirla con abandono. Durante una pausa, esa respuesta solo pide retomar;
+una negativa clara descarta la gestion sin mutacion. `cancela` aislado en una
+cancelacion activa mantiene el estado y formula una unica pregunta de si/no.
 Una expresion completa de seleccion, como `agendame a las 11 am`, continua el flujo
 si corresponde a la lista; una hora dentro de otra instruccion no cuenta como eleccion.
 Tambien se reconocen `quisiera una cita a las 9 am`, `necesito una cita a las 9 am`

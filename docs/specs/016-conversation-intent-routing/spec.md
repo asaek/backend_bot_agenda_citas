@@ -17,6 +17,8 @@ La seleccion natural de una reserva y las preguntas de costo con verbos de agend
 estan verificadas en `docs/verification/2026-10-10-booking-name-continuity.md`.
 La puntuacion, los cierres de seleccion y la no disponibilidad en reserva estan
 verificados en `docs/verification/2026-10-10-booking-slot-selection.md`.
+La confirmacion contextual de ADR 0049 se verifica en
+`docs/verification/2026-10-11-contextual-cancellation-confirmation.md`.
 
 ## Objetivo
 
@@ -38,11 +40,23 @@ la respuesta que esperaba el flujo anterior.
 
 ## Requisitos funcionales
 
+Las respuestas claras de confirmacion y las condiciones reconocibles respecto
+de una accion pendiente se resuelven con la clasificacion contextual de
+`specs/012-appointment-change-confirmation/` antes de interpretar otra tarea.
+La aclaracion de una accion desconocida muestra el cambio guardado y no autoriza
+una fecha, cita u operacion distinta por contener una afirmacion.
+La interpretacion hibrida de `specs/019-hybrid-slot-selection/` comparte una
+seleccion validada entre el router y el procesamiento del horario; no cambia las
+reglas de confirmacion de una accion pendiente.
+
 ### RF-1601 - Clasificar antes de continuar
 
 Antes de resolver cualquier estado pendiente, el backend debe evaluar el mensaje entrante
 segun la tarea activa. Debe distinguir entre una respuesta esperada, un abandono, una
 intencion nueva y una expresion ambigua.
+Con una accion pendiente, primero se reconoce una respuesta completa respecto de
+esa herramienta. `Si cancelala` o `Cancela la cita por favor` continuan la misma
+cancelacion; las contradicciones reconocidas se aclaran sin limpiar la accion.
 
 ### RF-1602 - Abandono sin efectos de agenda
 
@@ -70,6 +84,9 @@ explicita de `otra cita` no cuenta como eleccion de esa misma reserva.
 Una expresion aislada como `cancela` debe pedir aclaracion sobre si el paciente desea
 abandonar la solicitud actual o cancelar una cita existente. La cita y el estado pendiente
 deben permanecer intactos hasta que la intencion quede clara.
+Si la tarea activa ya es cancelar una cita identificada, la aclaracion pregunta solo
+si quiere cancelar esa cita (`Si, cancelar` / `No, mantenerla`), sin pausar la accion.
+Una accion que ya estaba pausada sigue requiriendo retomar y recibir confirmacion nueva.
 
 ### RF-1605 - Confirmacion no reutilizable
 
@@ -225,4 +242,8 @@ mantiene tras pausar y reiniciar el servicio.
 26. Puntuacion, minutos, AM/PM y cierres de aceptacion mantienen su significado;
     preguntas, dos horas y otras instrucciones no se convierten en selecciones.
 27. Un periodo nocturno con puntuacion conserva las 10 PM; no se sustituye por las
-    10 AM ni se considera ambiguo por haber ambos periodos ofrecidos.
+     10 AM ni se considera ambiguo por haber ambos periodos ofrecidos.
+28. Confirmar la cancelacion pendiente con un verbo de cancelar no reinicia ni pausa
+    la accion. Una instruccion sobre otra cita o fecha sigue requiriendo confirmacion nueva.
+29. Una contradiccion durante una confirmacion no se trata como abandono; las
+    negativas claras si descartan la gestion y explican que la cita sigue agendada.

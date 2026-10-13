@@ -86,3 +86,23 @@
       continuidad; mantener la confirmacion obligatoria en reprogramacion.
 - [x] Completar revision, suite de 353 pruebas y despliegue verificado en Raspberry Pi;
       evidencia en `docs/verification/2026-10-10-booking-slot-selection.md`.
+
+## Confirmacion contextual de la accion pendiente
+
+- [x] Reconocer respuestas completas sobre la herramienta antes del router generico.
+- [x] No reiniciar ni pausar una cancelacion al recibir su confirmacion natural.
+- [x] Mantener contradicciones para aclaracion, sin convertirlas en abandono.
+- [x] Conservar confirmaciones pausadas inactivas y exigir una nueva al retomar.
+- [x] Aclarar `cancela` sobre una cancelacion activa mediante una sola pregunta.
+- [x] Mantener otra cita, otra fecha y otra operacion fuera de la autorizacion anterior.
+- [x] Actualizar especificacion, diseno, arquitectura, alcance y ADR 0049.
+- [x] Registrar suite final de 370 pruebas y comprobaciones HTTP sin recarga del runtime en
+      `docs/verification/2026-10-11-contextual-cancellation-confirmation.md`.
+
+## Etapa 1 - Confirmacion natural y aclaracion contextual del cambio
+
+- [x] Coordinar las nuevas afirmaciones completas y las condiciones con el router contextual.
+- [x] Mantener el cambio guardado para aclarar dudas, sin renovar ni reactivar la autorizacion.
+- [x] Conservar referencias a otra cita/fecha fuera de la confirmacion anterior.
+- [x] Registrar 377 pruebas correctas y runtime verificado en
+      `docs/verification/2026-10-12-natural-reschedule-stage-one.md`.

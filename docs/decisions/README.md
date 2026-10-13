@@ -57,3 +57,5 @@ indique cual decision anterior queda obsoleta.
 - [0046 - Copiar .env completo en local to raspberry](./0046-full-env-in-local-to-raspberry.md)
 - [0047 - Preparar respuestas antes de reintentar WhatsApp](./0047-persist-replies-before-whatsapp-retries.md)
 - [0048 - Motivos generales comprensibles y aclaraciones diferenciadas](./0048-understandable-general-appointment-reasons.md)
+- [0049 - Confirmacion contextual de la accion pendiente](./0049-contextual-appointment-confirmation.md)
+- [0050 - Interpretacion hibrida de la seleccion pendiente](./0050-hybrid-pending-slot-selection.md)

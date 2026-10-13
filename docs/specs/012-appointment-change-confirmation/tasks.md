@@ -61,3 +61,43 @@
       Meta responde 200 el 11/10/2026 tras copiar y verificar el `.env` completo.
 
 Evidencia: `docs/verification/2026-10-10-single-cancellation-confirmation.md`.
+
+## Corte 7 - Confirmacion contextual sin bucles
+
+- [x] Reproducir la conversacion reportada con agenda simulada en Raspberry Pi.
+- [x] Probar primero `Si cancelala` y la instruccion directa despues de mostrar la cita.
+- [x] Coordinar enrutamiento, resolucion y pausa con una clasificacion contextual completa.
+- [x] Conservar contradicciones para aclaracion y rechazar condiciones o datos adicionales.
+- [x] Mantener otra cita, otra operacion, pausa y expiracion fuera de la autorizacion anterior.
+- [x] Separar abandono de solicitud y cancelacion; comunicar la cita aun agendada al rechazar.
+- [x] Cubrir recreacion del servicio y una sola cancelacion/notificacion en reintentos del webhook.
+- [x] Actualizar ADR, especificaciones, diseno, arquitectura y alcance.
+- [x] Completar revision, suite final de 370 pruebas, compilacion y comprobaciones HTTP en Raspberry Pi.
+
+Este corte sincroniza codigo, pruebas y documentacion; no solicita reemplazar `.env`
+ni reiniciar el backend en ejecucion. Evidencia:
+`docs/verification/2026-10-11-contextual-cancellation-confirmation.md`.
+
+## Activacion del corte 7 - 12/10/2026
+
+- [x] Ejecutar el `local to raspberry` solicitado, copiando el `.env` completo con modo 600.
+- [x] Verificar igualdad byte por byte y configuracion efectiva sin mostrar secretos.
+- [x] Activar Uvicorn y ngrok despues de confirmar que ambos estaban detenidos.
+- [x] Verificar salud, ambos webhooks locales/publicos y autenticacion Meta con HTTP 200.
+- [x] Ejecutar nuevamente las 370 pruebas en Raspberry Pi.
+
+Evidencia: `docs/verification/2026-10-12-contextual-cancellation-deployment.md`.
+
+## Corte 8 - Etapa 1: afirmaciones claras y aclaracion contextual de reprogramacion
+
+- [x] Reproducir con agenda simulada el bucle de `Si es correcto` antes de corregirlo.
+- [x] Reconocer las afirmaciones del plan con mayusculas, acentos y puntuacion.
+- [x] Evitar que `Si, si esta bien` y condiciones similares autoricen la accion anterior.
+- [x] Preguntar por el cambio guardado en vez de repetir solamente frases permitidas.
+- [x] Verificar dudas, negativa, expiracion, reinicio y referencias a otras fechas/citas.
+- [x] Verificar las tres afirmaciones y un unico cambio/notificacion ante duplicados del webhook.
+- [x] Completar revision directa, suite de 377 pruebas y despliegue en Raspberry Pi;
+      evidencia en `docs/verification/2026-10-12-natural-reschedule-stage-one.md`.
+
+Esta etapa corresponde a los puntos 1 y 2 del plan aprobado. La unificacion general
+de fechas, intervalos antes/despues y cierre con datos definitivos pertenece a la etapa 2.
