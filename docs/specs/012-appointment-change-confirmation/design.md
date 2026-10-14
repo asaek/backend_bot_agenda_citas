@@ -52,6 +52,12 @@ del paciente. Si el ID no aparece, devuelve `appointment_not_found`; si falla la
 normaliza la excepcion a su error publico de agenda. En ambos casos termina el turno sin
 accion pendiente, confirmacion ni mutacion. Solo una cita recuperada permite mostrar
 fecha, horario y motivo y guardar la operacion exacta.
+`PendingAppointmentAction._format_appointment_details()` muestra solo el inicio
+mediante `format_patient_time()`, como `Hora: 9:00 AM`. `_format_requested_start()`
+usa tambien AM/PM para el destino de reprogramacion. Los candidatos de
+`_format_appointment_target_selection()` muestran fecha y solo la hora de inicio.
+Los datos persistidos siguen conservando inicio y fin ISO; ADR 0052 registra la
+regla de presentacion.
 
 La accion pendiente conserva el nombre de la herramienta, sus argumentos permitidos,
 el ID de la llamada, los tiempos de creacion y expiracion y los datos recuperados de la

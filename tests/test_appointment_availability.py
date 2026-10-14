@@ -85,7 +85,10 @@ class AppointmentAvailabilityTests(unittest.TestCase):
 
         reply = format_availability_reply(result, request, timezone=self.timezone)
 
-        self.assertEqual(reply.count("- 11:00 AM a 11:30 AM"), 1)
+        self.assertEqual(
+            [line for line in reply.splitlines() if line.startswith("- ")],
+            ["- 11:00 AM"],
+        )
         self.assertIn("Elige uno", reply)
 
     def test_parses_common_patient_time_selections(self) -> None:

@@ -38,6 +38,16 @@
 
 Evidencia: `docs/verification/2026-10-07-twelve-hour-lists.md`.
 
+## Ampliacion - Solo la hora de inicio en disponibilidad
+
+- [x] Mostrar solo `- h:mm AM/PM` en disponibilidad para agendar y reprogramar.
+- [x] Aplicar el mismo formato al retomar listas pausadas y en el prompt del LLM.
+- [x] Ajustar las expectativas existentes de formato, deduplicacion y horarios ocupados.
+- [x] Verificar las comprobaciones en Raspberry Pi y registrar evidencia del despliegue.
+
+La presentacion del intervalo de la ampliacion anterior queda sustituida por ADR 0051.
+Evidencia: `docs/verification/2026-10-14-start-only-availability-lists.md`.
+
 ## Ampliacion - Seleccion natural de una reserva
 
 - [x] Reproducir `quisiera una cita a las 9 am` despues de la disponibilidad del lunes.

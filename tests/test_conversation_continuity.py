@@ -139,7 +139,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertIn("13/10/2026", offered)
                 reply = self.send(text)
                 self.assertIn("Confirmas", reply)
-                self.assertIn("13/10/2026 a las 09:00", reply)
+                self.assertIn("13/10/2026 a las 9:00 AM", reply)
                 self.assertEqual(self.provider.appointments, (original,))
                 self.assertEqual(self.events, [])
                 self.send("No")
@@ -166,7 +166,7 @@ class ConversationContinuityTests(unittest.TestCase):
         calls = self.llm.call_count
         reply = self.send("Sí, ese de las nueve me queda perfecto")
         self.assertIn("Confirmas", reply)
-        self.assertIn("a las 09:00", reply)
+        self.assertIn("a las 9:00 AM", reply)
         self.assertEqual(self.provider.appointments, (original,))
         self.assertEqual(self.events, [])
         self.assertEqual(self.llm.call_count, calls + 1)
@@ -398,8 +398,12 @@ class ConversationContinuityTests(unittest.TestCase):
                 arguments={"appointment_id": first.id}, call_id="call-delayed-cancel",
             ),
         )
-        self.assertIn("10:00 AM", self.send("Dime las citas que tengo para el lunes"))
-        self.assertIn("Confirmas", self.send("quisiera cancelar la de las 10 am"))
+        listed = self.send("Dime las citas que tengo para el lunes")
+        self.assertIn("- Horario: 10:00 AM", listed.splitlines())
+        self.assertIn("- Horario: 12:00 PM", listed.splitlines())
+        confirmation = self.send("quisiera cancelar la de las 10 am")
+        self.assertIn("Confirmas", confirmation)
+        self.assertIn("Hora: 10:00 AM", confirmation.splitlines())
         self.assertEqual(self.provider.appointments, (first, second))
         self.assertEqual(self.events, [])
         self.service = self.new_service()
@@ -711,7 +715,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("Hola", self.send("Hola buenos dias"))
         offered = self.send("quisiera agendar una cita para el dia lunes")
         self.assertIn("12/10/2026", offered)
-        self.assertIn("9:00 AM a 9:30 AM", offered)
+        self.assertIn("- 9:00 AM", offered.splitlines())
 
         self.assertIn("nombre completo", self.send("quisiera una cita a las 9 am"))
         self.assertEqual(self.llm.call_count, 1)
@@ -748,8 +752,8 @@ class ConversationContinuityTests(unittest.TestCase):
         for expression in ("QUisiera.a las 10 am", "a las 10 am esta bien"):
             with self.subTest(expression=expression):
                 offered = self.send("Buenos dias quisiera agendar para el dia lunes")
-                self.assertNotIn("- 9:00 AM a 9:30 AM", offered)
-                self.assertIn("- 10:00 AM a 10:30 AM", offered)
+                self.assertNotIn("- 9:00 AM", offered.splitlines())
+                self.assertIn("- 10:00 AM", offered.splitlines())
                 self.service = self.new_service()
                 self.assertEqual(self.send(expression), APPOINTMENT_NAME_REPLY)
                 self.assertEqual(self.provider.appointments, (original,))
@@ -772,8 +776,8 @@ class ConversationContinuityTests(unittest.TestCase):
             end_at=datetime(2026, 10, 12, 9, 30, tzinfo=timezone.utc),
         )
         offered = self.send("Quiero agendar para el lunes")
-        self.assertNotIn("- 9:00 AM a 9:30 AM", offered)
-        self.assertIn("- 10:00 AM a 10:30 AM", offered)
+        self.assertNotIn("- 9:00 AM", offered.splitlines())
+        self.assertIn("- 10:00 AM", offered.splitlines())
         for expression in ("9 am", "QUisiera.a las 9 am", "a las 9 am esta bien", "8 am", "5 pm"):
             with self.subTest(expression=expression):
                 reply = self.send(expression)
@@ -828,7 +832,7 @@ class ConversationContinuityTests(unittest.TestCase):
         for paused in (False, True):
             with self.subTest(paused=paused):
                 offered = self.send("Quiero agendar para el lunes")
-                self.assertIn("- 10:00 AM a 10:30 AM", offered)
+                self.assertIn("- 10:00 AM", offered.splitlines())
                 if paused:
                     self.send("¿Cuánto cuesta la consulta?")
                 self.service = self.new_service()
@@ -854,8 +858,8 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         self.service = self.new_service()
         offered = self.send("Quiero agendar para el lunes")
-        self.assertIn("- 10:00 AM a 10:30 AM", offered)
-        self.assertIn("- 10:00 PM a 10:30 PM", offered)
+        self.assertIn("- 10:00 AM", offered.splitlines())
+        self.assertIn("- 10:00 PM", offered.splitlines())
         self.assertEqual(self.send("a las 10 de.la.noche está bien"), APPOINTMENT_NAME_REPLY)
         self.send("Asael Ponce Silva")
         self.assertIn("confirmada", self.send("Revisión general"))
@@ -928,7 +932,7 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         self.assertIn("10:00 AM", self.send("me podrias decir las citas que tengo para hoy"))
         offered = self.send("quisiera modificar la cita de las 10")
-        self.assertIn("- 12:00 PM a 12:30 PM", offered)
+        self.assertIn("- 12:00 PM", offered.splitlines())
         self.llm.reply = ToolCall(
             name=ToolName.RESCHEDULE_APPOINTMENT.value,
             arguments={
@@ -942,7 +946,7 @@ class ConversationContinuityTests(unittest.TestCase):
         reply = self.send("quisiera cambiarla a las 12 pm")
 
         self.assertIn("Confirmas", reply)
-        self.assertIn("10:00 - 10:30", reply)
+        self.assertIn("Hora: 10:00 AM", reply.splitlines())
         self.assertIn("12:00", reply)
         self.assertIn("Veo oscuro", reply)
         self.assertNotIn("Horarios disponibles", reply)
@@ -970,7 +974,7 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         reply = self.send("Retomemos la cita")
         self.assertIn("Horarios disponibles", reply)
-        self.assertNotIn("- 11:00 AM a 11:30 AM", reply)
+        self.assertNotIn("- 11:00 AM", reply.splitlines())
         self.assertEqual(self.send("agéndame a las 12 pm"), APPOINTMENT_REASON_REPLY)
         self.assertIn("confirmada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
@@ -1137,18 +1141,18 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         self.service = self.new_service()
         offered = self.send("Quisiera modificar la cita de las 11")
-        self.assertIn("- 12:00 AM a 12:30 AM", offered)
-        self.assertIn("- 12:00 PM a 12:30 PM", offered)
+        self.assertIn("- 12:00 AM", offered.splitlines())
+        self.assertIn("- 12:00 PM", offered.splitlines())
 
         reply = self.send("Quisiera cambiarla a las 12")
 
         self.assertIn("Indica AM o PM", reply)
         self.assertEqual(self.provider.appointments[0], original)
         self.assertEqual(self.events, [])
-        self.assertIn("00:00", self.send("12 am"))
+        self.assertIn("a las 12:00 AM", self.send("12 am"))
         self.send("No")
         self.send("Quisiera modificar la cita de las 11")
-        self.assertIn("12:00", self.send("12 pm"))
+        self.assertIn("a las 12:00 PM", self.send("12 pm"))
         self.assertEqual(self.provider.appointments[0], original)
 
     def test_leaving_the_appointment_unchanged_abandons_instead_of_reopening(self) -> None:
@@ -1178,7 +1182,9 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("Información", reply)
         self.assertNotIn("Horarios disponibles", reply)
         self.service = self.new_service()
-        self.assertIn("Horarios disponibles", self.send("Retomemos la cita"))
+        resumed = self.send("Retomemos la cita")
+        self.assertIn("Horarios disponibles", resumed)
+        self.assertIn("- 12:00 PM", resumed.splitlines())
         self.assertIn("Confirmas", self.send("12 pm"))
         self.assertEqual(self.provider.appointments[0], original)
         self.assertEqual(self.events, [])
@@ -1301,7 +1307,7 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         refreshed = self.send("11 am")
         self.assertIn("Horarios disponibles", refreshed)
-        self.assertNotIn("- 11:00 AM a 11:30 AM", refreshed)
+        self.assertNotIn("- 11:00 AM", refreshed.splitlines())
         self.assertEqual(self.send("12 pm"), APPOINTMENT_NAME_REPLY)
         self.assertEqual(self.provider.appointments, ())
 
@@ -1328,7 +1334,7 @@ class ConversationContinuityTests(unittest.TestCase):
         )
         refreshed = self.send("Retomemos la cita")
         self.assertIn("Horarios disponibles", refreshed)
-        self.assertNotIn("- 3:00 PM a 3:30 PM", refreshed)
+        self.assertNotIn("- 3:00 PM", refreshed.splitlines())
         self.assertIn("Confirmas", self.send("14:00"))
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
         self.assertIn("modificada", self.send("Sí"))
@@ -1365,7 +1371,7 @@ class ConversationContinuityTests(unittest.TestCase):
             text="Quisiera modificar la cita de las 9 am",
         )
         self.assertIn("9:30 AM", offered)
-        self.assertNotIn("- 10:00 AM a 10:30 AM", offered)
+        self.assertNotIn("- 10:00 AM", offered.splitlines())
         calls = self.llm.call_count
 
         for selection in (

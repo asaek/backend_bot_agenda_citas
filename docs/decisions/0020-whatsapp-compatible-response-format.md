@@ -4,6 +4,10 @@
 
 Aceptada e implementada. Ampliada el 7 de octubre de 2026 para presentar las horas
 de las listas en formato de 12 horas con AM/PM.
+La regla de ambos extremos para disponibilidad fue sustituida el 14 de octubre de
+2026 por [ADR 0051](./0051-start-only-availability-lists.md), que muestra solo el inicio.
+El mismo dia, [ADR 0052](./0052-start-only-patient-appointment-times.md) extiende la
+regla de solo el inicio a las citas reservadas y detalles del paciente.
 
 ## Contexto
 

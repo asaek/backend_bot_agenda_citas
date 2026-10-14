@@ -621,8 +621,8 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(
             reply,
             "Para manana tienes dos citas confirmadas:\n\n"
-            "- Hora: 11:00 AM - 11:30 AM; Motivo: Revision del ojo rojo\n"
-            "- Hora: 11:30 AM - 12:00 PM; Motivo: Revision de queratocono",
+            "- Hora: 11:00 AM; Motivo: Revision del ojo rojo\n"
+            "- Hora: 11:30 AM; Motivo: Revision de queratocono",
         )
         self.assertNotIn("|", reply)
         self.assertNotIn("ID", reply)
@@ -630,7 +630,7 @@ class ConversationContextTests(unittest.TestCase):
     def test_build_reply_moves_appointment_reason_below_its_label(self) -> None:
         self.llm_provider.reply = (
             "- *Horario:* 10:00 a 10:30\n"
-            "  *Motivo de consulta:* ojos rojos\n\n"
+            "  *Motivo de consulta:* ojos rojos desde las 10:00 a 10:30\n\n"
             "- *Horario:* 14:00 a 14:30\n"
             "  *Motivo de consulta:*  \n  \n"
             "  tengo los parpados rojos"
@@ -648,10 +648,10 @@ class ConversationContextTests(unittest.TestCase):
 
         self.assertEqual(
             reply,
-            "- *Horario:* 10:00 AM a 10:30 AM\n"
+            "- *Horario:* 10:00 AM\n"
             "  *Motivo de consulta:*\n"
-            "  ojos rojos\n\n"
-            "- *Horario:* 2:00 PM a 2:30 PM\n"
+            "  ojos rojos desde las 10:00 a 10:30\n\n"
+            "- *Horario:* 2:00 PM\n"
             "  *Motivo de consulta:*\n"
             "  tengo los parpados rojos",
         )
@@ -867,7 +867,7 @@ class ConversationContextTests(unittest.TestCase):
         self.assertIn("Nunca uses tablas Markdown", messages[0].content)
         self.assertIn(
             "usa este formato, con una cita por bloque y sin combinar el horario y el motivo:\n"
-            "- *Horario:* h:mm AM/PM a h:mm AM/PM\n"
+            "- *Horario:* h:mm AM/PM\n"
             "  *Motivo de consulta:*\n"
             "  <motivo de la cita>.",
             messages[0].content,
@@ -1852,7 +1852,8 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         self.assertIn("confirmas", first_reply.lower())
         self.assertIn("21/09/2026", first_reply)
-        self.assertIn("11:00 - 11:30", first_reply)
+        self.assertIn("Hora: 11:00 AM", first_reply.splitlines())
+        self.assertNotIn("11:30", first_reply)
         self.assertIn("Revision de cornea", first_reply)
         self.assertNotIn(self.appointment.id, first_reply)
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.SCHEDULED)
@@ -1933,8 +1934,8 @@ class AppointmentConfirmationTests(unittest.TestCase):
         first_reply = asyncio.run(self.service.build_reply(first_context))
 
         self.assertIn("horarios disponibles", first_reply.lower())
-        self.assertIn("9:00 AM a 9:30 AM", first_reply)
-        self.assertIn("3:00 PM a 3:30 PM", first_reply)
+        self.assertIn("- 9:00 AM", first_reply.splitlines())
+        self.assertIn("- 3:00 PM", first_reply.splitlines())
         self.assertIn("elige uno", first_reply.lower())
         self.assertNotIn("¿Confirmas", first_reply)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
@@ -1967,7 +1968,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         selection_reply = asyncio.run(self.service.build_reply(selection_context))
 
         self.assertIn("reprogramar", selection_reply.lower())
-        self.assertIn("15:00", selection_reply)
+        self.assertIn("3:00 PM", selection_reply)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
 
         confirmation_context = self.service.receive_message(
@@ -2003,7 +2004,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         self.service.record_reply_sent(
             list_context,
             body=(
-                "- *Horario:* 11:00 AM a 11:30 AM\n"
+                "- *Horario:* 11:00 AM\n"
                 "  *Motivo de consulta:*\n"
                 "  Revision de cornea"
             ),
@@ -2021,7 +2022,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         reply = asyncio.run(self.service.build_reply(reschedule_context))
 
         self.assertIn("horarios disponibles para el 21/09/2026", reply.lower())
-        self.assertIn("9:00 AM a 9:30 AM", reply)
+        self.assertIn("- 9:00 AM", reply.splitlines())
         self.assertIn("elige uno de estos horarios", reply.lower())
         self.assertNotIn("dime a qué hora", reply.lower())
         self.assertEqual(self.service.llm_provider.call_count, 0)

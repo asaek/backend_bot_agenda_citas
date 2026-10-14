@@ -101,3 +101,13 @@ Evidencia: `docs/verification/2026-10-12-contextual-cancellation-deployment.md`.
 
 Esta etapa corresponde a los puntos 1 y 2 del plan aprobado. La unificacion general
 de fechas, intervalos antes/despues y cierre con datos definitivos pertenece a la etapa 2.
+
+## Ampliacion - Hora de inicio con AM/PM en confirmaciones
+
+- [x] Mostrar solo el inicio en datos de cancelacion y reprogramacion.
+- [x] Usar AM/PM en la nueva fecha/hora y en candidatos para aclarar la cita.
+- [x] Ajustar las expectativas existentes del servicio y del webhook.
+- [x] Verificar en Raspberry Pi que el formato conserva la confirmacion y la cita exacta.
+
+Decision: ADR 0052.
+Evidencia: `docs/verification/2026-10-14-start-only-appointment-times.md`.

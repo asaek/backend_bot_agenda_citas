@@ -38,6 +38,17 @@
 - [x] Verificar suite y runtime en Raspberry Pi y registrar evidencia en
       `docs/verification/2026-10-07-twelve-hour-lists.md`.
 
+## Ampliacion - Solo el inicio en citas y detalles
+
+- [x] Solicitar solo `h:mm AM/PM` en listados, detalles y confirmaciones.
+- [x] Eliminar el fin en campos de hora, listas y tablas normalizadas sin reescribir motivos.
+- [x] Leer listados cortos y rangos historicos para identificar la cita correcta.
+- [x] Actualizar las expectativas existentes de tablas, bloques y reprogramacion desde historial.
+- [x] Verificar en Raspberry Pi y registrar evidencia del despliegue.
+
+Decision: ADR 0052.
+Evidencia: `docs/verification/2026-10-14-start-only-appointment-times.md`.
+
 ## Siguiente incremento
 
 - [ ] Configurar el proveedor real de calendario.

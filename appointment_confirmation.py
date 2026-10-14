@@ -308,13 +308,12 @@ class PendingAppointmentAction:
         if self.appointment_details is None:
             return ""
         start_at = datetime.fromisoformat(self.appointment_details.start_at)
-        end_at = datetime.fromisoformat(self.appointment_details.end_at)
         reason = re.sub(r"\s+", " ", self.appointment_details.reason).strip()
         return "\n".join(
             (
                 "Datos de la cita:",
                 f"Fecha: {start_at:%d/%m/%Y}",
-                f"Hora: {start_at:%H:%M} - {end_at:%H:%M}",
+                f"Hora: {format_patient_time(start_at)}",
                 f"Motivo: {reason}",
             )
         )
@@ -473,4 +472,4 @@ def _format_requested_start(value: str) -> str:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return value
-    return parsed.strftime("%d/%m/%Y a las %H:%M")
+    return f"{parsed:%d/%m/%Y} a las {format_patient_time(parsed)}"

@@ -1251,7 +1251,7 @@ class WebhookTests(unittest.TestCase):
         self.assertIn("confirmas", fake_client.sent_messages[5][1].lower())
         self.assertIn("confirmas", fake_client.sent_messages[8][1].lower())
         self.assertIn("Fecha: 21/09/2026", fake_client.sent_messages[8][1])
-        self.assertIn("Hora: 11:00 - 11:30", fake_client.sent_messages[8][1])
+        self.assertIn("Hora: 11:00 AM", fake_client.sent_messages[8][1].splitlines())
         self.assertIn("Motivo: Revision", fake_client.sent_messages[8][1])
         self.assertNotIn("appointment-1", fake_client.sent_messages[8][1])
         with open_database(self.database_path) as connection:

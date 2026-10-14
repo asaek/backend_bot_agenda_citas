@@ -3,6 +3,8 @@
 ## Estado
 
 Aceptada.
+El horario del bloque fue actualizado a solo el inicio con AM/PM por
+[ADR 0052](./0052-start-only-patient-appointment-times.md) el 14 de octubre de 2026.
 
 ## Contexto
 

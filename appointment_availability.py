@@ -413,10 +413,7 @@ def format_availability_reply(
             "Si quieres, reviso otro dia."
         )
 
-    lines = [
-        f"- {format_patient_time(start)} a {format_patient_time(end)}"
-        for start, end in slots
-    ]
+    lines = [f"- {format_patient_time(start)}" for start, _ in slots]
     return (
         f"Horarios disponibles para el {requested_date}:\n"
         + "\n".join(lines)

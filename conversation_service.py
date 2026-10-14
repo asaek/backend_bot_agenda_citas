@@ -202,11 +202,14 @@ SYSTEM_PROMPT = "\n".join(
         "WhatsApp admite formato limitado con asteriscos simples para negrita, "
         "pero no admite tablas Markdown ni HTML.",
         "En listas de horarios disponibles o citas usa siempre el formato de 12 horas "
-        "con AM o PM en cada hora, por ejemplo: 9:30 AM a 10:00 AM y 1:00 PM a 1:30 PM. "
+        "con AM o PM en cada hora. En listas de disponibilidad, citas reservadas, "
+        "detalles y confirmaciones muestra solo la hora de inicio, "
+        "por ejemplo: 9:30 AM o 1:00 PM; "
+        "no muestres la hora de fin ni un rango. "
         "Medianoche es 12:00 AM y mediodia es 12:00 PM.",
         "Nunca uses tablas Markdown. Para cada cita devuelta por list_appointments "
         "usa este formato, con una cita por bloque y sin combinar el horario y el motivo:\n"
-        "- *Horario:* h:mm AM/PM a h:mm AM/PM\n"
+        "- *Horario:* h:mm AM/PM\n"
         "  *Motivo de consulta:*\n"
         "  <motivo de la cita>.",
         "Cada bloque debe ocupar exactamente tres lineas: deja *Motivo de consulta:* "
@@ -225,8 +228,9 @@ SYSTEM_PROMPT = "\n".join(
 
 _LISTED_APPOINTMENT_START_TIME_PATTERN = re.compile(
     r"^[ \t]*-[ \t]+\*?Horario:\*?[ \t]*"
+    r"(?:\d{2}/\d{2}/\d{4}[, \t]+)?"
     r"(?P<time>\d{1,2}:\d{2}(?:[ \t]*[ap]\.?m\.?)?)"
-    r"[ \t]+a\b",
+    r"(?=[ \t]*(?:a\b|[-–—]|;|$))",
     flags=re.IGNORECASE | re.MULTILINE,
 )
 _SOURCE_APPOINTMENT_TIME_PATTERN = re.compile(
@@ -736,7 +740,6 @@ class ConversationService:
                 )
             lines = [
                 "- " + format_patient_time(datetime.fromisoformat(slot.start_at).astimezone(self._timezone))
-                + " a " + format_patient_time(datetime.fromisoformat(slot.end_at).astimezone(self._timezone))
                 for slot in availability.slots
             ]
             return (
@@ -1302,10 +1305,9 @@ class ConversationService:
         options = []
         for appointment in appointments:
             start_at = appointment.start_at.astimezone(self._timezone)
-            end_at = appointment.end_at.astimezone(self._timezone)
             options.append(
                 f"- {start_at:%d/%m/%Y}, "
-                f"{format_patient_time(start_at)} a {format_patient_time(end_at)}"
+                f"{format_patient_time(start_at)}"
             )
         return (
             f"¿Cuál cita quieres {operation}? Indica el día y horario de una de estas:\n"
@@ -1976,7 +1978,7 @@ class ConversationService:
         appointment = result.data.appointment
         return (
             f"Tu cita está confirmada para el {appointment.start_at:%d/%m/%Y} "
-            f"a las {appointment.start_at:%H:%M}. Motivo: {appointment.reason}."
+            f"a las {format_patient_time(appointment.start_at)}. Motivo: {appointment.reason}."
         )
 
     def _load_pending_appointment_action(
@@ -2461,7 +2463,7 @@ _LIST_TIME_FIELD_PATTERN = re.compile(
 
 
 def _format_list_times(text: str) -> str:
-    """Normaliza las horas de listas del LLM sin reescribir los motivos de consulta."""
+    """Muestra solo el inicio en campos de hora sin reescribir los motivos de consulta."""
     def replace_time(match: re.Match[str]) -> str:
         parsed = parse_time_selection(match.group())
         if parsed is None or not 0 <= parsed[1] < 60:
@@ -2469,17 +2471,26 @@ def _format_list_times(text: str) -> str:
         return format_patient_time(time(*parsed))
 
     def replace_field(match: re.Match[str]) -> str:
-        return match.group("prefix") + _DISPLAY_TIME_PATTERN.sub(
-            replace_time, match.group("value")
-        )
+        start = _DISPLAY_TIME_PATTERN.match(match.group("value"))
+        if start is None:
+            return match.group()
+        return match.group("prefix") + replace_time(start)
 
     lines = []
+    reason_line = False
     for line in text.splitlines():
+        if reason_line:
+            lines.append(line)
+            reason_line = False
+            continue
+        reason_line = _APPOINTMENT_REASON_LABEL.fullmatch(line) is not None
         item = re.match(r"^(?P<bullet>[ \t]*(?:[-*•]|\d+[.)])[ \t]+)(?P<content>.*)$", line)
         if item is not None:
             line = item.group("bullet") + _LIST_TIME_FIELD_PATTERN.sub(
                 replace_field, item.group("content")
             )
+        elif re.match(r"^[ \t]*\*?(?:Horario|Hora):\*?[ \t]*", line, flags=re.IGNORECASE):
+            line = _LIST_TIME_FIELD_PATTERN.sub(replace_field, line)
         lines.append(line)
     return "\n".join(lines)
 

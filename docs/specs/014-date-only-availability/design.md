@@ -52,12 +52,15 @@ internos ni ejecuta una mutacion. Despues de una respuesta exitosa, el backend p
 la fecha, los slots ofrecidos y una expiracion de 10 minutos en
 `pending_appointment_availability` dentro de `conversations.context_json`.
 
-`format_availability_reply()` usa `format_patient_time()` para expresar cada extremo
-en formato de 12 horas con AM/PM. La hora se calcula sin depender del locale; no
-lleva cero inicial, y los minutos siempre tienen dos digitos. Un intervalo que
-cruza mediodia se presenta como `11:30 AM a 12:00 PM`. Este formato se comparte
-con las opciones de cita para reprogramar. La conversion afecta la presentacion;
-los timestamps ISO persistidos conservan la zona horaria para validar la seleccion.
+`format_availability_reply()` usa `format_patient_time()` para expresar solo la hora
+de inicio de cada slot como `- h:mm AM/PM`. La hora se calcula sin depender del
+locale; no lleva cero inicial, y los minutos siempre tienen dos digitos. Los slots
+que empiezan antes y despues de mediodia aparecen como `- 11:30 AM` y `- 12:00 PM`.
+Este formato se comparte con las opciones para reprogramar y con
+`_resumed_workflow_prompt()` al retomar una lista pausada. El `SYSTEM_PROMPT` pide
+el mismo formato para disponibilidad. La conversion afecta la presentacion;
+los timestamps ISO de inicio y fin persistidos conservan la zona horaria para
+validar la seleccion. Decision de presentacion: ADR 0051.
 La instruccion final invita a continuar la solicitud sin prometer que el motivo
 sea el siguiente dato; sirve tambien si el nombre acompaña una lista renovada.
 

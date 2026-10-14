@@ -71,6 +71,8 @@ esten aprobados.
 - [Verificacion de una confirmacion de cancelacion y recuperacion de autenticacion](./verification/2026-10-10-single-cancellation-confirmation.md)
 - [Etapa 1 de confirmacion natural y aclaracion de reprogramacion](./verification/2026-10-12-natural-reschedule-stage-one.md)
 - [Seleccion hibrida de horarios y cierre de autenticacion Meta](./verification/2026-10-12-hybrid-slot-selection.md)
+- [Disponibilidad con solo la hora de inicio y despliegue en Raspberry Pi](./verification/2026-10-14-start-only-availability-lists.md)
+- [Listados y confirmaciones de citas con solo el inicio y AM/PM](./verification/2026-10-14-start-only-appointment-times.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -104,3 +106,5 @@ esten aprobados.
 - [ADR 0047 - Preparar respuestas antes de reintentar WhatsApp](./decisions/0047-persist-replies-before-whatsapp-retries.md)
 - [ADR 0048 - Motivos generales comprensibles y aclaraciones diferenciadas](./decisions/0048-understandable-general-appointment-reasons.md)
 - [ADR 0050 - Interpretacion hibrida de la seleccion pendiente](./decisions/0050-hybrid-pending-slot-selection.md)
+- [ADR 0051 - Solo la hora de inicio en listas de disponibilidad](./decisions/0051-start-only-availability-lists.md)
+- [ADR 0052 - Solo el inicio con AM/PM en las horas de citas del paciente](./decisions/0052-start-only-patient-appointment-times.md)

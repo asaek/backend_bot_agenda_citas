@@ -76,10 +76,13 @@ limite de llamadas se configura con `LLM_MAX_TOOL_ITERATIONS`. RAG y memoria
 semantica siguen fuera del alcance. La suite automatizada usa proveedores falsos y
 no requiere credenciales externas. Las respuestas con varias citas se envian como
 listas simples compatibles con WhatsApp; las tablas Markdown se convierten antes
-de enviarse. Las listas de disponibilidad, citas y opciones de reprogramacion muestran
-horas en formato de 12 horas con AM/PM en ambos extremos, por ejemplo
-`9:30 AM a 10:00 AM`, `11:30 AM a 12:00 PM` y `1:00 PM a 1:30 PM`. Se usa la zona
-horaria de la agenda y el paciente puede seleccionar un horario indicando AM o PM.
+de enviarse. Las listas de disponibilidad para agendar o reprogramar muestran solo
+la hora de inicio en formato de 12 horas con AM/PM, por ejemplo `- 9:30 AM`,
+`- 12:00 PM` y `- 1:00 PM`, tambien al retomar una gestion pausada. Las listas y
+detalles de citas reservadas y las confirmaciones de cancelacion o reprogramacion
+tambien muestran solo el inicio, por ejemplo `Horario: 9:00 AM` o `Hora: 9:00 AM`.
+Se usa la zona horaria de la agenda y el paciente puede seleccionar un horario
+indicando AM o PM.
 
 Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
 objeto JSON estructurado antes de crear la cita. La respuesta debe contener

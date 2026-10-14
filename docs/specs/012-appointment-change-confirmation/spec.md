@@ -67,6 +67,9 @@ cuando corresponda. Una confirmacion no puede autorizar otra mutacion distinta.
 
 La pregunta de confirmacion debe mostrar los datos de la cita que se modificara:
 fecha, horario y motivo. No debe mostrar el ID interno de la cita.
+El horario presenta solo el inicio como `Hora: h:mm AM/PM`, sin hora de fin ni
+rango. Para reprogramar, la nueva fecha y hora tambien usa el inicio con AM/PM.
+Las opciones para aclarar cual cita desea modificar siguen la misma regla.
 
 ### RF-1203 - Respuesta negativa
 
@@ -168,7 +171,8 @@ estado y no ejecuta por si solo. Rechazar o abandonar la solicitud conserva la c
 8. Ninguna solicitud pendiente genera una notificacion al doctor.
 9. Una operacion confirmada genera la notificacion existente una sola vez.
 10. La confirmacion de cancelacion muestra fecha, horario y motivo de la cita sin
-   exponer su ID interno.
+   exponer su ID interno; la hora es solo el inicio con AM/PM, sin rango. La
+   confirmacion de reprogramacion aplica el mismo formato a la cita y al inicio nuevo.
 11. Una respuesta contradictoria como `Si, pero mejor no` o incierta como `No estoy
     seguro` solicita aclaracion y no modifica la agenda.
 12. Una cita no encontrada o una lectura fallida no genera una pregunta de confirmacion,

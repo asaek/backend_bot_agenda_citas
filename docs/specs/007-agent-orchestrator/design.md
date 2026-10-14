@@ -95,8 +95,12 @@ etiqueta o intercala una linea vacia. La conversion ocurre antes de que `main.py
 envie y persista la respuesta; un `ToolCall` no se transforma.
 
 Las horas de listas se solicitan al LLM en formato de 12 horas con AM/PM.
+El prompt solicita solo el inicio para disponibilidad, citas reservadas y detalles.
 `format_whatsapp_reply()` normaliza campos de horario reconocibles en elementos de
 lista, incluyendo las tablas convertidas, usando el formato compartido
-`format_patient_time()`; conserva el texto del motivo. La lectura del ultimo listado
-extrae la hora completa con su periodo y usa `parse_time_selection()` para compararla
+`format_patient_time()`; omite el extremo final de los rangos y reconoce tambien
+etiquetas `Hora:`/`Horario:` fuera de listas. Conserva el texto del motivo, incluida
+la linea inmediatamente posterior a `Motivo de consulta:`. La lectura del ultimo listado
+extrae el inicio y su periodo tanto del formato corto como de rangos historicos,
+y usa `parse_time_selection()` para compararla
 con la hora local de la cita sin confundir una hora de la tarde con una de la mañana.

@@ -48,13 +48,13 @@ debe consultar disponibilidad para el rango completo de ese dia.
 
 ### RF-1402 - Lista de espacios libres
 
-La respuesta debe mostrar cada espacio libre con hora de inicio y fin, sin IDs de
-calendario ni tablas Markdown.
-Las horas se expresan en formato de 12 horas con AM/PM en ambos extremos, en la
-zona horaria de agenda: `9:30 AM a 10:00 AM`, `11:30 AM a 12:00 PM` o
-`1:00 PM a 1:30 PM`. La hora no lleva cero inicial y los minutos tienen dos digitos.
+La respuesta debe mostrar cada espacio libre solo con su hora de inicio, sin hora
+de fin, rangos, IDs de calendario ni tablas Markdown.
+Cada opcion ocupa una linea en formato de 12 horas con AM/PM, en la zona horaria
+de agenda: `- 9:30 AM`, `- 12:00 PM` o `- 1:00 PM`.
+La hora no lleva cero inicial y los minutos tienen dos digitos.
 Medianoche es `12:00 AM` y mediodia `12:00 PM`. La misma presentacion se usa cuando
-se muestran horarios disponibles para reprogramar.
+se muestran horarios disponibles para reprogramar o se retoma una lista pausada.
 La instruccion final invita a elegir un horario para continuar la solicitud;
 no anuncia el motivo como siguiente paso cuando aun falta capturar el nombre.
 
@@ -116,8 +116,9 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
    cita ni pierde los controles del backend.
 10. `Quisiera agendar una` seguido de `hoy` consulta y muestra los horarios disponibles
     sin invocar al LLM en ninguno de esos dos turnos.
-11. Los slots de mañana, mediodia y tarde se muestran en 12 horas con AM/PM, y una
-     seleccion como `3:00 PM` sigue coincidiendo con el slot interno de las 15:00.
+11. Los slots de mañana, mediodia y tarde muestran solo su inicio en 12 horas con
+     AM/PM, sin hora de fin, tambien tras una pausa y reinicio. Una seleccion como
+     `3:00 PM` sigue coincidiendo con el slot interno de las 15:00.
 12. El 10/10/2026, pedir lunes y elegir `quisiera una cita a las 9 am` conserva
     el 12/10/2026 a las 9 AM. Recibir nombre y motivo crea una sola cita sin volver
     a pedir el nombre, incluso tras reinicios del servicio.
