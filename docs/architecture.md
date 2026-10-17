@@ -248,6 +248,19 @@ Construye la solicitud autenticada de tipo texto para WhatsApp Cloud API usando
 `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID`. No contiene logica de
 conversacion.
 
+### Confirmacion al paciente y bloques compartidos
+
+`appointment_messages.render_appointment_message()` construye los bloques de cita
+y paciente para las dos audiencias, compartiendo etiquetas, estados y telefono de
+10 digitos. El paciente recibe `CONFIRMACION DE CITA`, fecha `DD/MM/YYYY` y solo el
+inicio con AM/PM; el doctor conserva encabezado interno, fecha ISO e intervalo.
+`ConversationService._appointment_result_reply()` usa el output tipado definitivo,
+la zona de agenda y el nombre persistido para crear, cancelar y reprogramar. No
+depende del resumen ni realiza una llamada adicional al LLM. La respuesta se
+prepara y persiste antes de enviarse, con el mismo flujo idempotente del webhook.
+El compositor del doctor sanea sus campos antes de delegar los bloques compartidos
+y agrega resumen/prioridad despues. Spec 020 y ADR 0053 registran el alcance.
+
 ### Notificaciones al doctor
 
 Esta capacidad esta implementada en `specs/011-doctor-notifications/`. Los cortes 1
@@ -276,7 +289,8 @@ coincidencia con palabras clave. El respaldo local se combina con ese resultado,
 incluyendo secrecion ocular amarillenta, verdosa o abundante como `ocular_discharge`.
 El repositorio de notificaciones marca el limite con el ultimo evento anterior de esa
 conversacion, independientemente del estado de entrega, y el compositor reconoce
-ademas respuestas fijas de exito del backend. El limite de historial se aplica despues
+ademas respuestas fijas de exito del backend, incluidas las confirmaciones por
+bloques y los cierres historicos. El limite de historial se aplica despues
 de separar gestiones. Se excluyen mensajes futuros y se conserva la respuesta enviada
 del evento actual; los mensajes del asistente no son evidencia de sintomas.
 

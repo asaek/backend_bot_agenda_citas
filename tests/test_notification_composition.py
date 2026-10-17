@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from calendar_domain import Appointment, AppointmentStatus, PatientScope, ToolName
@@ -674,17 +675,24 @@ class NotificationCompositionTests(unittest.TestCase):
             ),
         )
 
-        message = asyncio.run(
-            DoctorNotificationComposer(provider).compose(
-                current_event,
-                patient_name="Ana Prueba",
-                history=history,
-            )
+        new_confirmation = (
+            "CONFIRMACION DE CITA\nTipo de evento: Cita agendada\n\nCITA\n"
+            "Fecha: 06/10/2026\nHora: 9:00 AM\nMotivo: Tengo los ojos rojos\n"
+            "Estado: programada\n\nPACIENTE\nNombre: Ana Prueba\nTelefono: 7531363338"
         )
-
-        self.assertEqual(message.priority_signals, ())
-        self.assertIn("- Ninguna detectada.", message.body)
-        self.assertNotIn("ojos rojos", provider.received_messages[0][1].content)
+        for closing_text in (history[1].text, new_confirmation):
+            with self.subTest(closing_text=closing_text):
+                event_history = (history[0], replace(history[1], text=closing_text), history[2])
+                message = asyncio.run(
+                    DoctorNotificationComposer(provider).compose(
+                        current_event,
+                        patient_name="Ana Prueba",
+                        history=event_history,
+                    )
+                )
+                self.assertEqual(message.priority_signals, ())
+                self.assertIn("- Ninguna detectada.", message.body)
+                self.assertNotIn("ojos rojos", provider.received_messages[-1][1].content)
 
     def test_renderer_sanitizes_untrusted_summary_values(self) -> None:
         message = render_doctor_notification(

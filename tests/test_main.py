@@ -174,7 +174,7 @@ class WebhookTests(unittest.TestCase):
                             responses = scenario.post_messages(client, confirmation, confirmation)
                 self.assertTrue(all(response.status_code == 200 for response in responses))
                 patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
-                self.assertEqual(sum(body == "Tu cita ha sido modificada." for body in patient_bodies), 1)
+                self.assertEqual(sum("Tipo de evento: Cita modificada" in body.splitlines() for body in patient_bodies), 1)
                 doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
                 self.assertEqual(len(doctor_bodies), 1)
                 self.assertIn("Cita modificada", doctor_bodies[0])
@@ -225,7 +225,7 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(changed.reason, original.reason)
         patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
         self.assertEqual(sum("¿Confirmas que deseas reprogramar" in body for body in patient_bodies), 1)
-        self.assertEqual(sum(body == "Tu cita ha sido modificada." for body in patient_bodies), 1)
+        self.assertEqual(sum("Tipo de evento: Cita modificada" in body.splitlines() for body in patient_bodies), 1)
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
         self.assertEqual(len(doctor_bodies), 1)
         self.assertIn("Cita modificada", doctor_bodies[0])
@@ -641,7 +641,7 @@ class WebhookTests(unittest.TestCase):
 
         self.assertEqual(failed.status_code, 502)
         self.assertTrue(all(response.status_code == 200 for response in responses))
-        self.assertIn("Tu cita está confirmada", fake_client.sent_messages[sent_count - 1][1])
+        self.assertIn("Tipo de evento: Cita agendada", fake_client.sent_messages[sent_count - 1][1])
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(len(fake_client.sent_messages), sent_count)
         self.assertEqual(provider.call_count, 1)
@@ -891,9 +891,12 @@ class WebhookTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.failed = False
+                self.confirmation_attempts = []
 
             async def send_text(self, to: str, body: str) -> dict[str, Any]:
-                if body.startswith("Tu cita está confirmada") and not self.failed:
+                if body.startswith("CONFIRMACION DE CITA\n"):
+                    self.confirmation_attempts.append(body)
+                if body.startswith("CONFIRMACION DE CITA\n") and not self.failed:
                     self.failed = True
                     raise httpx.ConnectError("fallo antes del envio")
                 return await super().send_text(to, body)
@@ -919,14 +922,32 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(len(app.state.calendar_provider.appointments), 1)
         self.assertEqual(provider.call_count, 1)  # Solo el resumen para el doctor.
         self.assertEqual([to for to, _ in fake_client.sent_messages][-2:], ["5491100000000", "5491100000001"])
+        self.assertEqual(len(fake_client.confirmation_attempts), 2)
+        self.assertEqual(fake_client.confirmation_attempts[0], fake_client.confirmation_attempts[1])
+        patient_body, doctor_body = [body for _, body in fake_client.sent_messages[-2:]]
+        self.assertIn("Fecha: 21/09/2026", patient_body)
+        self.assertIn("Hora: 9:00 AM", patient_body.splitlines())
+        self.assertNotIn("RESUMEN DE LA CONVERSACION", patient_body)
+        self.assertNotIn("SENALES DE PRIORIDAD", patient_body)
+        for field in (
+            "Tipo de evento: Cita agendada", "Motivo: tengo vision borrosa",
+            "Estado: programada", "Nombre: Ana Prueba", "Telefono: 1100000000",
+        ):
+            self.assertIn(field, patient_body.splitlines())
+            self.assertIn(field, doctor_body.splitlines())
         with open_database(self.database_path) as connection:
             attempts = connection.execute(
                 "SELECT status, started_at, completed_at FROM reply_delivery_attempts ORDER BY id DESC LIMIT 2"
             ).fetchall()
             notifications = connection.execute("SELECT status, attempt_count FROM doctor_notifications").fetchall()
+            prepared = connection.execute(
+                "SELECT r.body FROM reply_outbox r JOIN messages m ON m.id = r.incoming_message_id "
+                "WHERE m.provider_message_id = ?", ("wamid.retry-booking-reason",),
+            ).fetchone()[0]
         self.assertEqual([row[0] for row in attempts], ["sent", "failed"])
         self.assertTrue(all(row[1] and row[2] for row in attempts))
         self.assertEqual(notifications, [("sent", 1)])
+        self.assertEqual(prepared, patient_body)
 
     def test_whatsapp_configuration_failure_records_controlled_reply_as_failed(self) -> None:
         fake_client = MissingWhatsAppConfigurationClient()
@@ -1354,7 +1375,7 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(len(patient_bodies), 6)
         self.assertIn("Asael Ponce Silva", patient_bodies[4])
         self.assertIn("motivo", patient_bodies[4])
-        self.assertIn("confirmada", patient_bodies[5])
+        self.assertIn("Tipo de evento: Cita agendada", patient_bodies[5])
         self.assertNotIn("nombre completo", patient_bodies[5])
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
         self.assertEqual(len(doctor_bodies), 1)
@@ -1399,7 +1420,7 @@ class WebhookTests(unittest.TestCase):
         patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
         self.assertIn("nombre completo", patient_bodies[-3])
         self.assertIn("Asael Ponce Silva", patient_bodies[-2])
-        self.assertIn("confirmada", patient_bodies[-1])
+        self.assertIn("Tipo de evento: Cita agendada", patient_bodies[-1])
         self.assertIn("10:00", patient_bodies[-1])
         self.assertFalse(any("No identifiqué" in body for body in patient_bodies))
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
@@ -1459,7 +1480,7 @@ class WebhookTests(unittest.TestCase):
         self.assertTrue(all(response.status_code == 200 for response in responses))
         patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
         self.assertEqual(sum("¿Confirmas que deseas cancelar" in body for body in patient_bodies), 1)
-        self.assertEqual(sum(body == "Tu cita ha sido cancelada." for body in patient_bodies), 1)
+        self.assertEqual(sum("Tipo de evento: Cita cancelada" in body.splitlines() for body in patient_bodies), 1)
         self.assertIn("No hay una gestión pendiente", patient_bodies[-1])
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
         self.assertEqual(len(doctor_bodies), 1)
@@ -1601,7 +1622,7 @@ class WebhookTests(unittest.TestCase):
             ).fetchall()
 
         self.assertEqual(patient_reply[0], "sent")
-        self.assertIn("confirmada", patient_reply[1])
+        self.assertIn("Tipo de evento: Cita agendada", patient_reply[1])
         self.assertEqual(notification_rows[0][0:2], ("5491100000001", "failed"))
         self.assertEqual(notification_rows[0][2], "No se pudo conectar con WhatsApp.")
         self.assertEqual(notification_rows[1][0:2], ("5491100000002", "sent"))

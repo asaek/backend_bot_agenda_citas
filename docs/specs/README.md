@@ -45,3 +45,4 @@ NNN-nombre-de-la-funcionalidad/
 - [017 - Espejo de proyecto y configuracion en Raspberry Pi](./017-local-to-raspberry/spec.md)
 - [018 - Reintentos de webhook sin reabrir gestiones antiguas](./018-safe-webhook-retries/spec.md)
 - [019 - Seleccion hibrida de horarios](./019-hybrid-slot-selection/spec.md)
+- [020 - Confirmacion de cita para el paciente](./020-patient-appointment-confirmation/spec.md)

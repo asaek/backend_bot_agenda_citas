@@ -79,7 +79,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.offer_slots()
         self.send("11 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.events.clear()
 
     def request_mutation(self, tool: ToolName, *, text: str | None = None) -> str:
@@ -98,7 +98,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("Quiero agendar para hoy")
         self.send("11 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         original = self.provider.appointments[0]
         self.events.clear()
         self.llm.reply = ToolCall(
@@ -111,11 +111,100 @@ class ConversationContinuityTests(unittest.TestCase):
         self.llm.reply = "Información del consultorio."
         return original
 
+    def test_patient_confirmation_contains_appointment_and_patient_without_internal_sections(self) -> None:
+        self.now = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
+        self.send("Quiero agendar para mañana")
+        self.send("9 am")
+        self.send("Asael Ponce Silva")
+
+        reply = self.send("tengo vision borrosa")
+
+        self.assertEqual(reply, (
+            "CONFIRMACION DE CITA\n"
+            "Tipo de evento: Cita agendada\n\n"
+            "CITA\n"
+            "Fecha: 09/10/2026\n"
+            "Hora: 9:00 AM\n"
+            "Motivo: tengo vision borrosa\n"
+            "Estado: programada\n\n"
+            "PACIENTE\n"
+            "Nombre: Asael Ponce Silva\n"
+            "Telefono: 1100000000"
+        ))
+        self.assertEqual(self.llm.call_count, 0)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(len(self.provider.appointments), 1)
+        self.assertEqual(self.service.get_history(self.events[0].patient_scope.conversation_id)[-1].text, reply)
+
+    def test_patient_mutation_confirmations_show_the_definitive_appointment(self) -> None:
+        self.book()
+        original = self.provider.appointments[0]
+        self.assertNotIn("CONFIRMACION DE CITA", self.request_mutation(ToolName.RESCHEDULE_APPOINTMENT))
+        self.assertNotIn("CONFIRMACION DE CITA", self.send("3 pm"))
+        calls = self.llm.call_count
+
+        modified = self.send("Sí")
+
+        self.assertEqual(self.llm.call_count, calls)
+        for line in (
+            "Tipo de evento: Cita modificada", f"Fecha: {self.target_date:%d/%m/%Y}",
+            "Hora: 3:00 PM", "Estado: programada", "Motivo: Revisión general",
+            "Nombre: Asael Ponce Silva", "Telefono: 1100000000",
+        ):
+            self.assertIn(line, modified.splitlines())
+        self.assertNotIn("CONFIRMACION DE CITA", self.request_mutation(ToolName.CANCEL_APPOINTMENT))
+        calls = self.llm.call_count
+
+        cancelled = self.send("Sí")
+
+        self.assertEqual(self.llm.call_count, calls)
+        for line in ("Tipo de evento: Cita cancelada", "Estado: cancelada", "Hora: 3:00 PM"):
+            self.assertIn(line, cancelled.splitlines())
+        for reply in (modified, cancelled):
+            self.assertNotIn("RESUMEN DE LA CONVERSACION", reply)
+            self.assertNotIn("SENALES DE PRIORIDAD", reply)
+            self.assertNotIn(original.id, reply)
+            self.assertNotIn(original.calendar_id, reply)
+        self.assertEqual(self.provider.appointments[0].id, original.id)
+        self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
+        self.assertEqual(len(self.events), 2)
+
+    def test_patient_confirmation_converts_a_utc_result_to_the_clinic_date_and_time(self) -> None:
+        class UTCResultProvider(FakeCalendarProvider):
+            async def create_appointment(self, *, patient_scope, start_at, reason):
+                return await super().create_appointment(
+                    patient_scope=patient_scope, start_at=start_at.astimezone(timezone.utc), reason=reason,
+                )
+
+        self.now = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
+        self.provider = UTCResultProvider()
+        self.executor = ToolExecutor(
+            provider=self.provider, default_timezone="America/Mexico_City", now=lambda: self.now,
+            business_hours=BusinessHours(
+                timezone_name="America/Mexico_City",
+                windows_by_weekday={day: (TimeWindow(time(0), time(23, 59)),) for day in range(7)},
+            ),
+        )
+        self.service = ConversationService(
+            self.database, llm_provider=self.llm, tool_executor=self.executor,
+            timezone_name="America/Mexico_City", now=lambda: self.now,
+        )
+        self.send("Quiero agendar para mañana")
+        self.send("11 pm")
+        self.send("Ana Prueba")
+
+        reply = self.send("tengo vision borrosa")
+
+        self.assertIn("Fecha: 09/10/2026", reply.splitlines())
+        self.assertIn("Hora: 11:00 PM", reply.splitlines())
+        self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 10, 5, tzinfo=timezone.utc))
+        self.assertEqual(self.llm.call_count, 0)
+
     def test_stage_one_correct_confirmation_reschedules_on_the_first_reply(self) -> None:
         original = self.start_today_reschedule()
         self.service = self.new_service()
         reply = self.send("Sí es correcto")
-        self.assertEqual(reply, "Tu cita ha sido modificada.")
+        self.assertIn("Tipo de evento: Cita modificada", reply.splitlines())
         self.assertEqual(len(self.provider.appointments), 1)
         changed = self.provider.appointments[0]
         self.assertEqual(changed.id, original.id)
@@ -146,7 +235,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
         self.send("quisiera cambiar esa cita para mañana")
         self.send("si a las 9 am esta bien")
-        self.assertEqual(self.send("si confirmo"), "Tu cita ha sido modificada.")
+        self.assertIn("Tipo de evento: Cita modificada", self.send("si confirmo").splitlines())
         changed = self.provider.appointments[0]
         self.assertEqual(changed.id, original.id)
         self.assertEqual(changed.reason, original.reason)
@@ -244,7 +333,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.llm.call_count, calls + 1)
         self.assertEqual(self.provider.appointments, ())
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at.hour, 9)
 
     def test_invalid_numeric_hours_and_mixed_word_choices_never_reach_model(self) -> None:
@@ -343,7 +432,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertIn("11:00 AM", reply)
                 self.assertIn("hoy", reply)
                 self.service = self.new_service()
-        self.assertEqual(self.send("Correcto, por favor"), "Tu cita ha sido modificada.")
+        self.assertIn("Tipo de evento: Cita modificada", self.send("Correcto, por favor").splitlines())
         self.assertEqual(self.provider.appointments[0].start_at.hour, 16)
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.llm.call_count, 1)
@@ -368,7 +457,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.offer_slots()
         self.assertEqual(self.send("agéndame a las 11 am"), APPOINTMENT_NAME_REPLY)
         self.assertTrue(self.send("Asael Ponce Silva").endswith(APPOINTMENT_REASON_REPLY))
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.llm.call_count, 0)
         self.assertEqual(len(self.provider.appointments), 1)
         appointment = self.provider.appointments[0]
@@ -383,7 +472,7 @@ class ConversationContinuityTests(unittest.TestCase):
             self.send("Quiero agendar para el lunes")
             self.send(selection)
             self.send("Asael Ponce Silva")
-            self.assertIn("confirmada", self.send(reason))
+            self.assertIn("Tipo de evento: Cita agendada", self.send(reason))
         first, second = self.provider.appointments
         self.events.clear()
         self.llm.replies = (
@@ -410,7 +499,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
         reply = self.send("si por favor")
 
-        self.assertEqual(reply, "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", reply.splitlines())
         self.assertEqual(self.llm.call_count, 2)
         self.assertEqual(self.provider.appointments[0].id, first.id)
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
@@ -440,14 +529,14 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("Quiero agendar para mañana")
         self.send("9 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("TEngo problemas en la vista"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("TEngo problemas en la vista"))
         original = self.provider.appointments[0]
         self.events.clear()
         self.assertIn("12/10/2026", self.send("Quisiera cancelarla"))
         self.assertEqual(self.provider.appointments, (original,))
         self.service = self.new_service()
 
-        self.assertEqual(self.send("Si cancelala"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("Si cancelala").splitlines())
 
         self.assertEqual(self.provider.appointments[0].id, original.id)
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
@@ -477,7 +566,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertEqual(scenario.events, [])
                 scenario.service = scenario.new_service()
 
-                self.assertEqual(scenario.send(text), "Tu cita ha sido cancelada.")
+                self.assertIn("Tipo de evento: Cita cancelada", scenario.send(text).splitlines())
 
                 self.assertEqual(scenario.provider.appointments[0].id, original.id)
                 self.assertEqual(scenario.provider.appointments[0].status, AppointmentStatus.CANCELLED)
@@ -509,7 +598,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertEqual(scenario.provider.appointments, (original,))
                 self.assertEqual(scenario.events, [])
                 scenario.service = scenario.new_service()
-                self.assertEqual(scenario.send("Sí, por favor"), "Tu cita ha sido cancelada.")
+                self.assertIn("Tipo de evento: Cita cancelada", scenario.send("Sí, por favor").splitlines())
                 self.assertEqual(scenario.provider.appointments[0].status, AppointmentStatus.CANCELLED)
                 self.assertEqual(len(scenario.events), 1)
                 self.assertEqual(scenario.llm.call_count, 0)
@@ -530,7 +619,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
         self.assertIn("Confirmas", self.send("Retomemos la cita"))
         self.assertEqual(self.provider.appointments, (original,))
-        self.assertEqual(self.send("Si cancelala"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("Si cancelala").splitlines())
         self.assertEqual(len(self.events), 1)
 
     def test_bare_cancel_asks_one_clear_question_about_the_pending_cancellation(self) -> None:
@@ -546,7 +635,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.provider.appointments, (original,))
         self.assertEqual(self.events, [])
         self.service = self.new_service()
-        self.assertEqual(self.send("Sí, cancelar"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("Sí, cancelar").splitlines())
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
         self.assertEqual(len(self.events), 1)
 
@@ -586,7 +675,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
                 reply = scenario.send(text)
 
-                self.assertNotEqual(reply, "Tu cita ha sido cancelada.")
+                self.assertNotIn("Tipo de evento: Cita cancelada", reply.splitlines())
                 self.assertEqual(scenario.provider.appointments, (original,))
                 self.assertEqual(scenario.events, [])
 
@@ -596,7 +685,7 @@ class ConversationContinuityTests(unittest.TestCase):
             self.send(f"Quiero agendar para el {day}")
             self.send("9 am")
             self.send("Asael Ponce Silva")
-            self.assertIn("confirmada", self.send("Revisión general"))
+            self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         first, second = self.provider.appointments
         self.events.clear()
         self.assertIn("12/10/2026", self.send("Cancela mi cita del lunes a las 9 am"))
@@ -608,7 +697,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.provider.appointments, (first, second))
         self.assertEqual(self.events, [])
         self.service = self.new_service()
-        self.assertEqual(self.send("Si cancelala"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("Si cancelala").splitlines())
         self.assertEqual(self.provider.appointments[0], first)
         self.assertEqual(self.provider.appointments[1].id, second.id)
         self.assertEqual(self.provider.appointments[1].status, AppointmentStatus.CANCELLED)
@@ -630,7 +719,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.assertIn("No hay una gestión pendiente", self.send("Retomemos la cita"))
         self.assertIn("Confirmas", self.send("Quisiera cancelarla"))
-        self.assertEqual(self.send("Si cancelala"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("Si cancelala").splitlines())
         self.assertEqual(len(self.events), 1)
 
     def test_cancellation_words_cannot_authorize_a_pending_reschedule(self) -> None:
@@ -649,7 +738,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.provider.appointments, (original,))
         self.assertEqual(self.events, [])
         self.assertIn("Confirmas", self.send("Retomemos la cita"))
-        self.assertEqual(self.send("Sí, por favor"), "Tu cita ha sido modificada.")
+        self.assertIn("Tipo de evento: Cita modificada", self.send("Sí, por favor").splitlines())
         self.assertEqual(self.provider.appointments[0].id, original.id)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 15)
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.SCHEDULED)
@@ -662,7 +751,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
         reply = self.send("Si cancelala " * 30 + "pero tengo otra condición")
 
-        self.assertNotEqual(reply, "Tu cita ha sido cancelada.")
+        self.assertNotIn("Tipo de evento: Cita cancelada", reply.splitlines())
         self.assertEqual(self.provider.appointments, (original,))
         self.assertEqual(self.events, [])
 
@@ -672,7 +761,7 @@ class ConversationContinuityTests(unittest.TestCase):
             self.send(f"Quiero agendar para el {day}")
             self.send("10 am")
             self.send("Asael Ponce Silva")
-            self.assertIn("confirmada", self.send("Revisión general"))
+            self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         first, second = self.provider.appointments
         self.events.clear()
         ambiguous = self.send("Cancela mi cita de las 10 am")
@@ -686,7 +775,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.service = self.new_service()
         self.assertIn("12/10/2026", self.send("Cancela la de 12/10/2026 a las 10 am"))
-        self.assertEqual(self.send("si por favor"), "Tu cita ha sido cancelada.")
+        self.assertIn("Tipo de evento: Cita cancelada", self.send("si por favor").splitlines())
         self.assertEqual(self.provider.appointments[0].status, AppointmentStatus.CANCELLED)
         self.assertEqual(self.provider.appointments[1], second)
         self.assertEqual(len(self.events), 1)
@@ -728,7 +817,7 @@ class ConversationContinuityTests(unittest.TestCase):
 
         self.service = self.new_service()
         confirmed = self.send("Tengo los ojos rojos")
-        self.assertIn("confirmada", confirmed)
+        self.assertIn("Tipo de evento: Cita agendada", confirmed)
         self.assertNotIn("nombre completo", confirmed)
         self.assertEqual(self.llm.call_count, 1)
         self.assertEqual(len(self.provider.appointments), 1)
@@ -745,7 +834,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("Quiero agendar para el lunes")
         self.send("quisiera a las 9 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("tengo un ojo rojo"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("tengo un ojo rojo"))
         original = self.provider.appointments[0]
         self.events.clear()
 
@@ -760,7 +849,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertEqual(self.events, [])
 
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertIn(original, self.provider.appointments)
         self.assertEqual(self.provider.appointments[1].start_at, datetime(2026, 10, 12, 10, tzinfo=timezone.utc))
@@ -792,7 +881,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("no está disponible", self.send("a las 9 am esta bien"))
         self.assertEqual(self.send("a las 10 am está bien, gracias"), APPOINTMENT_NAME_REPLY)
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 10, tzinfo=timezone.utc))
         self.assertEqual(len(self.events), 1)
@@ -822,7 +911,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertNotIn("ocupado", ambiguous)
         self.assertEqual(self.send("a las 12 pm está bien"), APPOINTMENT_NAME_REPLY)
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 12, tzinfo=timezone.utc))
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.llm.call_count, 0)
@@ -843,7 +932,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertEqual(self.events, [])
         self.assertEqual(self.send("a las 10 a.m. está bien"), APPOINTMENT_NAME_REPLY)
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at.hour, 10)
         self.assertEqual(len(self.events), 1)
 
@@ -862,7 +951,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("- 10:00 PM", offered.splitlines())
         self.assertEqual(self.send("a las 10 de.la.noche está bien"), APPOINTMENT_NAME_REPLY)
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 22, tzinfo=timezone.utc))
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.llm.call_count, 0)
@@ -891,7 +980,7 @@ class ConversationContinuityTests(unittest.TestCase):
                 self.assertEqual(self.provider.appointments, ())
                 self.assertEqual(self.events, [])
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo los ojos rojos"))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
         self.assertEqual(len(self.events), 1)
@@ -912,7 +1001,7 @@ class ConversationContinuityTests(unittest.TestCase):
         resumed = self.send("Retomemos la cita")
         self.assertIn("motivo", resumed)
         self.assertNotIn("nombre completo", resumed)
-        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo los ojos rojos"))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at, datetime(2026, 10, 11, 11, tzinfo=timezone.utc))
         self.assertEqual(len(self.events), 1)
@@ -923,7 +1012,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("Horarios disponibles", self.send("Quiero agendar para hoy"))
         self.send("10 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Veo oscuro"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Veo oscuro"))
         original = self.provider.appointments[0]
         self.events.clear()
         self.llm.reply = (
@@ -976,7 +1065,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("Horarios disponibles", reply)
         self.assertNotIn("- 11:00 AM", reply.splitlines())
         self.assertEqual(self.send("agéndame a las 12 pm"), APPOINTMENT_REASON_REPLY)
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 12)
 
@@ -1203,7 +1292,7 @@ class ConversationContinuityTests(unittest.TestCase):
         resume = self.send("Retomemos la cita")
         self.assertIn("motivo", resume)
         self.assertNotIn("nombre completo", resume)
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
         self.assertEqual(len(self.events), 1)
@@ -1274,7 +1363,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.service = self.new_service()
         self.assertEqual(self.send("agéndame a las 11 am"), APPOINTMENT_NAME_REPLY)
         self.assertTrue(self.send("Asael Ponce Silva").endswith(APPOINTMENT_REASON_REPLY))
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.provider.appointments), 1)
 
     def test_clear_date_answer_resumes_a_paused_date_request(self) -> None:
@@ -1359,7 +1448,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.offer_slots()
         self.send("9 am")
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.events.clear()
         self.provider.register_busy_period(
             calendar_id="calendar-1",
@@ -1408,7 +1497,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertEqual(self.send("Quiero agendar otra cita a las 12 para pasado mañana"), APPOINTMENT_NAME_REPLY)
         self.llm.reply = "Información del consultorio."
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.send("Retomemos la cita")
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at.date(), next_date)
@@ -1468,7 +1557,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.assertIn("qué día", self.send("Retomemos la cita"))
         self.assertIn("Horarios disponibles", self.send("mañana"))
         self.assertEqual(self.send("11 am"), APPOINTMENT_REASON_REPLY)
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at.date(), (self.now + timedelta(days=1)).date())
 
     def test_question_about_changing_payment_does_not_replace_the_booking(self) -> None:
@@ -1477,7 +1566,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("Asael Ponce Silva")
         self.send("¿Puedo cambiar el método de pago?")
         self.assertIn("motivo", self.send("Retomemos la cita"))
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
 
     def test_expired_paused_date_consumes_the_new_date(self) -> None:
         self.send("Quiero agendar una cita")
@@ -1553,7 +1642,7 @@ class ConversationContinuityTests(unittest.TestCase):
         self.send("¿Cuánto cuesta la consulta?")
         self.assertIn("11:00 AM", self.send("Retomemos la cita"))
         self.send("Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].start_at.utcoffset(), timedelta(hours=-6))
 
     def test_malformed_tool_time_does_not_create_a_broken_pending_booking(self) -> None:

@@ -82,7 +82,7 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
 
         reply = self.send(reason)
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].reason, reason)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 13)
@@ -96,13 +96,13 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
         self.begin('{"quality":"valid","category":"visual_symptom",'
                    '"priority_signals":[],"confidence":0.10}')
 
-        self.assertIn("confirmada", self.send("Tengo molestias en la vista"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo molestias en la vista"))
         self.assertEqual(self.provider.appointments[0].reason, "Tengo molestias en la vista")
 
     def test_general_reason_can_use_local_support_after_invalid_json(self) -> None:
         self.begin("Respuesta que no es JSON")
 
-        self.assertIn("confirmada", self.send("Tengo problemas en el ojo izquierdo"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo problemas en el ojo izquierdo"))
         self.assertEqual(len(self.events), 1)
         with self.database.transaction() as connection:
             failures = connection.execute("SELECT COUNT(*) FROM llm_failures").fetchone()[0]
@@ -113,7 +113,7 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
                    '"priority_signals":[],"confidence":0.92}')
         reason = "Las letras se me mezclan cuando leo"
 
-        self.assertIn("confirmada", self.send(reason))
+        self.assertIn("Tipo de evento: Cita agendada", self.send(reason))
         self.assertEqual(self.provider.appointments[0].reason, reason)
 
     def test_clarifications_acknowledge_input_and_progress_across_restart(self) -> None:
@@ -139,7 +139,7 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
         self.assertEqual(self.provider.appointments, ())
         self.assertEqual(self.events, [])
 
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(self.provider.appointments[0].reason, "Revisión general")
         self.assertEqual(self.provider.appointments[0].start_at.hour, 13)
         self.assertEqual(len(self.events), 1)
@@ -160,7 +160,7 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
         self.assertEqual(self.events, [])
 
         self.restart()
-        self.assertIn("confirmada", self.send(reason))
+        self.assertIn("Tipo de evento: Cita agendada", self.send(reason))
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].reason, reason)
         self.assertEqual(len(self.events), 1)
@@ -217,7 +217,7 @@ class AppointmentReasonCollectionTests(unittest.TestCase):
                    '"priority_signals":[],"confidence":0.95}')
         reason = "Tengo molestias en la vista, como siempre"
 
-        self.assertIn("confirmada", self.send(reason))
+        self.assertIn("Tipo de evento: Cita agendada", self.send(reason))
         self.assertEqual(self.provider.appointments[0].reason, reason)
         self.assertEqual(self.evaluator_provider.call_count, 1)
 

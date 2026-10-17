@@ -73,6 +73,7 @@ esten aprobados.
 - [Seleccion hibrida de horarios y cierre de autenticacion Meta](./verification/2026-10-12-hybrid-slot-selection.md)
 - [Disponibilidad con solo la hora de inicio y despliegue en Raspberry Pi](./verification/2026-10-14-start-only-availability-lists.md)
 - [Listados y confirmaciones de citas con solo el inicio y AM/PM](./verification/2026-10-14-start-only-appointment-times.md)
+- [Confirmacion al paciente con bloques compartidos de cita y paciente](./verification/2026-10-14-patient-appointment-confirmation.md)
 
 ## Funcionalidad implementada y verificada por cortes
 
@@ -85,6 +86,7 @@ esten aprobados.
 - [017 - Espejo de proyecto y configuracion en Raspberry Pi](./specs/017-local-to-raspberry/spec.md)
 - [018 - Reintentos de webhook sin reabrir gestiones antiguas](./specs/018-safe-webhook-retries/spec.md)
 - [019 - Seleccion hibrida de horarios](./specs/019-hybrid-slot-selection/spec.md)
+- [020 - Confirmacion de cita para el paciente](./specs/020-patient-appointment-confirmation/spec.md)
 - [ADR 0019 - Entrega de notificaciones al doctor](./decisions/0019-doctor-notification-delivery.md)
 - [ADR 0020 - Formato de respuestas compatible con WhatsApp](./decisions/0020-whatsapp-compatible-response-format.md)
 - [ADR 0027 - Señales de prioridad sin diagnostico](./decisions/0027-priority-signals-without-diagnosis.md)
@@ -108,3 +110,4 @@ esten aprobados.
 - [ADR 0050 - Interpretacion hibrida de la seleccion pendiente](./decisions/0050-hybrid-pending-slot-selection.md)
 - [ADR 0051 - Solo la hora de inicio en listas de disponibilidad](./decisions/0051-start-only-availability-lists.md)
 - [ADR 0052 - Solo el inicio con AM/PM en las horas de citas del paciente](./decisions/0052-start-only-patient-appointment-times.md)
+- [ADR 0053 - Bloques compartidos de cita y paciente en confirmaciones](./decisions/0053-shared-appointment-confirmation-blocks.md)

@@ -439,12 +439,6 @@ def classify_action_confirmation(
     return classify_confirmation(normalized)
 
 
-def confirmation_reply(tool_name: ToolName) -> str:
-    if tool_name is ToolName.CANCEL_APPOINTMENT:
-        return "Tu cita ha sido cancelada."
-    return "Tu cita ha sido modificada."
-
-
 def _normalize(value: str) -> str:
     normalized = unicodedata.normalize("NFD", value.strip().lower())
     without_marks = "".join(

@@ -1,7 +1,7 @@
 """Composicion segura del mensaje interno para el doctor."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import json
 import re
@@ -15,7 +15,7 @@ from appointment_reason_evaluation import (
     priority_signal_messages,
     priority_signals_for_texts,
 )
-from calendar_domain import AppointmentStatus
+from appointment_messages import AppointmentMessageAudience, render_appointment_message
 from llm_provider import ChatMessage, LLMProvider, ToolCall
 from notification_domain import (
     AppointmentNotificationEvent,
@@ -36,7 +36,6 @@ MAX_NOTIFICATION_SUMMARY_CHARACTERS = 360
 MAX_NOTIFICATION_SIGNAL_CHARACTERS = 120
 MAX_NOTIFICATION_REASON_CHARACTERS = 240
 MAX_NOTIFICATION_NAME_CHARACTERS = 120
-DISPLAY_PHONE_DIGITS = 10
 
 SAFE_FALLBACK_SUMMARY = (
     "La conversacion se relaciona con la gestion de una cita. "
@@ -252,19 +251,12 @@ def render_doctor_notification(
         max_characters=MAX_NOTIFICATION_REASON_CHARACTERS,
         clinical_fallback="Contenido clinico omitido",
     )
-    event_label = {
-        AppointmentNotificationType.SCHEDULED: "Cita agendada",
-        AppointmentNotificationType.MODIFIED: "Cita modificada",
-        AppointmentNotificationType.CANCELLED: "Cita cancelada",
-    }[event.notification_type]
-    status_label = {
-        AppointmentStatus.SCHEDULED: "programada",
-        AppointmentStatus.CONFIRMED: "confirmada",
-        AppointmentStatus.CANCELLED: "cancelada",
-        AppointmentStatus.COMPLETED: "completada",
-        AppointmentStatus.NO_SHOW: "no asistio",
-    }[appointment.status]
-    end_at = appointment.end_at.astimezone(appointment.start_at.tzinfo)
+    appointment_blocks = render_appointment_message(
+        replace(appointment, reason=safe_reason),
+        tool_name=event.tool_name,
+        patient_name=safe_name,
+        audience=AppointmentMessageAudience.DOCTOR,
+    )
     signal_lines = (
         "- " + signal
         for signal in safe_priority_signals
@@ -272,18 +264,7 @@ def render_doctor_notification(
     rendered_signals = "\n".join(signal_lines) or "- Ninguna detectada."
     body = "\n".join(
         (
-            "NOTIFICACION INTERNA DE CITA",
-            f"Tipo de evento: {event_label}",
-            "",
-            "CITA",
-            f"Fecha: {appointment.start_at.date().isoformat()}",
-            f"Hora: {_format_time(appointment.start_at)}-{_format_time(end_at)}",
-            f"Motivo: {safe_reason}",
-            f"Estado: {status_label}",
-            "",
-            "PACIENTE",
-            f"Nombre: {safe_name}",
-            f"Telefono: {_format_display_phone(event.patient_scope.whatsapp_number)}",
+            appointment_blocks,
             "",
             "RESUMEN DE LA CONVERSACION",
             safe_summary,
@@ -466,6 +447,7 @@ def _history_for_event(
             and message.reply_to_message_id != event.incoming_message_id
             and _policy_text(message.text).startswith(
                 (
+                    "confirmacion de cita\n",
                     "tu cita esta confirmada para el ",
                     "tu cita fue agendada correctamente.",
                     "tu cita ha sido cancelada.",
@@ -591,13 +573,6 @@ def _timezone_name(value: datetime) -> str:
 
 def _format_time(value: datetime) -> str:
     return value.strftime("%H:%M")
-
-
-def _format_display_phone(value: str) -> str:
-    digits = re.sub(r"\D", "", value)
-    if len(digits) <= DISPLAY_PHONE_DIGITS:
-        return digits or value
-    return digits[-DISPLAY_PHONE_DIGITS:]
 
 
 def _compact_text(value: str) -> str:

@@ -166,6 +166,10 @@ notificacion al doctor, igual que en los demas eventos de agenda.
 
 ## Integracion con notificaciones
 
+La creacion exitosa devuelve la confirmacion por bloques de spec 020: cita
+definitiva, nombre completo persistido y telefono. Comparte el renderizador con
+el doctor y no requiere generar un resumen para responder al paciente.
+
 La pregunta inicial no ejecuta `ToolExecutor`, por lo que no genera
 `AppointmentNotificationEvent`. El evento se emite unicamente desde la ejecucion
 exitosa posterior al mensaje que contiene el motivo.

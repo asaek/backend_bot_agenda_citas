@@ -76,6 +76,9 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Presentar las listas de disponibilidad, citas y opciones de reprogramacion en
   formato de 12 horas con AM/PM y solo la hora de inicio, incluidas las listas
   retomadas, los detalles de citas y las confirmaciones de cancelacion o reprogramacion.
+- Confirmar el resultado exitoso de agendar, reprogramar y cancelar con bloques de
+  cita y paciente compartidos con la notificacion del doctor, sin resumen ni señales
+  internas en la respuesta al paciente y sin otra llamada al LLM; spec 020 y ADR 0053.
 - Conservar durante 10 minutos la intencion de agendar sin hora exacta mientras se
   espera el dia y resolver respuestas como `hoy` directamente en el backend.
 - Persistir la disponibilidad ofrecida y validar en el backend la hora elegida antes

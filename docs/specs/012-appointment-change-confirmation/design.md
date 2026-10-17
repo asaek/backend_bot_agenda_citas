@@ -143,6 +143,11 @@ confirmada para evitar reutilizar la misma autorizacion.
 
 ## Integracion con notificaciones
 
+Despues de una mutacion exitosa, `_appointment_result_reply()` responde al paciente
+con los datos definitivos de la cita y el nombre persistido usando los bloques
+compartidos de spec 020. Este mensaje de resultado es posterior a la pregunta de
+confirmacion y no constituye una autorizacion para otra mutacion.
+
 La consulta inicial de disponibilidad y la seleccion del horario no emiten un
 `AppointmentNotificationEvent`. La confirmacion muestra los datos publicables de la cita
 y el horario destino sin el ID interno. El evento se crea unicamente cuando la operacion

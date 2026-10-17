@@ -95,6 +95,12 @@ Respuesta afirmativa explicita del paciente que autoriza una cancelacion o una
 reprogramacion concreta antes de modificar la cita.
 _Evitar_: Intencion, solicitud pendiente
 
+**Confirmacion al paciente**:
+Mensaje que comunica el resultado exitoso de agendar, reprogramar o cancelar una
+cita. Incluye los datos definitivos de la cita y del paciente; el resumen
+conversacional y las señales de prioridad son contenido interno del doctor.
+_Evitar_: Autorizacion de un cambio pendiente, resumen interno, cita solicitada
+
 **Accion pendiente de cita**:
 Solicitud de cancelacion o reprogramacion que aun espera la confirmacion del
 paciente y no ha cambiado la fuente de verdad de agenda.

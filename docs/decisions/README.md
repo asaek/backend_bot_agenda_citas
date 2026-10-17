@@ -61,3 +61,4 @@ indique cual decision anterior queda obsoleta.
 - [0050 - Interpretacion hibrida de la seleccion pendiente](./0050-hybrid-pending-slot-selection.md)
 - [0051 - Solo la hora de inicio en listas de disponibilidad](./0051-start-only-availability-lists.md)
 - [0052 - Solo el inicio con AM/PM en las horas de citas del paciente](./0052-start-only-patient-appointment-times.md)
+- [0053 - Bloques compartidos de cita y paciente en confirmaciones](./0053-shared-appointment-confirmation-blocks.md)

@@ -11,8 +11,8 @@ from appointment_confirmation import (
     PENDING_APPOINTMENT_ACTION_KEY,
     classify_action_confirmation,
     classify_confirmation,
-    confirmation_reply,
 )
+from appointment_messages import AppointmentMessageAudience, render_appointment_message
 from conversation_intent import (
     PendingConversationFlow,
     PendingInterruption,
@@ -108,9 +108,11 @@ from repositories import (
     PatientRepository,
 )
 from tool_contracts import (
+    CancelAppointmentOutput,
     CheckAvailabilityOutput,
     CreateAppointmentOutput,
     ListAppointmentsOutput,
+    RescheduleAppointmentOutput,
 )
 from tool_executor import ToolExecutor
 from tool_results import public_error_from_exception
@@ -1757,7 +1759,7 @@ class ConversationService:
             on_appointment_event=appointment_event_sink,
         )
         if result.ok:
-            return confirmation_reply(pending_action.tool_name)
+            return self._appointment_result_reply(result, tool_name=pending_action.tool_name)
         if result.error is not None:
             return self._calendar_error_reply(
                 context,
@@ -1914,7 +1916,7 @@ class ConversationService:
             on_appointment_event=appointment_event_sink,
         )
         if result.ok:
-            return self._create_appointment_reply(result)
+            return self._appointment_result_reply(result, tool_name=ToolName.CREATE_APPOINTMENT)
         if result.error is not None:
             return result.error.message
         return CONTROLLED_FALLBACK_REPLY
@@ -1971,14 +1973,24 @@ class ConversationService:
             + "¿Qué deseas revisar en esta consulta? Basta una descripción general."
         )
 
-    @staticmethod
-    def _create_appointment_reply(result: ToolResult) -> str:
-        if not isinstance(result.data, CreateAppointmentOutput):
-            return "Tu cita fue agendada correctamente."
+    def _appointment_result_reply(self, result: ToolResult, *, tool_name: ToolName) -> str:
+        expected_output = {
+            ToolName.CREATE_APPOINTMENT: CreateAppointmentOutput,
+            ToolName.RESCHEDULE_APPOINTMENT: RescheduleAppointmentOutput,
+            ToolName.CANCEL_APPOINTMENT: CancelAppointmentOutput,
+        }[tool_name]
+        if not result.ok or not isinstance(result.data, expected_output):
+            return CONTROLLED_FALLBACK_REPLY
         appointment = result.data.appointment
-        return (
-            f"Tu cita está confirmada para el {appointment.start_at:%d/%m/%Y} "
-            f"a las {format_patient_time(appointment.start_at)}. Motivo: {appointment.reason}."
+        return render_appointment_message(
+            replace(
+                appointment,
+                start_at=appointment.start_at.astimezone(self._timezone),
+                end_at=appointment.end_at.astimezone(self._timezone),
+            ),
+            tool_name=tool_name,
+            patient_name=self._load_patient_name(appointment.patient_scope.patient_id),
+            audience=AppointmentMessageAudience.PATIENT,
         )
 
     def _load_pending_appointment_action(

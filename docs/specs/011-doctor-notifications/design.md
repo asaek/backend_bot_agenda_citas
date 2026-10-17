@@ -92,6 +92,10 @@ incluye IDs de SQLite, IDs de Google Calendar, IDs de herramientas ni credencial
 El telefono del paciente se muestra con sus ultimos 10 digitos, sin el prefijo
 internacional.
 El nombre ausente se muestra como `No informado` sin inventar uno.
+Los bloques de cita y paciente se delegan a `appointment_messages.py` despues del
+saneamiento. El mismo renderizador produce la confirmacion al paciente con su
+presentacion temporal; spec 020 y ADR 0053. El resumen y prioridad siguen siendo
+contenido del doctor, compuesto despues de entregar la respuesta al paciente.
 
 ### Ampliacion - Prioridad semantica con evidencia (7 de octubre de 2026)
 

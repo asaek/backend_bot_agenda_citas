@@ -94,7 +94,7 @@ class PatientNameCollectionTests(unittest.TestCase):
         self.assertIn("motivo", reply)
         self.assertEqual(self.stored_name(), "Asael Ponce Silva")
         self.assertEqual(self.provider.appointments, ())
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
 
@@ -124,7 +124,7 @@ class PatientNameCollectionTests(unittest.TestCase):
                 self.assertEqual(self.events, [])
                 self.service = self.new_service()
         self.assertIn("Asael Ponce Silva", self.send("Asael Ponce Silva"))
-        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo los ojos rojos"))
         self.assertEqual(self.stored_name(), "Asael Ponce Silva")
         self.assertEqual(len(self.provider.appointments), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
@@ -138,7 +138,7 @@ class PatientNameCollectionTests(unittest.TestCase):
         reply = self.send("Asael Ponce Silva")
         self.assertIn("Asael Ponce Silva", reply)
         self.assertEqual(self.stored_name(), "Asael Ponce Silva")
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
 
@@ -156,7 +156,7 @@ class PatientNameCollectionTests(unittest.TestCase):
         self.assertEqual(retry, reply)
         self.assertEqual(self.provider.appointments, ())
         self.assertEqual(self.events, [])
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
         self.assertEqual(len(self.events), 1)
 
     def test_repeating_candidate_is_not_an_explicit_confirmation(self) -> None:
@@ -193,7 +193,7 @@ class PatientNameCollectionTests(unittest.TestCase):
                 self.assertEqual(self.events, [])
         self.assertIn(name, self.send("Sí, es correcto"))
         self.assertEqual(self.stored_name(), name)
-        self.assertIn("confirmada", self.send("Tengo los ojos rojos"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Tengo los ojos rojos"))
         self.assertEqual(self.provider.appointments[0].start_at.hour, 11)
         self.assertEqual(len(self.events), 1)
 
@@ -208,7 +208,7 @@ class PatientNameCollectionTests(unittest.TestCase):
         self.send("Sí")
         self.assertIsNone(self.stored_name())
         self.assertIn("Asael Ponce Silva", self.send("Asael Ponce Silva"))
-        self.assertIn("confirmada", self.send("Revisión general"))
+        self.assertIn("Tipo de evento: Cita agendada", self.send("Revisión general"))
 
     def test_old_candidate_retry_does_not_replace_new_candidate_or_become_reason(self) -> None:
         self.start_booking()

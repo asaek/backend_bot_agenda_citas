@@ -582,7 +582,7 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(choice_reply, APPOINTMENT_NAME_REPLY)
         self.assertTrue(name_reply.endswith(APPOINTMENT_REASON_REPLY))
         self.assertIn("Ana Prueba", name_reply)
-        self.assertIn("confirmada", reason_reply.lower())
+        self.assertIn("tipo de evento: cita agendada", reason_reply.lower())
         self.assertEqual(llm_provider.call_count, 0)
         self.assertEqual(len(provider.appointments), 1)
         self.assertEqual(provider.appointments[0].reason, "Siento rara la vista")
@@ -772,7 +772,7 @@ class ConversationContextTests(unittest.TestCase):
             service.build_reply(reason_context, appointment_event_sink=events.append)
         )
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(events), 1)
         self.assertEqual(
             events[0].notification_type,
@@ -1098,7 +1098,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         )
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(self.provider.appointments[-1].reason, "Revisión general")
 
@@ -1171,7 +1171,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         )
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(self.provider.appointments[-1].reason, "Revisión general")
 
@@ -1232,7 +1232,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         )
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
 
     def test_invalid_reason_keeps_pending_request_until_valid_reason_arrives(self) -> None:
@@ -1295,7 +1295,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             self.service.build_reply(valid_context, appointment_event_sink=events.append)
         )
 
-        self.assertIn("confirmada", valid_reply)
+        self.assertIn("Tipo de evento: Cita agendada", valid_reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(
             self.provider.appointments[-1].reason,
@@ -1372,7 +1372,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(self.provider.appointments[-1].start_at.hour, 13)
         self.assertEqual(
@@ -1430,7 +1430,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             service.build_reply(reason_context, appointment_event_sink=events.append)
         )
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(len(events), 1)
         with service.database.transaction() as connection:
@@ -1480,7 +1480,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         reply = asyncio.run(self.service.build_reply(reason_context))
 
-        self.assertIn("confirmada", reply)
+        self.assertIn("Tipo de evento: Cita agendada", reply)
         self.assertEqual(len(self.provider.appointments), 2)
 
     def test_vague_reason_requests_clarification(self) -> None:
@@ -1647,7 +1647,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
         )
         valid_reply = asyncio.run(restarted_service.build_reply(valid_context))
 
-        self.assertIn("confirmada", valid_reply)
+        self.assertIn("Tipo de evento: Cita agendada", valid_reply)
         self.assertEqual(
             self.provider.appointments[-1].reason,
             "Seguimiento después de un golpe ocular",
@@ -1718,7 +1718,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
 
         self.assertIn("nombre", first_reply.lower())
         self.assertIn("motivo", name_reply.lower())
-        self.assertIn("confirmada", second_reply)
+        self.assertIn("Tipo de evento: Cita agendada", second_reply)
         self.assertEqual(len(self.provider.appointments), 2)
         self.assertEqual(
             self.provider.appointments[-1].reason,

@@ -84,6 +84,14 @@ tambien muestran solo el inicio, por ejemplo `Horario: 9:00 AM` o `Hora: 9:00 AM
 Se usa la zona horaria de la agenda y el paciente puede seleccionar un horario
 indicando AM o PM.
 
+Despues de agendar, reprogramar o cancelar correctamente, el paciente recibe una
+`CONFIRMACION DE CITA` con tipo de evento, los bloques `CITA` (fecha, inicio con
+AM/PM, motivo y estado definitivo) y `PACIENTE` (nombre completo y ultimos 10
+digitos del telefono). El renderizado de estos bloques se comparte con la
+notificacion del doctor en `appointment_messages.py`. El resumen y las señales de
+prioridad siguen en el mensaje interno. La confirmacion no requiere otro llamado
+al LLM y funciona con notificaciones al doctor deshabilitadas.
+
 Cuando `LLM_REASON_EVALUATION_ENABLED=true`, el backend evalua el motivo con un
 objeto JSON estructurado antes de crear la cita. La respuesta debe contener
 `quality`, `category`, `priority_signals`, `priority_signal_evidence` y `confidence`; el backend valida esos
