@@ -62,3 +62,5 @@ indique cual decision anterior queda obsoleta.
 - [0051 - Solo la hora de inicio en listas de disponibilidad](./0051-start-only-availability-lists.md)
 - [0052 - Solo el inicio con AM/PM en las horas de citas del paciente](./0052-start-only-patient-appointment-times.md)
 - [0053 - Bloques compartidos de cita y paciente en confirmaciones](./0053-shared-appointment-confirmation-blocks.md)
+- [0054 - Llamadas entrantes con autorizacion ligada al origen](./0054-inbound-calling-with-scoped-confirmation.md)
+  — propuesta; sin implementacion ni biblioteca de audio adoptada.

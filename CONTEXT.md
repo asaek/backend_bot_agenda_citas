@@ -156,3 +156,30 @@ _Evitar_: Respuesta recibida, nueva decision, nueva solicitud
 Repeticion de un turno anterior cuando ya se atendieron turnos posteriores de la
 misma conversacion. No autoriza volver a abrir una gestion terminada.
 _Evitar_: Nueva intencion, retomar una gestion, recordatorio
+
+## Lenguaje para llamadas (propuesta del corte 021)
+
+**Conversacion del paciente**:
+Continuidad de la atencion de un paciente de prueba, que puede abarcar mensajes y
+varias llamadas. Una llamada terminada no equivale a una conversacion terminada.
+_Evitar_: Sesion de llamada, cita, gestion pendiente
+
+**Sesion de llamada**:
+Encuentro de voz desde que se recibe una llamada del paciente de prueba hasta su
+finalizacion. Volver a llamar inicia otra sesion, aunque continue la misma conversacion.
+_Evitar_: Conversacion del paciente, turno de voz, llamada telefonica convencional
+
+**Turno de voz**:
+Intervencion completa del paciente de prueba durante una llamada y la respuesta
+decidida para ella. Una transcripcion parcial no constituye otro turno.
+_Evitar_: Fragmento de audio, mensaje escrito, sesion de llamada
+
+**Confirmacion verbal de cita**:
+Autorizacion explicita para crear, reprogramar o cancelar una cita concreta cuyos
+datos se acaban de presentar en la misma llamada. No se transfiere a otra llamada o al chat.
+_Evitar_: Seleccion de horario, confirmacion al paciente, afirmacion fuera de contexto
+
+**Continuidad entre canales**:
+Recuperacion explicita de una gestion del mismo paciente al pasar entre mensajes
+y llamadas, conservando los datos utiles y solicitando de nuevo cualquier autorizacion.
+_Evitar_: Confirmacion transferida, nueva identidad, reserva confirmada

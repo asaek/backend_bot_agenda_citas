@@ -79,6 +79,17 @@ local, la suite del mirror de Raspberry Pi y la verificacion HTTP operativa.
 Evidencia de la ampliacion:
 `docs/verification/2026-10-07-semantic-priority-signals.md`.
 
+## Ajuste - Resumen de la charla sin repetir la agenda (17 de octubre de 2026)
+
+- [x] Centrar el prompt en lo expresado por el paciente y excluir los datos de agenda
+      y la confirmacion del resumen, incluso si aparecen en el historial.
+- [x] Enviar al resumidor solo el motivo y el historial como contexto, sin campos
+      estructurados de fecha, horas, zona, estado ni tipo de evento.
+- [x] Verificar la composicion y el webhook en Raspberry Pi y comprobar un resumen
+      generado con el proveedor configurado usando datos de prueba.
+
+Evidencia: `docs/verification/2026-10-17-conversation-only-notification-summary.md`.
+
 ## Fuera de este corte
 
 - [ ] Agregar un worker o una cola distribuida para notificaciones.

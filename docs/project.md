@@ -71,6 +71,9 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   para las señales de prioridad, con evidencia literal y sin heredar sintomas de citas
   anteriores; reconocer secrecion ocular amarillenta, verdosa o abundante, incluidos
   errores de escritura como `laga;as`, mediante respaldo local.
+- Resumir la charla con el paciente en la notificacion al doctor: motivo, molestias,
+  dudas y detalles expresados, sin repetir fecha, horario, zona, estado o confirmacion
+  de la cita ni inventar sintomas cuando solo se proporciona un motivo general.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
 - Presentar las listas de disponibilidad, citas y opciones de reprogramacion en
@@ -113,6 +116,36 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Mantener el mirror de Raspberry Pi con los archivos y el `.env` completo locales
   al solicitar `local to raspberry`; comprobar copia, permisos, configuracion
   efectiva, reinicio, rutas y autenticacion de WhatsApp sin mostrar secretos.
+
+## Alcance propuesto: llamadas entrantes de WhatsApp
+
+El [corte 021](./specs/021-whatsapp-inbound-calling/spec.md) especifica llamadas
+de voz iniciadas por el paciente de prueba dentro de WhatsApp. Su estado es
+borrador para revision; la entrega del 18 de octubre de 2026 define documentos,
+sin habilitar llamadas ni introducir dependencias de audio en el backend actual.
+
+El plan permite avanzar antes de comprar una linea:
+
+1. C0: especificacion, diseno y tareas.
+2. C1: control de llamada simulado con persistencia, duplicados, cierre y reinicio.
+3. C2: saludo y audio bidireccional en laboratorio sobre la Raspberry.
+4. C3: transcripcion -> bot existente -> sintesis, con turnos e interrupciones.
+5. C4: agenda falsa y continuidad entre chat y llamadas, con confirmacion verbal.
+6. C5: conexion con Meta y verificaciones reales; requiere numero registrado,
+   elegible y con Calling habilitado.
+
+La propuesta conserva identidad y conversacion del paciente, pero distingue cada
+sesion de llamada y cada turno de voz. Una gestion solo cambia de canal mediante
+una recuperacion explicita o una nueva solicitud; los datos utiles se conservan y
+las autorizaciones anteriores se invalidan. La voz requiere confirmacion antes
+de crear, reprogramar o cancelar, incluida una pregunta nueva al retomar.
+
+La ruta propuesta mantiene Meta directa y separa control, medios y proveedores
+de voz. Biblioteca WebRTC y proveedores/modelos de transcripcion y sintesis se
+decidiran en sus cortes con pruebas y costos documentados. La
+[ADR 0054](./decisions/0054-inbound-calling-with-scoped-confirmation.md) registra
+la propuesta, no una decision implementada. Telefonia convencional, llamadas
+salientes y notas de voz quedan fuera de este incremento.
 
 ## Estrategia de implementacion por cortes
 

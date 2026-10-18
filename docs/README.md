@@ -75,6 +75,15 @@ esten aprobados.
 - [Listados y confirmaciones de citas con solo el inicio y AM/PM](./verification/2026-10-14-start-only-appointment-times.md)
 - [Confirmacion al paciente con bloques compartidos de cita y paciente](./verification/2026-10-14-patient-appointment-confirmation.md)
 
+## Funcionalidad especificada, pendiente de implementacion
+
+- [021 - Llamadas entrantes de WhatsApp](./specs/021-whatsapp-inbound-calling/spec.md)
+  — borrador para revision, con simulacion y laboratorio antes de comprar numero.
+- [Diseno de llamadas](./specs/021-whatsapp-inbound-calling/design.md) y
+  [tareas por cortes](./specs/021-whatsapp-inbound-calling/tasks.md).
+- [ADR 0054 - Autorizacion ligada al origen](./decisions/0054-inbound-calling-with-scoped-confirmation.md)
+  — propuesta, no adoptada por el runtime.
+
 ## Funcionalidad implementada y verificada por cortes
 
 - [011 - Notificaciones al doctor](./specs/011-doctor-notifications/spec.md)

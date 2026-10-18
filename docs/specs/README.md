@@ -46,3 +46,5 @@ NNN-nombre-de-la-funcionalidad/
 - [018 - Reintentos de webhook sin reabrir gestiones antiguas](./018-safe-webhook-retries/spec.md)
 - [019 - Seleccion hibrida de horarios](./019-hybrid-slot-selection/spec.md)
 - [020 - Confirmacion de cita para el paciente](./020-patient-appointment-confirmation/spec.md)
+- [021 - Llamadas entrantes de WhatsApp](./021-whatsapp-inbound-calling/spec.md)
+  — borrador especificado; implementacion y conexion con Meta pendientes.

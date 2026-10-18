@@ -52,6 +52,56 @@ del reporte. La configuracion efectiva del proceso debe coincidir con la copiada
 Las verificaciones incluyen rutas locales/publicas y autenticacion de Meta de
 solo lectura, para distinguir un webhook saludable de una credencial de envio valida.
 
+## Diseno propuesto: llamadas entrantes (021)
+
+La [especificacion 021](./specs/021-whatsapp-inbound-calling/spec.md) y su
+[diseno](./specs/021-whatsapp-inbound-calling/design.md) son un borrador para
+revision. El runtime mostrado en `Arquitectura actual` sigue procesando texto;
+los componentes siguientes no estan implementados ni sus dependencias instaladas.
+
+```text
+Meta Calling / simulador
+        |
+        v
+Webhook -> registro del evento -> ACK
+        |
+        v
+Servicio de llamadas <-> cliente Calling HTTP / fake
+        +-- sesiones y eventos -> SQLite
+        +-- tareas supervisadas por FastAPI
+        |
+        v
+Transporte de audio <-> Meta / interlocutor de laboratorio
+        |
+        v
+Transcripcion final -> turno con origen -> ConversationService
+                                             |
+                                             v
+                                   Herramientas de agenda
+                                             |
+                                             v
+Audio <- sintesis <- presentacion oral del resultado
+```
+
+La propuesta de [ADR 0054](./decisions/0054-inbound-calling-with-scoped-confirmation.md)
+mantiene Meta directa y el flujo conversacional actual. Separa conversacion del
+paciente, sesion de llamada y turno de voz. La gestion unica gana propietario de
+canal/sesion y version: retomar conserva datos, revalida agenda y exige otra
+pregunta, sin trasladar autorizaciones del chat o de una llamada anterior.
+
+Antes de cualquier mutacion de voz, incluidas las rutas locales de creacion, el
+backend comprobara la autorizacion para la accion exacta. La entrega escrita y
+la reproduccion tendran resultados separados; un fallo de audio no autoriza
+repetir una operacion de agenda. Las sesiones abiertas tras reiniciar quedaran
+interrumpidas, sin reanudar automaticamente audio o herramientas.
+
+Los cortes empiezan con dobles sin red y audio de laboratorio en la Raspberry.
+`aiortc` es candidato sujeto a prueba; STT/TTS y conectividad ICE/STUN/TURN se
+concretaran antes de sus verificaciones. El numero real y Calling habilitado
+solo bloquean el corte conectado a Meta. Una prueba de laboratorio o un webhook
+saludable no acreditan audio de WhatsApp. El detalle y las salidas por corte estan
+en [tasks.md](./specs/021-whatsapp-inbound-calling/tasks.md).
+
 ## Arquitectura objetivo
 
 ```text
@@ -278,7 +328,11 @@ entregara a cada doctor configurado.
 El resumen sera contenido de cada notificacion y no un disparador independiente.
 
 La composicion usa `generate_text()` con un prompt interno sin herramientas. El
-resultado del LLM se valida y se limita; los diagnosticos, recomendaciones,
+resumidor recibe el motivo y el historial, sin campos estructurados de agenda, y
+se instruye para resumir la charla con el paciente (motivo, molestias, dudas y
+detalles relevantes), omitiendo fecha, horario, zona, estado y confirmacion de la cita
+incluso si aparecen en el historial. Un motivo general no autoriza inventar sintomas.
+El resultado del LLM se valida y se limita; los diagnosticos, recomendaciones,
 transcripciones completas y valores internos conocidos se descartan o sustituyen
 por contenido seguro antes de formar el cuerpo.
 

@@ -80,6 +80,12 @@ carga desde SQLite el paciente y el historial persistido, y
 La solicitud usa un prompt interno sin herramientas; `OpenAICompatibleLLMProvider`
 expone `generate_text()` para no publicar los esquemas de agenda en esta llamada.
 
+El contexto especifico del resumidor contiene el motivo expresado y el historial,
+sin agregar fecha, horario, zona, estado o tipo de evento como datos estructurados.
+El prompt pide sintetizar la charla (motivo, molestias, dudas y detalles relevantes)
+y omitir los datos de agenda y la confirmacion aunque aparezcan en los mensajes.
+Un motivo general se resume sin inventar sintomas.
+
 El resultado se valida como resumen y senales de prioridad. Si el proveedor
 devuelve una transcripcion, diagnosticos, recomendaciones clinicas o contenido
 demasiado largo, se usa un resumen operativo seguro y se descartan las senales no
@@ -177,8 +183,8 @@ este orden. La creacion de entregas por destinatario pertenece al corte de entre
 El nombre del paciente puede estar vacio en el modelo actual. En ese caso se debe
 mostrar el numero de WhatsApp sin inventar un nombre.
 
-El resumen se construye desde los mensajes persistidos y la informacion operativa
-de la cita mediante el `LLMProvider` existente con un prompt interno separado, sin
+El resumen se construye desde los mensajes persistidos y el motivo expresado
+mediante el `LLMProvider` existente con un prompt interno separado, sin
 tools y con reglas explicitas para no generar diagnosticos ni recomendaciones
 clinicas. El cuerpo final queda listo para conservarse antes del envio, de modo que
 un reintento no dependa de una nueva interpretacion del historial.

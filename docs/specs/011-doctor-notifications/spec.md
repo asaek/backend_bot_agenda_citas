@@ -82,6 +82,12 @@ debe conservar los datos relevantes para la atencion del doctor. No debe present
 un diagnostico, una recomendacion clinica ni una transcripcion completa como si
 fuera una nota clinica.
 
+Debe sintetizar lo que el paciente conto: motivo de consulta, molestias, dudas y
+detalles relevantes expresados para su atencion. No debe repetir la fecha, el
+horario, la zona horaria, el estado ni la confirmacion de la cita, incluso si esos
+datos aparecen en el historial. Si solo se expreso un motivo general, basta con
+resumir esa solicitud sin inventar sintomas ni informacion adicional.
+
 El resumen se genera como parte de la notificacion del evento de cita. No se envia
 un resumen despues de cada mensaje ni se crea una notificacion independiente de
 resumen.
@@ -159,6 +165,9 @@ y no debe guardar credenciales en la base ni en el repositorio.
     `sudden_vision_loss` cuando el LLM aporta evidencia literal del motivo o historial actual.
 14. Un motivo rutinario puede incorporar un sintoma del historial actual; evidencia
     inventada, negada, de una cita anterior, del asistente o posterior al evento se descarta.
+15. Para una revision de los ojos, el resumen describe la solicitud del paciente sin
+    repetir `19/10/2026, de 14:00 a 14:30 (UTC−06:00)` ni confirmar otra vez la cita;
+    los datos operativos se presentan en los bloques correspondientes del mensaje.
 
 ## Fuera del alcance
 
