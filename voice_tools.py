@@ -7,6 +7,7 @@ import unicodedata
 from datetime import timedelta
 
 from agent_orchestrator import execute_agent_tool, serialize_tool_result
+from appointment_availability import format_patient_time
 from calendar_domain import PatientScope, ToolName, ToolRequest
 from llm_provider import ToolCall
 from booking_details import BookingDetails
@@ -21,6 +22,11 @@ from conversation_intent import PendingConversationFlow, PendingInterruption, cl
 
 
 MUTATIONS = {"create_appointment", "cancel_appointment", "reschedule_appointment"}
+
+
+def _format_voice_appointment_datetime(value, timezone):
+    local = value.astimezone(timezone)
+    return f"{format_patient_time(local)} del {local:%d/%m/%Y}"
 
 
 def prompt_fingerprint(text: str) -> str:
@@ -152,15 +158,15 @@ class VoiceTools:
                 raise ValueError("El horario ya no esta disponible; consulta otra opcion")
         if not self._current(turn, generation):
             raise ValueError("El turno fue reemplazado; solicita una propuesta nueva")
-        local = start_at.astimezone(self.executor.business_hours.timezone)
-        when = local.strftime("%Y-%m-%d a las %I:%M %p")
+        timezone = self.executor.business_hours.timezone
+        when = _format_voice_appointment_datetime(start_at, timezone)
         if name == "create_appointment":
-            prompt = f"¿Confirmas agendar la cita para el {when}, a nombre de {patient_name}, por {arguments['reason']}?"
+            prompt = f"¿Confirmas agendar la cita a las {when}, a nombre de {patient_name}, por {arguments['reason']}?"
         elif name == "reschedule_appointment":
-            old = appointment.start_at.astimezone(self.executor.business_hours.timezone).strftime("%Y-%m-%d a las %I:%M %p")
-            prompt = f"¿Confirmas cambiar la cita del {old}, por {appointment.reason}, al {when}?"
+            old = _format_voice_appointment_datetime(appointment.start_at, timezone)
+            prompt = f"¿Confirmas cambiar la cita de las {old}, por {appointment.reason}, a las {when}?"
         else:
-            prompt = f"¿Confirmas cancelar la cita del {when}, por {appointment.reason}?"
+            prompt = f"¿Confirmas cancelar la cita de las {when}, por {appointment.reason}?"
         action_id = await asyncio.to_thread(self.repository.propose, self.session_id, str(turn), {
             "name": name, "arguments": arguments, "patient_name": patient_name,
             "channel": channel, "channel_turn": channel_turn,

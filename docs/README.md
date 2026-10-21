@@ -121,6 +121,8 @@ esten aprobados.
   diagnostico del rechazo repetido y renovacion segura de la pregunta.
 - [Confirmacion de reprogramacion tras turnos VAD intermedios](./verification/2026-10-20-reschedule-confirmation-vad-loop.md):
   reproduccion del ciclo y confirmacion solo con transcripcion afirmativa del turno actual.
+- [Formato de fecha en confirmaciones habladas](./verification/2026-10-21-voice-mexican-date-format.md):
+  hora AM/PM primero, seguida de la fecha `DD/MM/YYYY`; regresion y recarga verificadas.
 
 ## Funcionalidad implementada y verificada por cortes
 

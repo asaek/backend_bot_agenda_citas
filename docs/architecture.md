@@ -109,7 +109,11 @@ intervencion. Las instrucciones comunes y la ejecucion validada de herramientas
 se reutilizan; el historial se transcribe en paralelo. Una transcripcion tardia
 no ejecuta acciones. Se distinguen generacion, emision, interrupcion y entrega
 escrita. Las confirmaciones de laboratorio verifican pregunta literal emitida y
-decision de un turno posterior. La continuidad con chat operativo sigue en C4.
+decision de un turno posterior. Su fecha y hora se presentan en español de México,
+primero la hora de inicio en 12 horas con AM/PM y despues la fecha `DD/MM/YYYY`.
+La [verificacion del formato](./verification/2026-10-21-voice-mexican-date-format.md)
+registra la regresion y la recarga del laboratorio. La continuidad con chat operativo
+sigue en C4.
 
 `laboratory_executor()` selecciona `FakeCalendarProvider` por defecto o el
 `GoogleCalendarProvider` cuando `VOICE_CALENDAR_PROVIDER=google`. En Google, el

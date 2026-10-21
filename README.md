@@ -146,6 +146,8 @@ falsa; crear, mover y cancelar preparan una propuesta, leen su pregunta y requie
 una decision en un turno posterior. El backend verifica emision completa, datos,
 vigencia, generacion y reclamacion durable. Una correccion o cierre anterior a la
 reclamacion impide ejecutar; una operacion ya reclamada conserva su resultado.
+La pregunta formula primero la hora de inicio en formato de 12 horas con AM/PM y
+despues la fecha `DD/MM/YYYY`, por ejemplo: `a las 10:00 AM del 19/10/2026`.
 
 Si respondes antes de que termine la pregunta de confirmacion, el bot conserva
 nombre, motivo y horario y vuelve a preguntar tras revisar la disponibilidad.

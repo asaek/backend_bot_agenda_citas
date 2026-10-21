@@ -75,6 +75,36 @@ class VoiceToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved[0]["reason"], "Revisión general")
         self.assertEqual(saved[0]["id"], self.provider.appointments[0].id)
 
+    async def test_confirmation_prompts_present_time_before_mexican_date(self):
+        booking = await self.propose()
+        self.assertEqual(
+            booking["confirmation_prompt"],
+            "¿Confirmas agendar la cita a las 10:00 AM del 19/10/2026, "
+            "a nombre de Asael Ponce, por Revisión general?",
+        )
+        self.arm(booking)
+        self.assertTrue((await self.confirm(booking))["ok"])
+
+        appointment_id = self.provider.appointments[0].id
+        move = await self.tools.execute("move-format", "reschedule_appointment", {
+            "appointment_id": appointment_id,
+            "new_start_at": "2026-10-19T11:00:00+00:00",
+        }, 3)
+        self.assertEqual(
+            move["confirmation_prompt"],
+            "¿Confirmas cambiar la cita de las 10:00 AM del 19/10/2026, "
+            "por Revisión general, a las 11:00 AM del 19/10/2026?",
+        )
+
+        cancel = await self.tools.execute(
+            "cancel-format", "cancel_appointment", {"appointment_id": appointment_id}, 4,
+        )
+        self.assertEqual(
+            cancel["confirmation_prompt"],
+            "¿Confirmas cancelar la cita de las 10:00 AM del 19/10/2026, "
+            "por Revisión general?",
+        )
+
     async def test_unemitted_changed_same_turn_or_expired_confirmation_renews_without_authorizing(self):
         for case in ("unemitted", "changed", "same-turn", "expired"):
             with self.subTest(case=case):

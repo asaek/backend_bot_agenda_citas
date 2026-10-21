@@ -157,6 +157,8 @@ Si VAD divide una afirmacion posterior y cancela una respuesta intermedia, el
 backend evalua solo la transcripcion vinculada al turno actual (espera maxima: 1 s).
 Una afirmacion inequivoca puede confirmar la propuesta vigente; si falta o es
 ambigua, renueva la pregunta sin mutar la cita (ADR 0060).
+Las preguntas habladas presentan la hora en formato de 12 horas con AM/PM antes
+de la fecha `DD/MM/YYYY`, conforme al español de México.
 
 El incremento de medicion del 20 de octubre agrega latencias por turno,
 interrupcion local, herramientas, recursos/colas y costo estimado con transcripcion.

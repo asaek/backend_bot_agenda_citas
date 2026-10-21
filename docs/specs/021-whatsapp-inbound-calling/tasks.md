@@ -210,6 +210,15 @@ laboratorio estan en [la verificacion del 20 de octubre](../../verification/2026
 La [verificacion del limite de sesiones](../../verification/2026-10-20-voice-session-quota.md)
 documenta el 429 accionable y el conteo persistente del perfil.
 
+### Formato de fecha en confirmaciones habladas (21 de octubre)
+
+- [x] Presentar primero la hora de inicio en 12 horas con AM/PM y despues la
+      fecha `DD/MM/YYYY` en español de México.
+- [x] Agregar regresion de formato para crear, reprogramar y cancelar.
+- [x] Sincronizar y verificar la regresion y suite de voz en la Raspberry Pi.
+
+Ver [causa y verificacion del formato](../../verification/2026-10-21-voice-mexican-date-format.md).
+
 ## C4 - Agenda, continuidad y autorizacion de voz
 
 ### Continuidad de laboratorio aprobada (ADR 0057)

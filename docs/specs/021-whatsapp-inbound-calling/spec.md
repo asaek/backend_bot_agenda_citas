@@ -167,7 +167,10 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   presentar la operacion y sus datos, y recibir una afirmacion explicita posterior
   en la misma llamada. Para reservar se repiten nombre completo, fecha, hora y
   motivo; para cambios se identifica la cita y, al reprogramar, el nuevo horario.
-   La pregunta debe haberse emitido completa antes de aceptar la autorizacion.
+  Las preguntas expresan primero la hora de inicio en formato de 12 horas con
+  AM/PM y despues la fecha en orden dia/mes/año (`DD/MM/YYYY`), conforme al
+  español de México; por ejemplo: `a las 10:00 AM del 19/10/2026`.
+  La pregunta debe haberse emitido completa antes de aceptar la autorizacion.
    Una afirmacion durante una pregunta interrumpida solicita una nueva confirmacion.
    En laboratorio, intentar confirmar esa propuesta en la misma llamada y canal
    conserva nombre, motivo y horario, revalida la agenda y devuelve una pregunta

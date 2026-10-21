@@ -87,7 +87,10 @@ siguen pendientes.
   El estado `listening` exige que todos los elementos de salida hayan drenado.
 - `VoiceTools` comparte instrucciones, esquemas, validadores y ejecucion con chat.
   El nombre y motivo se validan antes de proponer; el modelo no elige identidad.
-    Una pregunta debe coincidir con el texto backend y haberse emitido completa.
+    La fecha y hora de cada pregunta se formatean en español de México: hora de
+    inicio en 12 horas con AM/PM seguida de fecha `DD/MM/YYYY`, por ejemplo
+    `a las 10:00 AM del 19/10/2026`. Una pregunta debe coincidir con el texto
+    backend y haberse emitido completa.
     Confirmar requiere la misma propuesta, sesion/canal y generacion vigente. La
     secuencia normal es el turno siguiente; si VAD cancela una respuesta intermedia,
     el backend liga la transcripcion al turno actual y espera hasta 1 s. Solo una
