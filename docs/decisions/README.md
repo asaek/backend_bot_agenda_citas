@@ -63,4 +63,16 @@ indique cual decision anterior queda obsoleta.
 - [0052 - Solo el inicio con AM/PM en las horas de citas del paciente](./0052-start-only-patient-appointment-times.md)
 - [0053 - Bloques compartidos de cita y paciente en confirmaciones](./0053-shared-appointment-confirmation-blocks.md)
 - [0054 - Llamadas entrantes con autorizacion ligada al origen](./0054-inbound-calling-with-scoped-confirmation.md)
-  — propuesta; sin implementacion ni biblioteca de audio adoptada.
+  — propuesta para Calling y autorizaciones; laboratorio delimitado en ADR 0055.
+- [0055 - Laboratorio aislado con aiortc y Opus](./0055-isolated-aiortc-audio-laboratory.md)
+  — aceptada para audio de laboratorio en Raspberry Pi.
+- [0056 - Voz nativa con OpenAI Realtime en laboratorio](./0056-native-realtime-voice-laboratory.md)
+  — aceptada para voz nativa y herramientas de laboratorio; Meta/continuidad operativa pendientes.
+- [0057 - Continuidad ficticia entre voz y texto](./0057-laboratory-voice-text-continuity.md)
+  — aceptada, con pruebas de canales, publicacion, historial y OpenAI real.
+- [0058 - Google Calendar opcional para el laboratorio Realtime](./0058-google-calendar-for-realtime-laboratory.md)
+  — agenda falsa por defecto; modo Google explicito y propietario separado de WhatsApp.
+- [0059 - Sesiones ilimitadas temporalmente en el laboratorio de voz](./0059-unlimited-voice-lab-sessions.md)
+  — override explicito de pruebas; default 5 y cuota diaria pendiente.
+- [0060 - Confirmacion explicita tras turnos VAD intermedios](./0060-explicit-voice-confirmation-after-vad-turns.md)
+  — permite la secuencia posterior solo con transcripcion afirmativa actual y pregunta completa.

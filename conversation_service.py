@@ -5,6 +5,8 @@ import json
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from agent_instructions import COMMON_AGENT_INSTRUCTIONS
+from booking_details import BookingDetails
 from appointment_confirmation import (
     ConfirmationDecision,
     PendingAppointmentAction,
@@ -154,14 +156,7 @@ APPOINTMENT_AVAILABILITY_EXPIRED_REPLY = (
 )
 SYSTEM_PROMPT = "\n".join(
     (
-        "Responder en español.",
-        "Ser breve y claro.",
-        "No inventar citas, horarios o datos.",
-        "No afirmar que realizó acciones externas.",
-        "No proporcionar diagnósticos médicos.",
-        "Pedir aclaración cuando falte información.",
-        "Conservar todas las partes del nombre proporcionado por el paciente. No corregir, "
-        "abreviar ni omitir apellidos; el backend controla su validacion y confirmacion.",
+        *COMMON_AGENT_INSTRUCTIONS,
         "Prioriza la intención más reciente del paciente. Si abandona o cambia una "
         "solicitud pendiente, no insistas en completar el flujo anterior.",
         "Las preguntas informativas y saludos pueden pausar una gestión. Usa el estado "
@@ -1900,6 +1895,16 @@ class ConversationService:
                 attempt_count=evaluated_pending_reason.attempt_count,
             )
 
+        try:
+            details = BookingDetails.from_patient_texts(
+                self._load_patient_name(context.patient_id) or "", validation.normalized_text,
+            )
+        except ValueError:
+            self._save_pending_appointment_reason(context.conversation_id, replace(
+                evaluated_pending_reason, name_required=True, name_candidate=None,
+                name_clarification_message_id=None,
+            ))
+            return APPOINTMENT_NAME_REPLY
         self._save_last_appointment_reason_evaluation(
             context.conversation_id,
             attempt_count=evaluated_pending_reason.attempt_count,
@@ -1910,7 +1915,7 @@ class ConversationService:
             return CONTROLLED_FALLBACK_REPLY
 
         result = await self.agent_orchestrator.execute_confirmed_tool(
-            tool_call=pending_reason.to_tool_call(validation.normalized_text),
+            tool_call=pending_reason.to_tool_call(details.reason),
             patient_scope=context.patient_scope,
             incoming_message_id=context.incoming_message_id,
             on_appointment_event=appointment_event_sink,

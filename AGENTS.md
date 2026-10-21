@@ -41,12 +41,18 @@
 
 - Verify the health check and both webhook methods with the local `curl` commands documented in `README.md`.
 
+## Laboratory Access
+
+- For requests to open the test SSH tunnel or prepare `/lab` from the Mac, follow
+  `.agents/skills/lab-tunnel/SKILL.md`. It covers the Pi laboratory process,
+  tunnel reuse/startup and direct access checks. The laboratory requires no access token.
+
 ## Mirror Workflow
 
 - For `local to raspberry` requests, follow `.agents/skills/local-to-raspberry/SKILL.md`,
   including its full `.env` copy, backend restart and verification after synchronization.
 - Make all code and documentation changes in this local checkout only.
-- The execution mirror is `asaek@192.168.101.19:~/Downloads/chatbot_test_repo`.
+- The execution mirror is `asaek@192.168.1.12:~/Downloads/chatbot_test_repo`.
 - After every local change, synchronize the project files to the Raspberry Pi before compiling, running, or verifying anything; use the Raspberry Pi as the runtime environment.
 - Do not edit the Raspberry Pi copy directly. Keep source, documentation, and configuration paths mirrored, while excluding `.venv`, caches, and `.git`.
 - Transfer `.env` through the skill's configuration step; keep source and documentation edits local.

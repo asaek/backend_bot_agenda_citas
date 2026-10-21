@@ -12,5 +12,15 @@ dependencies = [
     "uvicorn>=0.35.0",
 ]
 
+[project.optional-dependencies]
+audio = [
+    "aiortc==1.14.0",
+    "av==16.1.0",
+    "numpy>=2.2.6,<3",
+]
+voice = [
+    "websockets>=15.0.1,<17",
+]
+
 [dependency-groups]
 dev = []

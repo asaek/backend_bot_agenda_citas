@@ -171,6 +171,7 @@ def create_google_calendar_provider_from_environment(
     environment: Mapping[str, str] | None = None,
     *,
     http_client: httpx.AsyncClient | None = None,
+    managed_by_value: str = MANAGED_BY_VALUE,
 ) -> "GoogleCalendarProvider":
     """Compone el adaptador usando variables de entorno y secretos externos."""
     values = os.environ if environment is None else environment
@@ -228,6 +229,7 @@ def create_google_calendar_provider_from_environment(
         ),
         timeout_seconds=timeout_seconds,
         http_client=http_client,
+        managed_by_value=managed_by_value,
     )
 
 
@@ -247,6 +249,7 @@ class GoogleCalendarProvider(CalendarProvider):
         base_url: str = GOOGLE_CALENDAR_API_BASE_URL,
         timeout_seconds: float = 20.0,
         http_client: httpx.AsyncClient | None = None,
+        managed_by_value: str = MANAGED_BY_VALUE,
     ) -> None:
         normalized_calendar_ids = tuple(calendar_ids)
         if not normalized_calendar_ids:
@@ -277,9 +280,11 @@ class GoogleCalendarProvider(CalendarProvider):
             raise GoogleCalendarConfigurationError(
                 "base_url debe utilizar HTTPS"
             )
+        _require_text(managed_by_value, "managed_by_value")
 
         self.calendar_ids = normalized_calendar_ids
         self.access_token_provider = access_token_provider
+        self.managed_by_value = managed_by_value
         self.timezone_name = timezone_name
         self._timezone = timezone_value
         self.base_url = base_url.rstrip("/")
@@ -545,7 +550,7 @@ class GoogleCalendarProvider(CalendarProvider):
                     (
                         (
                             "privateExtendedProperty",
-                            f"{MANAGED_BY_PROPERTY}={MANAGED_BY_VALUE}",
+                            f"{MANAGED_BY_PROPERTY}={self.managed_by_value}",
                         ),
                         (
                             "privateExtendedProperty",
@@ -597,7 +602,11 @@ class GoogleCalendarProvider(CalendarProvider):
                 )
             except _GoogleCalendarNotFound:
                 continue
-            if not _event_matches_patient(event, patient_scope):
+            if not _event_matches_patient(
+                event,
+                patient_scope,
+                managed_by_value=self.managed_by_value,
+            ):
                 raise AppointmentAccessDenied()
             if event.get("status") == AppointmentStatus.CANCELLED.value:
                 raise InvalidAppointmentState()
@@ -634,7 +643,11 @@ class GoogleCalendarProvider(CalendarProvider):
         *,
         patient_scope: PatientScope,
     ) -> Appointment | None:
-        if not _event_matches_patient(event, patient_scope):
+        if not _event_matches_patient(
+            event,
+            patient_scope,
+            managed_by_value=self.managed_by_value,
+        ):
             return None
 
         event_id = event.get("id")
@@ -698,8 +711,10 @@ class GoogleCalendarProvider(CalendarProvider):
             "visibility": "private",
             "extendedProperties": {
                 "private": {
-                    MANAGED_BY_PROPERTY: MANAGED_BY_VALUE,
-                    PATIENT_ID_PROPERTY: str(patient_scope.patient_id),
+                MANAGED_BY_PROPERTY: self.managed_by_value,
+                # Cada runtime puede usar un propietario distinto para impedir
+                # que sus citas aparezcan en otro canal sobre el mismo calendario.
+                PATIENT_ID_PROPERTY: str(patient_scope.patient_id),
                     CONVERSATION_ID_PROPERTY: str(patient_scope.conversation_id),
                 }
             },
@@ -821,11 +836,13 @@ def _event_has_whatsapp_marker(
 def _event_matches_patient(
     event: Mapping[str, object],
     patient_scope: PatientScope,
+    *,
+    managed_by_value: str = MANAGED_BY_VALUE,
 ) -> bool:
     private = _private_properties(event)
     if MANAGED_BY_PROPERTY in private or PATIENT_ID_PROPERTY in private:
         return (
-            private.get(MANAGED_BY_PROPERTY) == MANAGED_BY_VALUE
+            private.get(MANAGED_BY_PROPERTY) == managed_by_value
             and private.get(PATIENT_ID_PROPERTY) == str(patient_scope.patient_id)
         )
     return _event_has_whatsapp_marker(event, patient_scope.whatsapp_number)

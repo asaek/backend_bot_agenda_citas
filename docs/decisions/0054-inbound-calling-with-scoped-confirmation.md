@@ -3,8 +3,14 @@
 ## Estado
 
 Propuesta el 18 de octubre de 2026. Asociada al
-[corte 021](../specs/021-whatsapp-inbound-calling/spec.md); sin implementacion.
-No reemplaza las decisiones vigentes de texto ni adopta librerias de audio.
+[corte 021](../specs/021-whatsapp-inbound-calling/spec.md). Calling y autorizaciones
+siguen sin implementacion. El laboratorio A-E se implementa por separado y adopta
+su biblioteca de medios en la [ADR 0055](./0055-isolated-aiortc-audio-laboratory.md).
+
+Actualizacion del 19 de octubre: la cadena de voz propuesta aqui se reemplaza
+por audio nativo OpenAI Realtime en la [ADR 0056](./0056-native-realtime-voice-laboratory.md).
+Las autorizaciones operativas y continuidad entre canales de esta ADR siguen
+propuestas; las confirmaciones de laboratorio tienen identidad y agenda de prueba.
 
 ## Contexto y propuesta
 
@@ -35,8 +41,8 @@ el de reproduccion o entrega escrita.
 - Separar conversaciones por canal evitaria algunas colisiones, pero fragmentaria
   identidad y gestion y cambiaria el invariante de conversacion activa unica.
   La propuesta conserva ese invariante y hace explicita la transferencia.
-- `aiortc` es candidato para WebRTC, no una tecnologia aceptada. Se decide tras
-  comprobar su compatibilidad en la Raspberry, antes del corte de audio.
+- `aiortc` fue candidato en esta propuesta. Tras comprobar su compatibilidad en la
+  Raspberry se adopto solo para laboratorio en la ADR 0055; Meta sigue pendiente.
 - Una simulacion no prueba elegibilidad o medios de Meta. Las mutaciones externas
   inciertas necesitan conciliacion, no una promesa de ejecucion exactamente una vez.
 

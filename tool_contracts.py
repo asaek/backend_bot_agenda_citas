@@ -175,6 +175,28 @@ def llm_tool_definitions() -> list[dict[str, object]]:
     ]
 
 
+def realtime_tool_definitions() -> list[dict[str, object]]:
+    """Mismos esquemas de agenda, mas intake y confirmacion controlados para voz."""
+    definitions = [{"type": "function", **item["function"]} for item in llm_tool_definitions()]
+    for item in definitions:
+        if item["name"] == "create_appointment":
+            item["parameters"]["properties"]["patient_name"] = {"type": "string", "description": "Nombre completo dicho por el paciente, sin corregirlo."}
+            item["parameters"]["required"] = [*item["parameters"]["required"], "patient_name"]
+        if item["name"] in {"create_appointment", "reschedule_appointment", "cancel_appointment"}:
+            item["description"] += " Solo prepara una propuesta; el backend devuelve la pregunta de confirmacion."
+    definitions.append({"type": "function", "name": "confirm_appointment_action",
+        "description": "Comunica la decision explicita del paciente sobre la ultima pregunta del backend, en un turno posterior.",
+        "parameters": {"type": "object", "properties": {
+            "action_id": {"type": "string"},
+            "decision": {"type": "string", "enum": ["confirm", "reject", "correct"]},
+        }, "required": ["action_id", "decision"], "additionalProperties": False}})
+    definitions.append({"type": "function", "name": "manage_appointment_workflow",
+        "description": "Retoma una propuesta en este canal o inicia una gestion nueva solo cuando el paciente lo pide explicitamente. Retomar devuelve una pregunta y autorizacion nuevas.",
+        "parameters": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["resume", "new"]}},
+                       "required": ["mode"], "additionalProperties": False}})
+    return definitions
+
+
 @dataclass(frozen=True, slots=True)
 class CheckAvailabilityInput:
     patient_scope: PatientScope

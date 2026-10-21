@@ -52,12 +52,89 @@ del reporte. La configuracion efectiva del proceso debe coincidir con la copiada
 Las verificaciones incluyen rutas locales/publicas y autenticacion de Meta de
 solo lectura, para distinguir un webhook saludable de una credencial de envio valida.
 
-## Diseno propuesto: llamadas entrantes (021)
+## Laboratorio de audio implementado (021, A-E)
+
+```text
+Navegador de laboratorio <--- HTTP oferta/respuesta + ICE completo ---> main:create_lab_app
+           |                                                               |
+           +------------------- WebRTC / Opus ----------------> AiortcCallMedia
+                                                                           |
+                                           CallingService (lifespan, plazos, cierre)
+                                                                           |
+                                            CallingRepository -> SQLite de laboratorio
+```
+
+La factory crea otra aplicacion y proceso, habilitado explicitamente, sin token
+de acceso y con base exclusiva; escucha en loopback y se accede mediante SSH.
+`main:app` no publica `/lab` ni `/lab/calls`. Una llamada global por base/proceso,
+cierre idempotente y tareas supervisadas. El saludo WAV se emite al detectar senal
+de entrada; sus estados y metricas se conservan sin SDP ni audio recibido.
+La agenda operativa se compone en el lifespan de texto, evitando efectos al
+importar la factory. `aiortc`/PyAV se importan solo al arrancar el laboratorio,
+mediante el extra opcional `audio` (ADR 0055).
+
+El boton **Conectar e iniciar llamada** comprueba HTTP con `GET /lab/health`
+automaticamente antes de reservar una sesion, sin campo ni cabecera de token, y
+observa ICE, par host/protocolo, contadores RTP y reproduccion por separado. Para
+usar microfono desde la computadora se sirve en localhost mediante SSH (o HTTPS);
+HTTP en una IP LAN no basta. El tunel transporta senalizacion, mientras los medios
+usan candidatos host y UDP directo. No se han incorporado STUN/TURN; se evaluaran
+segun la conectividad observada. El ngrok del webhook apunta al backend de texto.
+
+Se comprobaron tonos bidireccionales y reproduccion Chromium/backend en la misma
+Raspberry, candidatos host y Opus. La [verificacion](./verification/2026-10-18-aiortc-audio-laboratory.md)
+incluye CPU, memoria, desconexion y apagado. Tambien se comprobo
+[Chrome en la computadora y backend Pi por LAN](./verification/2026-10-18-webrtc-client-lan.md),
+con medios UDP directos sin STUN/TURN. Escucha fisica, microfono real y
+conectividad fuera de esa frontera siguen pendientes.
+
+## Diseno propuesto: integracion de llamadas entrantes (021)
+
+### Arquitectura aprobada de voz nativa (ADR 0056)
+
+```text
+Navegador / futuro Meta <-- WebRTC/Opus --> AiortcCallMedia
+                                               |
+                                          VoiceSession
+                                               |
+                                    OpenAI Realtime (WebSocket PCM24k)
+                                               |
+                            VoiceTools -> validadores/ToolExecutor -> fake | Google
+                                               |
+                                VoiceRepository (SQLite de voz exclusiva)
+```
+
+El modelo recibe audio y genera audio. El agente de texto no participa en cada
+intervencion. Las instrucciones comunes y la ejecucion validada de herramientas
+se reutilizan; el historial se transcribe en paralelo. Una transcripcion tardia
+no ejecuta acciones. Se distinguen generacion, emision, interrupcion y entrega
+escrita. Las confirmaciones de laboratorio verifican pregunta literal emitida y
+decision de un turno posterior. La continuidad con chat operativo sigue en C4.
+
+`laboratory_executor()` selecciona `FakeCalendarProvider` por defecto o el
+`GoogleCalendarProvider` cuando `VOICE_CALENDAR_PROVIDER=google`. En Google, el
+propietario de evento `whatsapp_voice_lab` permite que el perfil ficticio liste y
+modifique sus eventos sin que el adaptador operativo de WhatsApp los presente como
+citas de pacientes (`whatsapp_chatbot`). Google conserva la fuente de verdad; la
+SQLite de voz no intenta reconstruir snapshots de un proveedor remoto. El cliente
+HTML y `/lab/health` muestran el proveedor activo.
+
+`VoiceMetrics` conserva medidas escalares por turno y costo estimado por sesion
+con transcripcion separada. Primer PCM recibido, primer frame emitido por la pista
+y señal en el renderizador del navegador tienen referencias distintas y explicitas.
+Se registran herramientas, corte local, CPU/RSS y colas; ningun contador acredita
+escucha humana ni convierte una muestra en garantia de p50/p95. Ver CA-18 de 021.
+El maximo configurable por sesion Realtime es de 300 s; la inactividad real de
+30 s y la cuota total por perfil se mantienen separadas. `VOICE_MAX_SESSIONS` usa
+5 por defecto y acepta `unlimited` para el entorno de pruebas actual. Al agotar un
+maximo numerico, el endpoint informa HTTP 429 con el conteo persistente; reiniciar
+no lo borra. La cuota diaria queda pendiente antes de uso operativo.
 
 La [especificacion 021](./specs/021-whatsapp-inbound-calling/spec.md) y su
-[diseno](./specs/021-whatsapp-inbound-calling/design.md) son un borrador para
-revision. El runtime mostrado en `Arquitectura actual` sigue procesando texto;
-los componentes siguientes no estan implementados ni sus dependencias instaladas.
+[diseno](./specs/021-whatsapp-inbound-calling/design.md) mantienen propuesta la
+integracion con Meta y autorizaciones/continuidad operativas. El runtime de texto
+sigue separado del laboratorio implementado. Los siguientes componentes no
+representan una integracion Calling disponible.
 
 ```text
 Meta Calling / simulador
@@ -74,13 +151,13 @@ Servicio de llamadas <-> cliente Calling HTTP / fake
 Transporte de audio <-> Meta / interlocutor de laboratorio
         |
         v
-Transcripcion final -> turno con origen -> ConversationService
+Audio nativo <-> OpenAI Realtime <-> turno consolidado
                                              |
                                              v
                                    Herramientas de agenda
                                              |
                                              v
-Audio <- sintesis <- presentacion oral del resultado
+Audio <- respuesta nativa del modelo y resultado validado
 ```
 
 La propuesta de [ADR 0054](./decisions/0054-inbound-calling-with-scoped-confirmation.md)
@@ -96,11 +173,41 @@ repetir una operacion de agenda. Las sesiones abiertas tras reiniciar quedaran
 interrumpidas, sin reanudar automaticamente audio o herramientas.
 
 Los cortes empiezan con dobles sin red y audio de laboratorio en la Raspberry.
-`aiortc` es candidato sujeto a prueba; STT/TTS y conectividad ICE/STUN/TURN se
-concretaran antes de sus verificaciones. El numero real y Calling habilitado
+`aiortc` esta adoptado para laboratorio en la ADR 0055 y OpenAI Realtime para
+voz nativa en la ADR 0056. La conectividad ICE/STUN/TURN hacia Meta se concretara
+antes de su verificacion. El numero real y Calling habilitado
 solo bloquean el corte conectado a Meta. Una prueba de laboratorio o un webhook
 saludable no acreditan audio de WhatsApp. El detalle y las salidas por corte estan
 en [tasks.md](./specs/021-whatsapp-inbound-calling/tasks.md).
+
+## Continuidad del paciente ficticio de laboratorio (ADR 0057)
+
+`/lab/messages` y `/lab/history` comparten el perfil del servidor, su historial y
+proveedor de agenda con la voz. Fake es el default; Google se selecciona
+explicitamente y escribe eventos reales bajo el propietario de laboratorio. Si hay
+llamada, el texto entra en esa sesion Realtime;
+sin llamada `LaboratoryTextConversation` mantiene una conexion textual limitada.
+El cambio a voz cierra primero esa conexion. `BookingDetails` concentra la
+validacion final de nombre/motivo compartida con `ConversationService`.
+
+Canal, secuencia y generacion los fija el backend. Retomar conserva datos y crea
+otra pregunta/propuesta, sin transferir autorizaciones. Los turnos conservan
+`generation_state`, `state`, `generated_ms` y `emitted_ms`: las transcripciones
+actualizan su clave/orden original, y una salida interrumpida no se presenta como
+completa. El texto solo se marca publicado despues de emitir el cuerpo HTTP;
+los resultados pendientes de escritura se reintentan sin volver a invocar al modelo.
+La continuidad con el bot/paciente operativo sigue delimitada en C4/C5.
+
+Una pregunta de reserva cortada pierde su autorizacion, no sus datos. `VoiceTools`
+conserva aparte la propuesta interrumpida durante la llamada; confirmar su ID en
+el canal propietario vuelve a validar/preparar y retorna otra pregunta con ID
+nuevo. Solo otra afirmacion tras emitirla completa ejecuta la accion. Rechazo,
+correccion, nueva gestion y cierre descartan esa recuperacion local (ADR 0057).
+Si una respuesta intermedia Realtime se cancela y crea un salto de secuencia,
+`VoiceSession` liga la transcripcion al turno actual y espera hasta 1 s. Una
+afirmacion inequivoca de ese turno, para la propuesta vigente cuya pregunta se
+emitio completa, permite confirmarla. Sin transcripcion clara se renueva la
+pregunta; no se utiliza texto de turnos anteriores ni de otra sesion (ADR 0060).
 
 ## Arquitectura objetivo
 
@@ -607,6 +714,12 @@ Es la fuente de verdad opcional de la agenda del medico durante el MVP tecnico.
 Alli se administran las citas, los dias no laborables y los espacios bloqueados
 manualmente. El backend lo consulta y modifica mediante herramientas controladas;
 el LLM no recibe credenciales ni acceso directo al calendario.
+
+`GoogleCalendarProvider` usa por defecto el propietario privado
+`managed_by=whatsapp_chatbot`. El laboratorio Realtime puede inyectar el valor
+`whatsapp_voice_lab` en el mismo adaptador: sus operaciones quedan en el calendario
+configurado, pero el backend de WhatsApp no los lista ni modifica como citas
+operativas.
 
 Cada cita creada por el chatbot ocupara 30 minutos. Antes de ofrecer o reservar
 un horario, el backend debera comprobar tanto que el espacio no este ocupado

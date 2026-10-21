@@ -24,6 +24,7 @@ from google_calendar_provider import (
     StaticAccessTokenProvider,
     create_google_calendar_provider_from_environment,
 )
+from voice_session import VOICE_LAB_MANAGED_BY_VALUE
 
 
 class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
@@ -50,13 +51,18 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
 
-    def provider_for(self, *calendar_ids: str) -> GoogleCalendarProvider:
+    def provider_for(
+        self,
+        *calendar_ids: str,
+        managed_by_value: str = MANAGED_BY_VALUE,
+    ) -> GoogleCalendarProvider:
         return GoogleCalendarProvider(
             calendar_ids=calendar_ids,
             access_token_provider=StaticAccessTokenProvider("test-token"),
             timezone_name="UTC",
             base_url="https://calendar.test/v3",
             http_client=self.client,
+            managed_by_value=managed_by_value,
         )
 
     async def test_check_availability_queries_all_configured_calendars(self) -> None:
@@ -110,6 +116,44 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(body["description"], "Revision corneal")
+
+    async def test_voice_lab_owner_marker_is_separate_from_whatsapp_appointments(self) -> None:
+        self.mode = "create-voice-lab"
+        voice_provider = self.provider_for(
+            "calendar-1",
+            managed_by_value=VOICE_LAB_MANAGED_BY_VALUE,
+        )
+
+        await voice_provider.create_appointment(
+            patient_scope=self.patient,
+            start_at=self.start,
+            reason="Revision de prueba",
+        )
+
+        event_request = self.requests[1]
+        body = json.loads(event_request.content)
+        self.assertEqual(
+            body["extendedProperties"]["private"][MANAGED_BY_PROPERTY],
+            VOICE_LAB_MANAGED_BY_VALUE,
+        )
+        event = self._event(
+            "voice-event",
+            managed_by_value=VOICE_LAB_MANAGED_BY_VALUE,
+        )
+        self.assertIsNone(
+            self.provider_for("calendar-1")._translate_event(
+                "calendar-1",
+                event,
+                patient_scope=self.patient,
+            )
+        )
+        self.assertIsNotNone(
+            voice_provider._translate_event(
+                "calendar-1",
+                event,
+                patient_scope=self.patient,
+            )
+        )
 
     async def test_list_follows_pages_and_requires_private_metadata(self) -> None:
         self.mode = "list"
@@ -339,10 +383,15 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
         path = request.url.path
         if self.mode == "availability" and path.endswith("/freeBusy"):
             return self._freebusy_response(request, busy_calendar="calendar-1")
-        if self.mode == "create" and path.endswith("/freeBusy"):
+        if self.mode in {"create", "create-voice-lab"} and path.endswith("/freeBusy"):
             return self._freebusy_response(request)
-        if self.mode == "create" and request.method == "POST":
-            event = self._event("event-1")
+        if self.mode in {"create", "create-voice-lab"} and request.method == "POST":
+            owner = (
+                VOICE_LAB_MANAGED_BY_VALUE
+                if self.mode == "create-voice-lab"
+                else MANAGED_BY_VALUE
+            )
+            event = self._event("event-1", managed_by_value=owner)
             event["description"] = json.loads(request.content)["description"]
             return self._json_response(request, event)
         if self.mode == "list" and request.method == "GET":
@@ -506,6 +555,7 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
         status: str = "confirmed",
         managed: bool = True,
         minimal: bool = False,
+        managed_by_value: str = MANAGED_BY_VALUE,
     ) -> dict[str, object]:
         private = {
             PATIENT_ID_PROPERTY: str(
@@ -514,7 +564,7 @@ class GoogleCalendarProviderTests(unittest.IsolatedAsyncioTestCase):
             CONVERSATION_ID_PROPERTY: str(self.patient.conversation_id),
         }
         if managed:
-            private[MANAGED_BY_PROPERTY] = MANAGED_BY_VALUE
+            private[MANAGED_BY_PROPERTY] = managed_by_value
         if minimal:
             return {
                 "id": event_id,

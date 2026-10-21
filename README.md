@@ -10,6 +10,235 @@ persistencia conversacional y pruebas sin consumir API mediante un
 uv sync
 ```
 
+### Laboratorio de audio WebRTC
+
+El laboratorio tiene una aplicacion independiente y una base de prueba. Para
+instalar las versiones de audio comprobadas, desde la raiz del mirror de la Pi:
+
+```bash
+~/.local/bin/uv sync --locked --extra audio
+.venv/bin/python scripts/probe_aiortc.py --seconds 10
+```
+
+Para abrir el cliente, habilita el laboratorio e inicia su proceso:
+
+```bash
+export LAB_CALLS_ENABLED=true
+export LAB_AUDIO_MODE=greeting
+export LAB_DATABASE_PATH=data/calling-lab.sqlite3
+.venv/bin/uvicorn main:create_lab_app --factory --host 127.0.0.1 --port 8001 \
+  --no-access-log --no-proxy-headers
+```
+
+Desde tu computadora, en otra terminal:
+
+```bash
+ssh -N -L 8001:127.0.0.1:8001 asaek@192.168.1.12
+```
+
+Abre `http://localhost:8001/lab` y pulsa **Conectar e iniciar llamada**, sin token.
+El tono de 440 Hz permite probar sin microfono; tambien puedes seleccionar
+microfono, escuchar el saludo y pulsar **Colgar**. El tunel SSH transporta la
+senalizacion HTTP; los medios usan conectividad WebRTC directa. Para otro equipo,
+empieza en la misma LAN: esa ruta necesita su propia comprobacion.
+
+#### Cliente y red: computadora -> Raspberry
+
+Para preparar este acceso con el agente, usa **`/lab-tunnel`** o pide
+**«levanta el tunel de pruebas»**. La skill [lab-tunnel](.agents/skills/lab-tunnel/SKILL.md)
+comprueba/inicia el laboratorio de la Pi, reutiliza/abre el forwarding SSH y verifica
+el acceso directo desde el Mac. Por defecto usa
+Realtime; puedes pedir el saludo sin API. El flujo incluye recuperar el acceso
+despues de reiniciar cualquiera de los equipos.
+
+El microfono y los altavoces pertenecen a tu computadora; la Pi recibe y procesa
+los frames por red. El cliente y la API se sirven desde el mismo origen, sin
+configurar CORS. `http://localhost:8001/lab` mediante SSH es un contexto confiable
+para solicitar microfono. `http://192.168.1.12:8001` no lo es: una URL HTTP de
+LAN no habilita el microfono por estar en la misma red. HTTPS tambien es valido.
+
+1. Con ambos equipos en la misma LAN, inicia el laboratorio en la Pi y el tunel
+   SSH anterior en tu computadora. Mantiene la API en `127.0.0.1:8001` en la Pi.
+2. Selecciona **Tono de prueba de 440 Hz** y pulsa **Conectar e iniciar llamada**.
+   El mismo boton comprueba HTTP automaticamente y comienza la llamada.
+   La senalizacion debe mostrar `HTTP 200; señalización accesible`.
+3. En Conectividad
+   deben aparecer ICE `connected`/`completed`, conexion `connected`, par host/host
+   UDP y contadores RTP de envio/recepcion crecientes. En la sesion de la Pi,
+   `non_silent_frames` debe aumentar y el saludo pasar a `completed`.
+4. Escucha el saludo en los altavoces de tu computadora. Si llegan paquetes pero
+   el audio esta pausado, pulsa Reproducir en el control; revisa volumen y salida
+   de audio. La recepcion RTP y la emision `completed` no sustituyen esta escucha.
+5. Pulsa **Colgar**, selecciona **Micrófono**, vuelve a conectar, concede permiso
+   y habla para activar el saludo. Colgar debe liberar la sesion y permitir otra.
+
+Si HTTP funciona pero ICE falla, revisa VPN, aislamiento de clientes Wi-Fi y
+firewalls que bloqueen UDP entre los equipos. Los puertos UDP de medios son
+dinamicos: reenviar solo TCP 8001 no los transporta. Esta primera prueba no usa
+STUN/TURN. El tunel HTTP de ngrok actual apunta al backend de texto en 8000;
+aunque otro tunel sirviera el cliente/senalizacion por HTTPS, no acreditaria audio.
+STUN/TURN se evaluara despues de observar una ruta que no conecte directamente.
+
+La API del laboratorio funciona sin token ni cabecera `Authorization`.
+El proceso sigue habilitandose explicitamente y escuchando en loopback con acceso SSH:
+
+- `GET /lab/health`: HTTP 200 con `{"status":"ok","mode":"laboratory","audio_mode":"greeting"}`;
+  prueba de senalizacion sin asignar recursos de medios.
+- `POST /lab/calls`: JSON `{"type":"offer","sdp":"..."}` con candidatos completos.
+  Devuelve 201, `session_id`, respuesta SDP y modo `laboratory`.
+- `GET /lab/calls/{session_id}`: estado, saludo, metricas y eventos seguros.
+- `DELETE /lab/calls/{session_id}`: cierre idempotente y resultado de liberacion.
+
+Solo se admite una sesion activa. Los limites predeterminados son 20 s para
+negociar, 60 s sin audio entrante y 600 s de duracion maxima. `main:app` no
+publica estas rutas. El saludo fijo esta en `assets/lab-greeting.wav`.
+Si SQLite no permite finalizar, el audio se cierra igualmente y la API devuelve
+503: pulsa **Colgar** otra vez para persistir el resultado cuando se recupere.
+
+Verificacion automatizada en la Pi:
+
+```bash
+~/.local/bin/uv run --locked --extra audio python -m unittest discover -s tests -v
+~/.local/bin/uv run --no-project --with playwright==1.56.0 --with httpx \
+  python scripts/verify_lab_browser.py
+```
+
+El segundo comando utiliza `/usr/bin/chromium` y crea/cierra su propio backend,
+puerto y base temporal. Comprueba reproduccion y cierres desde el cliente
+real. Las [medidas y fronteras verificadas](docs/verification/2026-10-18-aiortc-audio-laboratory.md)
+incluyen Opus, CPU y memoria. La [verificacion LAN](docs/verification/2026-10-18-webrtc-client-lan.md)
+acredita tambien Chrome en la computadora contra la Pi, con UDP directo sin
+STUN/TURN. La escucha fisica y el microfono real quedan como comprobacion manual.
+
+### Conversacion de voz nativa con OpenAI Realtime
+
+El modo `realtime` recibe audio directamente del navegador, lo envia desde la Pi
+a OpenAI por WebSocket y reproduce la voz generada. La transcripcion se guarda
+en paralelo; el agente de texto no se ejecuta por cada intervencion.
+
+Desde la raiz del mirror de la Pi, instala ambos extras y usa el tunel SSH
+descrito arriba:
+
+```bash
+~/.local/bin/uv sync --locked --extra audio --extra voice
+export LAB_CALLS_ENABLED=true LAB_AUDIO_MODE=realtime
+.venv/bin/uvicorn main:create_lab_app --factory --host 127.0.0.1 --port 8001 \
+  --no-access-log --no-proxy-headers
+```
+
+Se requiere `OPENAI_REALTIME_API_KEY` o `OPENAI_API_KEY` en la configuracion secreta.
+El modelo de texto y sus credenciales genericas no se usan para voz. Las opciones
+de `.env.example` incluyen `VOICE_MODEL=gpt-realtime-2.1`, `VOICE_VOICE=marin` y
+`VOICE_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe`. La transcripcion puede tener
+cargo separado. La sesion inicial dura hasta 300 s (5 minutos), espera hasta 30 s de verdadera
+inactividad. `VOICE_MAX_SESSIONS` limita a cinco sesiones por perfil por defecto y
+acepta `unlimited` para pruebas controladas. Es una cuota de sesiones, no un limite
+monetario de OpenAI; la cuota diaria queda pendiente antes de uso operativo.
+
+En `http://localhost:8001/lab`, deja **Micrófono** y pulsa **Conectar e iniciar llamada**.
+Tambien puedes elegir **Muestra de voz (archivo)**: acepta hasta 30 s/2 MB y envia
+la muestra despues del saludo del modelo. `assets/voice-availability-sample.wav`
+pregunta por disponibilidad de mañana y permite probar una herramienta sin microfono.
+El tono de 440 Hz sirve a la prueba de transporte, no como intervencion hablada.
+
+El backend fija `VOICE_LAB_PROFILE` e identidad de prueba. Consulta una agenda
+falsa; crear, mover y cancelar preparan una propuesta, leen su pregunta y requieren
+una decision en un turno posterior. El backend verifica emision completa, datos,
+vigencia, generacion y reclamacion durable. Una correccion o cierre anterior a la
+reclamacion impide ejecutar; una operacion ya reclamada conserva su resultado.
+
+Si respondes antes de que termine la pregunta de confirmacion, el bot conserva
+nombre, motivo y horario y vuelve a preguntar tras revisar la disponibilidad.
+La respuesta anticipada no reserva: confirma otra vez cuando termine la pregunta
+nueva. Esa interrupcion no debe exigir repetir tus datos ni anunciar sesion perdida.
+Si VAD divide la afirmacion en turnos intermedios y cancela una respuesta, el backend
+espera hasta un segundo la transcripcion del turno vigente. Solo una afirmacion clara
+de ese turno puede confirmar la misma propuesta, si la pregunta se emitio completa;
+si falta o es ambigua, vuelve a preguntar sin modificar la cita.
+
+El panel **Mensajes del mismo paciente ficticio** permite escribir durante la
+llamada o despues de colgar. Comparte identidad, historial y agenda con la voz.
+Durante una llamada usa su conexion Realtime; sin llamada mantiene una sesion de
+texto acotada por los mismos plazos y cuota de conexiones. No usa el numero ni
+los pacientes operativos de WhatsApp. Para continuar una propuesta en otro canal,
+escribe **Retomemos la cita** y responde a la pregunta nueva: un `si` escrito no
+confirma la pregunta de voz. Una gestion nueva reemplaza la anterior.
+
+`POST /lab/messages` recibe `{"message_id":"id-unico","text":"..."}` con el
+acceso directo sin token. Hasta 2000 caracteres; no acepta identidad/canal del cliente.
+Reintentar el mismo ID/cuerpo devuelve la misma respuesta, incluso tras un fallo
+de escritura; otro cuerpo con el mismo ID se rechaza. `GET /lab/history` devuelve
+el historial del perfil fijo, con `channel`, `generation_state`, `state`,
+`generated_ms` y `emitted_ms`. Publicar texto de laboratorio no significa enviar
+un mensaje de WhatsApp. Una pregunta textual solo se habilita para confirmar
+despues de publicar el cuerpo HTTP completo.
+Ver [controles y continuidad del paciente ficticio](docs/verification/2026-10-19-voice-text-controls.md).
+
+`VOICE_DATABASE_PATH` es una SQLite exclusiva, diferente de llamadas y pacientes.
+Si se omite se deriva del nombre de `LAB_DATABASE_PATH` con sufijo `-voice`.
+Conserva perfil, transcripciones, estados de emision, propuestas, resultados y
+agenda falsa entre sesiones. `VOICE_CALENDAR_PROVIDER=fake` mantiene esa agenda
+simulada y es el valor por defecto. `VOICE_CALENDAR_PROVIDER=google` conecta la
+pagina HTML Realtime a los calendarios de `GOOGLE_CALENDAR_IDS`, usando las
+credenciales y zona horaria existentes. Las reservas confirmadas en este modo son
+eventos reales; el cliente y `/lab/health` muestran el proveedor activo.
+Los eventos de voz usan `managed_by=whatsapp_voice_lab`, de modo que el backend
+operativo de WhatsApp no los presenta ni modifica como citas de pacientes. La
+identidad del laboratorio sigue siendo ficticia; las reservas simuladas existentes
+no se migran a Google automaticamente. Las transcripciones ausentes dejan marcadores;
+las tardias completan historial sin ejecutar acciones. El audio permanece temporal.
+`metrics.voice_usage` registra por modelo tokens de audio/texto/cache y transcripcion.
+El panel **Rendimiento y consumo** muestra `metrics.voice_performance` y
+`metrics.voice_cost`: primer PCM recibido/primer frame emitido, tiempo de corte
+local y herramientas, CPU, pico RSS y colas. La referencia del backend es el evento
+VAD recibido (commit si falta), por lo que no incluye el VAD/red anteriores.
+Emision en la Pi y reproduccion en el Mac son medidas distintas. Con un archivo,
+`sample_end_to_browser_playback_signal_ms` mide aproximadamente fin de muestra ->
+primera señal remota en el renderizador, con muestreo de 20 ms; no mide el altavoz.
+Las metas sin herramientas son p50 <= 1500 ms / p95 <= 3000 ms end-to-end. Los
+percentiles de backend son por sesion e incluyen numero de muestras; no demuestran
+por si solos esas metas. El saludo y los turnos con herramientas se separan.
+
+El costo en USD es estimado, con tarifas/fuente/fecha del 20 de octubre para
+`gpt-realtime-2.1` y `gpt-4o-mini-transcribe`; incluye la transcripcion separada y
+el descuento de cache. Si configuras otro modelo o faltan detalles/eventos finales,
+el total es `null`, con `complete=false` y un subtotal conocido; no significa costo
+cero. Revisa el consumo tambien en OpenAI antes de ampliar los cinco intentos.
+La transferencia entre chat operativo y voz corresponde al corte C4; la conexion
+con Meta Calling corresponde a C5.
+
+El laboratorio limita las sesiones durables por perfil mediante
+`VOICE_MAX_SESSIONS` (5 por defecto). `unlimited` desactiva la cuota total de sesiones
+para pruebas controladas; no existe aun una cuota diaria. En la Pi de pruebas esta
+configurado explicitamente `unlimited`. Si se establece un maximo numerico y se
+alcanza, iniciar una sesion devuelve HTTP 429 con el conteo; reiniciar no restablece
+la cuota.
+
+Verificacion sin APIs y pruebas de pago separadas, siempre en la Pi:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+# UI, canales y reintentos con WebRTC real/proveedor falso, sin costo de API:
+~/.local/bin/uv run --no-project --with playwright==1.56.0 --with httpx \
+  python scripts/verify_lab_controls.py
+# OpenAI real, WebRTC real y muestra conocida; una sesion de pago acotada:
+.venv/bin/python scripts/probe_realtime_voice.py
+# Navegador real, OpenAI, consulta de agenda falsa y continuidad voz/texto:
+~/.local/bin/uv run --no-project --with playwright==1.56.0 --with httpx \
+  python scripts/verify_realtime_browser.py
+```
+
+Los scripts de pago usan bases y cuotas temporales: invocaciones separadas no
+comparten el contador de sesiones. Cada ejecucion informa su consumo; el
+presupuesto de referencia aprobado para las pruebas iniciales es 5 USD.
+El verificador de navegador admite `--cdp-url`, `--port` y `--expected-peer` para
+Chrome en otra computadora. La prueba automatizada silencia la reproduccion y
+usa muestras sinteticas; la escucha y el microfono fisicos se comprueban manualmente.
+Ver [evidencia de voz nativa](docs/verification/2026-10-19-native-realtime-voice.md).
+El [resultado del hito y mediciones](docs/verification/2026-10-20-realtime-milestone.md)
+registra la verificacion mas reciente: 453 tests en la Pi, navegador Mac/Pi/OpenAI,
+costos estimados y las comprobaciones humanas que siguen pendientes.
+
 ## 2. Configurar variables de entorno
 
 El archivo `.env` se carga automaticamente desde la raiz del proyecto y esta

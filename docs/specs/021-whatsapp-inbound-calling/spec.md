@@ -2,16 +2,59 @@
 
 ## Estado
 
-Borrador para revision, preparado el 18 de octubre de 2026. El usuario solicito
-comenzar por la especificacion, el diseno y las tareas. Esta entrega es documental:
-no implementa Calling, no instala dependencias de audio y no acredita una llamada real.
-Los cortes de implementacion permanecen pendientes en [tasks.md](./tasks.md).
+El 18 de octubre de 2026 se aprobo implementar la compatibilidad de `aiortc`,
+control de sesiones, medios, saludo preparado y senalizacion HTTP de laboratorio
+(A-E). Ese alcance esta implementado y tiene verificacion automatizada de medios
+y navegador en la Pi y entre computadora/Pi en LAN; la escucha fisica y el
+microfono real siguen pendientes.
+El resto de Calling conserva estado
+de propuesta; no se acredita una llamada Meta. El avance y las verificaciones
+se registran en [tasks.md](./tasks.md).
+
+El 19 de octubre se implemento conversacion de laboratorio con OpenAI Realtime:
+audio nativo, transcripcion asincrona, herramientas controladas y agenda falsa
+persistente por defecto. Se verificaron audio real y una consulta desde Chrome en
+macOS. Desde el 20 de octubre, `VOICE_CALENDAR_PROVIDER=google` permite que la
+misma pagina HTML escriba en Google Calendar con un propietario de laboratorio
+separado (ADR 0058). La identidad sigue siendo ficticia; no es continuidad ni
+atencion de pacientes operativos. Dobles HTTP verifican crear, listar, reprogramar
+y cancelar; en la Pi se comprobo salud y disponibilidad Google de solo lectura, sin
+crear un evento operativo. Ver
+[`2026-10-20-voice-google-calendar.md`](../../verification/2026-10-20-voice-google-calendar.md).
+La conexion Calling sigue pendiente.
+
+La continuidad de laboratorio aprobada en ADR 0057 permite mensajes escritos en
+`/lab` con el mismo perfil ficticio. Canal y secuencia los fija el servidor. Un
+`si` cruzado no confirma otra via; retomar conserva datos y revalida, pero crea
+otra propuesta/pregunta/autorizacion. Texto, voz e historial asincrono comparten
+el contexto sin convertir una transcripcion en otro turno ni en una herramienta.
+
+El laboratorio se implementa como aplicacion FastAPI separada, con SQLite de
+prueba, habilitacion explicita y acceso por loopback/SSH sin token. Puede verificar
+el control y los medios sin completar
+antes el cliente o los eventos simulados de Meta de C1; no declara C1 completo.
+Su API expone `POST /lab/calls`, `GET /lab/calls/{session_id}` y
+`DELETE /lab/calls/{session_id}` solo en ese proceso. El backend de texto no
+publica esas rutas. La muestra de entrada debe decodificarse y contener senal;
+el saludo distingue preparado, reproduciendo, completado, interrumpido y fallido.
+
+El cliente distingue senalizacion HTTP, conectividad ICE, paquetes
+RTP y reproduccion. `GET /lab/health` permite comprobar HTTP sin crear una llamada.
+Desde el 20 de octubre no se pide token en el cliente ni en la API de laboratorio,
+incluidos mensajes e historial. **Conectar e iniciar llamada** comprueba HTTP
+automaticamente y establece la llamada; **Colgar** cierra la sesion y permite
+volver a conectar. El microfono exige HTTPS o localhost y
+presenta un error explicativo en un origen no confiable. La primera ruta entre
+equipos usa la misma LAN y un tunel SSH para servir el cliente en localhost;
+los medios viajan directamente, sin STUN/TURN. El tunel HTTP de ngrok no prueba
+conectividad de audio. La escucha humana sigue siendo un criterio separado.
 
 ## Problema y objetivo
 
 Un paciente de prueba debe poder iniciar una llamada desde WhatsApp y conversar
-en español con el bot para gestionar sus citas. Hoy el backend procesa mensajes
-de texto; no recibe sesiones de llamada ni transporta audio continuo.
+en español con el bot para gestionar sus citas. El backend operativo procesa
+mensajes de texto. El laboratorio separado ya transporta audio continuo con
+Realtime, sin recibir todavia sesiones de llamada de Meta.
 
 Se necesita avanzar sin comprar todavia una linea ni habilitar otro numero en
 Meta. Primero se verificaran el control de llamadas con dobles, el audio en un
@@ -24,7 +67,7 @@ corte posterior con su propia evidencia.
 - Aceptar, rechazar y terminar llamadas; registrar su resultado y liberar recursos.
 - Simular el ciclo completo sin numero, credenciales de Calling o consumo de APIs.
 - Probar audio bidireccional en laboratorio y despues conversar mediante
-  transcripcion, bot existente y sintesis de voz.
+  un modelo de voz nativa que recibe audio y genera audio en tiempo real.
 - Reutilizar identidad, reglas y herramientas de agenda, agregando confirmacion
   verbal antes de crear, reprogramar o cancelar una cita.
 - Continuar una gestion entre chat y llamadas sin transferir su autorizacion.
@@ -33,6 +76,14 @@ corte posterior con su propia evidencia.
 
 El piloto sigue usando pacientes y datos de prueba. Las credenciales y servicios
 reales solo son necesarios para los cortes que los ejercitan.
+
+La arquitectura de voz aprobada usa OpenAI Realtime desde la Raspberry, audio
+nativo bidireccional y herramientas controladas por el backend (ADR 0056). El
+alcance inicial conserva identidad falsa, historial propio y agenda falsa por
+defecto. El modo Google escribe eventos de laboratorio reales en los calendarios
+configurados, con `managed_by=whatsapp_voice_lab`; el adaptador de WhatsApp usa su
+propietario distinto y no los presenta a pacientes. La continuidad y las entregas
+sobre pacientes operativos siguen en C4/C5.
 
 ## Fuera de este incremento
 
@@ -94,8 +145,9 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   audio en ambos sentidos, envia una muestra y recibe un saludo completo en
   español que identifica al asistente virtual. Desconectarse durante el saludo
   libera la sesion. Esta prueba se registra como laboratorio, no como Meta.
-- **CA-08 — Intervencion final e interrupcion.** Solo una transcripcion final
-  valida puede avanzar la gestion. Recibir varias revisiones del mismo turno no
+- **CA-08 — Intervencion final e interrupcion.** Solo un turno de audio consolidado
+  y una solicitud estructurada validada pueden avanzar la gestion. La transcripcion
+  asincrona completa el historial, no autoriza acciones. Varias revisiones del turno no
   lo ejecuta otra vez. Al interrumpir al bot, se detiene el audio pendiente; una
   respuesta generada para un turno reemplazado no se reproduce mas tarde.
 - **CA-09 — Identidad e historial.** Texto y voz reconocen al mismo paciente de
@@ -115,12 +167,22 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   presentar la operacion y sus datos, y recibir una afirmacion explicita posterior
   en la misma llamada. Para reservar se repiten nombre completo, fecha, hora y
   motivo; para cambios se identifica la cita y, al reprogramar, el nuevo horario.
-  La pregunta debe haberse emitido completa antes de aceptar la autorizacion.
-  Una afirmacion durante una pregunta interrumpida solicita una nueva confirmacion.
+   La pregunta debe haberse emitido completa antes de aceptar la autorizacion.
+   Una afirmacion durante una pregunta interrumpida solicita una nueva confirmacion.
+   En laboratorio, intentar confirmar esa propuesta en la misma llamada y canal
+   conserva nombre, motivo y horario, revalida la agenda y devuelve una pregunta
+   con identificador nuevo; no responde que se perdio la sesion ni exige recapturar
+    los datos. Solo la afirmacion posterior a la nueva emision completa ejecuta.
+    Si Realtime divide una afirmacion y cancela una respuesta intermedia, el
+    backend asocia la transcripcion a la intervencion de voz vigente. Puede aceptar
+    una secuencia VAD posterior solo si esa transcripcion confirma inequivocamente
+    la accion pendiente y la pregunta original se emitio completa. Espera hasta un
+    segundo por la transcripcion; si falta, falla o es ambigua, renueva la pregunta
+    sin mutar la agenda. Una transcripcion de otro turno nunca autoriza la accion.
 - **CA-12 — Vigencia contextual.** La autorizacion expira a los 10 minutos como
   maximo, y antes si cambia un dato, se pausa o reemplaza la gestion, se cambia de
   canal, termina la llamada o se reinicia el backend. Un `Si` de otra llamada,
-  del chat o de una transcripcion tardia no ejecuta la accion. Una correccion
+  del chat o de una transcripcion de otro turno no ejecuta la accion. Una correccion
   genera una version nueva que debe presentarse y confirmarse de nuevo.
 - **CA-13 — Resultado de agenda.** La operacion se reclama una sola vez y se
   revalida contra la agenda antes de ejecutarse. Si la llamada termina antes de
@@ -133,6 +195,42 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   notificar al doctor corresponden solo a operaciones exitosas y no se duplican.
 
 ### Configuracion y verificaciones
+
+- **CA-18 — Rendimiento y presupuesto del laboratorio.** Cada sesion conserva
+  latencia hasta primer audio recibido y emitido localmente, corte de cola local,
+  duracion de herramientas, CPU/memoria del proceso y acumulacion de audio. Se
+  explicita el punto inicial: evento VAD recibido, o commit si falta aquel. La
+  primera emision local no se presenta como reproduccion en el Mac. Con muestras
+  conocidas se mide por separado fin del archivo -> primera señal en el reproductor
+  del navegador. Los percentiles incluyen numero de muestras y separan turnos con
+  herramientas; las metas fin de habla -> audio son p50 <= 1500 ms y p95 <= 3000 ms,
+  objetivos de evaluacion, no garantias inferidas de una muestra. El costo estimado
+  incluye audio, texto, cache y transcripcion con tarifa/modelo/fecha identificados;
+  si falta desglose o tarifa no se inventa un total ni se interpreta como gratuito.
+  El presupuesto inicial de referencia es 5 USD; las cuotas de sesiones no son un
+  limite monetario del proveedor. La escucha/microfono humanos requieren su propia
+  comprobacion y no se deducen de la reproduccion automatizada.
+
+- **CA-19 — Proveedor de agenda del laboratorio.** `VOICE_CALENDAR_PROVIDER`
+  acepta `fake` o `google` y usa `fake` si se omite. En modo Google, disponibilidad,
+  creacion, listado, reprogramacion y cancelacion usan los calendarios y credenciales
+  configurados. Los eventos tienen propietario `whatsapp_voice_lab`, por lo que el
+  backend de WhatsApp no puede listarlos ni modificarlos como citas de un paciente,
+  incluso si ambos usan el mismo calendario. `/lab/health` y la pagina HTML indican
+  el proveedor activo y si las confirmaciones escriben eventos reales. El perfil
+  sigue siendo ficticio y las citas falsas anteriores no se importan.
+
+- **CA-20 — Cuota configurable y visible.** `VOICE_MAX_SESSIONS` acepta 1-100 o
+  `unlimited`, con default 5. Al alcanzar un maximo numerico, la API rechaza la
+  llamada con HTTP 429 y el limite utilizado/permitido. El error no se etiqueta
+  como fallo de microfono o SDP; no abre Realtime ni una cita y reiniciar no
+  reinicia el contador durable. `unlimited` desactiva solo la cuota total de
+  sesiones; no cambia los topes por duracion/inactividad. No hay cuota diaria aun.
+
+- **CA-21 — Cuota diaria antes de uso operativo (pendiente).** Antes de usar voz
+  con pacientes operativos se debe definir e implementar un limite diario por
+  perfil, su zona horaria y su persistencia. `VOICE_MAX_SESSIONS=unlimited` no
+  satisface este criterio y queda restringido al laboratorio de pruebas.
 
 - **CA-15 — Datos de la prueba.** Los dobles usan identidades y audio de prueba.
   El audio permanece en buffers temporales y se descarta al cerrar. Los logs no
@@ -168,8 +266,9 @@ existentes. [design.md](./design.md) define su evolucion y la
 [ADR 0054](../../decisions/0054-inbound-calling-with-scoped-confirmation.md)
 registra la propuesta arquitectonica.
 
-Antes del corte de audio se verificaran biblioteca, codecs y compatibilidad de la
-Raspberry. Antes de probar voz de pago se seleccionaran proveedor y modelos y se
+La compatibilidad de biblioteca, codecs y Raspberry del laboratorio se verifico
+en la [evidencia del 18 de octubre](../../verification/2026-10-18-aiortc-audio-laboratory.md)
+y se adopto en la ADR 0055. Antes de probar voz de pago se seleccionaran proveedor y modelos y se
 documentaran sus credenciales y consumo. Antes del corte conectado se verificaran
 version de API, eventos y limites vigentes, elegibilidad del numero, configuracion
 de Calling y conectividad de medios. Estas dependencias no bloquean la simulacion

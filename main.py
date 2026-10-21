@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from datetime import time
 from pathlib import Path
 from typing import Any
@@ -52,7 +53,19 @@ from whatsapp_client import WhatsAppClient, WhatsAppConfigurationError
 
 load_dotenv(Path(__file__).with_name(".env"))
 
-app = FastAPI(title="WhatsApp Chatbot")
+@asynccontextmanager
+async def application_lifespan(application: FastAPI):
+    if not hasattr(application.state, "tool_executor"):
+        application.state.calendar_provider = create_calendar_provider()
+        application.state.availability_provider = create_availability_provider(application.state.calendar_provider)
+        application.state.tool_executor = create_tool_executor(
+            application.state.calendar_provider,
+            availability_provider=application.state.availability_provider,
+        )
+    yield
+
+
+app = FastAPI(title="WhatsApp Chatbot", lifespan=application_lifespan)
 logger = logging.getLogger(__name__)
 
 
@@ -334,14 +347,314 @@ async def deliver_doctor_notifications(
             )
 
 
-app.state.calendar_provider = create_calendar_provider()
-app.state.availability_provider = create_availability_provider(
-    app.state.calendar_provider,
-)
-app.state.tool_executor = create_tool_executor(
-    app.state.calendar_provider,
-    availability_provider=app.state.availability_provider,
-)
+def create_lab_app(
+    *,
+    enabled: bool | None = None,
+    repository=None,
+    media_factory=None,
+    audio_mode: str | None = None,
+    realtime_provider_factory=None,
+    voice_settings=None,
+    voice_database_path: str | Path | None = None,
+) -> FastAPI:
+    """Crea solo el laboratorio: `uvicorn main:create_lab_app --factory`."""
+    import asyncio
+    import sqlite3
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from starlette.background import BackgroundTask
+
+    from calling_repository import (
+        CallCapacityError,
+        CallNotFoundError,
+        CallingRepository,
+        VoiceSessionQuotaExceededError,
+    )
+    from calling_service import CallMediaPersistenceError, CallPersistenceError, CallSetupError, CallingService
+    from openai_realtime_provider import RealtimeError
+    from voice_session import voice_calendar_provider_name
+
+    audio_mode = audio_mode or os.getenv("LAB_AUDIO_MODE", "greeting")
+    if audio_mode not in {"greeting", "realtime"}:
+        raise ValueError("LAB_AUDIO_MODE debe ser greeting o realtime")
+    calendar_provider_name = voice_calendar_provider_name()
+
+    if enabled is None:
+        enabled = _environment_flag(os.getenv("LAB_CALLS_ENABLED"), default=False)
+    if not enabled:
+        raise ValueError("LAB_CALLS_ENABLED debe habilitarse para iniciar el laboratorio")
+    database_path = Path(os.getenv("LAB_DATABASE_PATH", "data/calling-lab.sqlite3"))
+    if repository is None:
+        if database_path.resolve() == Path(os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)).resolve():
+            raise ValueError("LAB_DATABASE_PATH debe ser diferente de la base de pacientes")
+        repository = CallingRepository(database_path)
+
+    @asynccontextmanager
+    async def lifespan(laboratory: FastAPI):
+        factory = media_factory
+        session_factory = None
+        voice_repository = None
+        text_conversation = None
+        maximum_seconds = float(os.getenv("LAB_MAXIMUM_SECONDS", "600"))
+        if audio_mode == "realtime":
+            from openai_realtime_provider import OpenAIRealtimeProvider, RealtimeSettings
+            from voice_repository import VoiceRepository
+            from voice_session import VoiceSession
+            from lab_text_conversation import LaboratoryTextConversation
+
+            settings = voice_settings or RealtimeSettings.from_environment()
+            voice_path = Path(voice_database_path or os.getenv("VOICE_DATABASE_PATH", str(repository.path.with_name(repository.path.stem + "-voice.sqlite3"))))
+            if voice_path.resolve() in {repository.path.resolve(), Path(os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)).resolve()}:
+                raise ValueError("VOICE_DATABASE_PATH requiere una base separada de llamadas y pacientes")
+            voice_repository = VoiceRepository(voice_path)
+            hours = create_business_hours()
+            profile = os.getenv("VOICE_LAB_PROFILE", "developer").strip()
+            if not profile or len(profile) > 100:
+                raise ValueError("VOICE_LAB_PROFILE debe identificar el perfil de prueba del servidor")
+            if factory is None:
+                from call_media import AiortcCallMedia
+                factory = AiortcCallMedia
+            session_factory = lambda session_id: VoiceSession(
+                session_id=session_id, media=factory(),
+                provider=realtime_provider_factory() if realtime_provider_factory else OpenAIRealtimeProvider(settings),
+                repository=voice_repository, settings=settings, business_hours=hours, profile=profile,
+                calendar_provider_name=calendar_provider_name,
+            )
+            text_conversation = LaboratoryTextConversation(repository=voice_repository, settings=settings,
+                provider_factory=realtime_provider_factory or (lambda: OpenAIRealtimeProvider(settings)),
+                business_hours=hours, profile=profile)
+            maximum_seconds = min(maximum_seconds, settings.maximum_seconds)
+        elif factory is None:
+            from call_media import AiortcCallMedia, validate_greeting
+
+            greeting = Path(os.getenv("LAB_GREETING_PATH", str(Path(__file__).parent / "assets/lab-greeting.wav")))
+            validate_greeting(greeting)
+            factory = lambda: AiortcCallMedia(greeting)
+        service = CallingService(
+            repository, factory,
+            session_media_factory=session_factory,
+            negotiation_seconds=float(os.getenv("LAB_NEGOTIATION_SECONDS", "20")),
+            inactivity_seconds=float(os.getenv("LAB_INACTIVITY_SECONDS", "60")),
+            maximum_seconds=maximum_seconds,
+        )
+        try:
+            if voice_repository:
+                voice_repository.start()
+            await service.start()
+            laboratory.state.calling_service = service
+            laboratory.state.conversation_lock = asyncio.Lock()
+            laboratory.state.text_conversation = text_conversation
+            laboratory.state.voice_repository = voice_repository
+            laboratory.state.pending_text_results = {}
+            yield
+        finally:
+            try:
+                try:
+                    if text_conversation:
+                        await text_conversation.close()
+                finally:
+                    await service.shutdown()
+            finally:
+                if voice_repository:
+                    voice_repository.close()
+
+    laboratory = FastAPI(title="Laboratorio de audio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @laboratory.middleware("http")
+    async def laboratory_response_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @laboratory.get("/lab", response_class=HTMLResponse)
+    async def laboratory_client():
+        return (
+            (Path(__file__).parent / "assets/lab-client.html")
+            .read_text()
+            .replace('data-audio-mode="greeting"', f'data-audio-mode="{audio_mode}"')
+            .replace('data-calendar-provider="fake"', f'data-calendar-provider="{calendar_provider_name}"')
+        )
+
+    @laboratory.get("/lab/health")
+    async def laboratory_health():
+        return {
+            "status": "ok",
+            "mode": "laboratory",
+            "audio_mode": audio_mode,
+            "calendar_provider": calendar_provider_name,
+        }
+
+    @laboratory.post("/lab/calls", status_code=201)
+    async def create_laboratory_call(request: Request):
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 131072:
+                raise HTTPException(status_code=413, detail="Oferta demasiado grande")
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeError):
+            raise HTTPException(status_code=400, detail="Se requiere JSON valido") from None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("type") != "offer"
+            or not isinstance(payload.get("sdp"), str)
+            or not payload["sdp"].strip()
+        ):
+            raise HTTPException(status_code=400, detail="Se requiere una oferta SDP")
+        try:
+            async with laboratory.state.conversation_lock:
+                if laboratory.state.text_conversation:
+                    await laboratory.state.text_conversation.close()
+                session, answer = await laboratory.state.calling_service.create(payload["sdp"])
+        except VoiceSessionQuotaExceededError as error:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"El perfil de laboratorio alcanzó su límite de sesiones "
+                    f"({error.used}/{error.maximum}). Reiniciar no restablece el "
+                    "contador; revisa el consumo antes de ampliar la cuota."
+                ),
+            ) from None
+        except CallCapacityError:
+            raise HTTPException(status_code=409, detail="Laboratorio ocupado o cerrando") from None
+        except CallSetupError:
+            raise HTTPException(status_code=422, detail="No se pudo establecer el audio") from None
+        except CallMediaPersistenceError:
+            raise HTTPException(status_code=503, detail="Reintenta iniciar la llamada tras finalizar el historial de texto") from None
+        except CallPersistenceError as error:
+            return JSONResponse(
+                {"detail": "Reintenta finalizar la sesion", "session_id": error.session_id},
+                status_code=503,
+            )
+        except sqlite3.Error:
+            raise HTTPException(status_code=503, detail="No se pudo persistir el resultado de la sesion") from None
+        return {
+            "session_id": session["session_id"],
+            "type": "answer",
+            "sdp": answer,
+            "mode": "laboratory",
+            "audio_mode": audio_mode,
+            "calendar_provider": calendar_provider_name,
+        }
+
+    @laboratory.get("/lab/history")
+    async def laboratory_history():
+        manager = laboratory.state.text_conversation
+        if manager is None:
+            raise HTTPException(status_code=409, detail="El historial compartido requiere modo realtime")
+        try:
+            history = await asyncio.to_thread(manager.repository.profile_history, manager.profile)
+            return {"profile": manager.profile, "history": history, "mode": "laboratory"}
+        except sqlite3.Error:
+            raise HTTPException(status_code=503, detail="Historial no disponible") from None
+
+    @laboratory.post("/lab/messages")
+    async def laboratory_text(request: Request):
+        manager = laboratory.state.text_conversation
+        if manager is None:
+            raise HTTPException(status_code=409, detail="Los mensajes requieren modo realtime")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 16384:
+                raise HTTPException(status_code=413, detail="Mensaje demasiado grande")
+        try:
+            value = json.loads(body)
+        except (ValueError, UnicodeError):
+            raise HTTPException(status_code=400, detail="Se requiere JSON valido") from None
+        if (not isinstance(value, dict) or set(value) != {"message_id", "text"}
+            or not isinstance(value["message_id"], str) or not 1 <= len(value["message_id"]) <= 100
+            or not isinstance(value["text"], str) or not 1 <= len(value["text"].strip()) <= 2000):
+            raise HTTPException(status_code=400, detail="Se requiere message_id y texto de hasta 2000 caracteres")
+        async with laboratory.state.conversation_lock:
+            claimed = False
+            try:
+                pending = laboratory.state.pending_text_results.get(value["message_id"])
+                if pending:
+                    if pending["text"] != value["text"]:
+                        raise ValueError("message_id reutilizado")
+                    await store_text_result(manager, value, pending["result"])
+                    return text_response(manager, pending["result"])
+                fresh, previous = await asyncio.to_thread(manager.repository.claim_text, manager.profile, value["message_id"], value["text"])
+                if not fresh:
+                    return text_response(manager, previous)
+                claimed = True
+                media = laboratory.state.calling_service.active_media()
+                session = media if media is not None and not media.closed else await manager.ensure_session()
+                result = await session.submit_text(value["text"])
+                await store_text_result(manager, value, result)
+                return text_response(manager, result)
+            except sqlite3.Error:
+                raise HTTPException(status_code=503, detail="No se pudo persistir el mensaje") from None
+            except ValueError:
+                if claimed:
+                    await store_text_result(manager, value, {
+                        "state": "failed", "reply": "Perfil o cuota no disponibles; revisa el estado antes de enviar otro mensaje.",
+                    })
+                raise HTTPException(status_code=409, detail="Perfil, cuota o mensaje no disponibles; revisa el estado del laboratorio") from None
+            except RealtimeError:
+                if claimed:
+                    await store_text_result(manager, value, {
+                        "state": "failed", "reply": "La conexion Realtime fallo; consulta el historial antes de reintentar.",
+                    })
+                raise HTTPException(status_code=502, detail="No se pudo completar la conexion Realtime") from None
+            except CallMediaPersistenceError:
+                raise HTTPException(status_code=503, detail="Reintenta cuando se recupere el historial del laboratorio") from None
+            except TimeoutError:
+                result = {"state": "interrupted", "reply": "La respuesta expiro; revisa el historial antes de iniciar otro mensaje."}
+                await store_text_result(manager, value, result)
+                return text_response(manager, result)
+            except asyncio.CancelledError:
+                if claimed:
+                    await store_text_result(manager, value, {
+                        "state": "interrupted", "reply": "La entrega se interrumpio; consulta el historial antes de iniciar otro mensaje.",
+                    })
+                raise
+
+    async def store_text_result(manager, value, result):
+        pending = laboratory.state.pending_text_results
+        pending[value["message_id"]] = {"text": value["text"], "result": result}
+        try:
+            await asyncio.to_thread(manager.repository.finish_text, manager.profile, value["message_id"], result)
+        except sqlite3.Error:
+            raise HTTPException(status_code=503, detail="Respuesta conservada; reintenta el mismo mensaje para finalizarla sin repetir acciones") from None
+        pending.pop(value["message_id"], None)
+
+    def text_response(manager, result):
+        session = next((candidate for candidate in (laboratory.state.calling_service.active_media(), manager.session)
+                        if candidate is not None and candidate.session_id == result.get("session_id") and not candidate.closed), None)
+
+        async def published():
+            if session is not None and isinstance(result.get("turn_id"), int):
+                try:
+                    await session.publish_text(result["turn_id"])
+                except sqlite3.Error:
+                    # Permiso sigue deshabilitado; reenviar el resultado puede
+                    # reintentar la publicacion sin volver a ejecutar el modelo.
+                    pass
+
+        return JSONResponse(result, background=BackgroundTask(published))
+
+    @laboratory.get("/lab/calls/{session_id}")
+    async def get_laboratory_call(session_id: str):
+        try:
+            return laboratory.state.calling_service.get(session_id)
+        except CallNotFoundError:
+            raise HTTPException(status_code=404, detail="Sesion no encontrada") from None
+        except sqlite3.Error:
+            raise HTTPException(status_code=503, detail="Estado de sesion temporalmente no disponible") from None
+
+    @laboratory.delete("/lab/calls/{session_id}")
+    async def end_laboratory_call(session_id: str):
+        try:
+            return await laboratory.state.calling_service.finish(session_id)
+        except CallNotFoundError:
+            raise HTTPException(status_code=404, detail="Sesion no encontrada") from None
+        except (CallPersistenceError, sqlite3.Error):
+            raise HTTPException(status_code=503, detail="Reintenta finalizar la sesion") from None
+
+    return laboratory
 
 
 def extract_provider_message_id(result: dict[str, Any]) -> str | None:

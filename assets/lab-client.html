@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="es" data-audio-mode="greeting" data-calendar-provider="fake">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laboratorio de audio</title>
+<style>
+body { font: 17px system-ui; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+label, audio { display: block; margin: 1rem 0; }
+input { width: min(95%, 32rem); } button, select, input { font: inherit; padding: .4rem; }
+pre { white-space: pre-wrap; background: #f2f3f5; padding: 1rem; }
+[hidden] { display: none !important; }
+</style>
+<h1>Laboratorio WebRTC</h1>
+<p id="description">Envía una muestra a la Raspberry y escucha el saludo en español.</p>
+<p id="calendar-mode">Agenda simulada: no se escriben eventos en Google Calendar.</p>
+<label>Entrada <select id="source"><option value="tone">Tono de prueba de 440 Hz</option><option value="microphone">Micrófono</option><option value="sample">Muestra de voz (archivo)</option></select></label>
+<label id="sample-label" hidden>Archivo de audio (hasta 30 s / 2 MB) <input id="sample" type="file" accept="audio/*"></label>
+<button id="connect">Conectar e iniciar llamada</button> <button id="hangup" disabled>Colgar</button>
+<audio id="audio" controls autoplay></audio>
+<p>El micrófono requiere HTTPS o localhost. El tono no requiere permiso de micrófono.
+Usa los controles de audio si el navegador no inicia la reproducción automáticamente.</p>
+<h2>Conectividad</h2>
+<p>Al conectar se comprueba HTTP automáticamente. ICE y los contadores RTP comprueban el transporte
+de audio por separado. Empieza con ambos equipos en la misma LAN: el túnel HTTP
+(SSH o ngrok) no transporta el audio WebRTC. Esta prueba usa candidatos host, sin STUN/TURN.</p>
+<pre id="network" aria-live="polite"></pre>
+<h2>Sesión en la Raspberry</h2>
+<pre id="status">Sin sesión. Este laboratorio no conecta con Meta.</pre>
+<section id="measurements" hidden>
+<h2>Rendimiento y consumo</h2>
+<p>Los tiempos del backend comienzan al recibir el evento VAD; la emisión local
+no equivale a escuchar el audio en el Mac. Con un archivo se mide también el fin
+de la muestra hasta la primera señal de respuesta en el reproductor del navegador.
+El costo es una estimación según los tokens informados, incluida la transcripción.</p>
+<pre id="measurements-result" aria-live="polite"></pre>
+</section>
+<section id="text-lab" hidden>
+<h2>Mensajes del mismo paciente ficticio</h2>
+<p id="text-lab-description">Voz y texto comparten historial y agenda de laboratorio. Para continuar una propuesta en
+este canal, escribe «Retomemos la cita»: recibirás una pregunta nueva.</p>
+<label>Mensaje <textarea id="chat-text" rows="3" maxlength="2000"></textarea></label>
+<button id="send-text">Enviar texto</button> <button id="refresh-history">Ver historial compartido</button>
+<pre id="text-result" aria-live="polite">Los mensajes usan OpenAI Realtime. Sin llamada activa se abre una sesión temporal de texto.</pre>
+<pre id="shared-history"></pre>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const audioMode = document.documentElement.dataset.audioMode;
+const calendarProvider = document.documentElement.dataset.calendarProvider;
+const calendarDescription = calendarProvider === 'google'
+  ? 'Google Calendar operativo: las confirmaciones crean eventos reales.'
+  : 'agenda simulada: no se crean eventos reales en Google Calendar.';
+$('calendar-mode').textContent = calendarProvider === 'google'
+  ? 'Agenda conectada: Google Calendar operativo. Las reservas confirmadas escriben en el calendario.'
+  : 'Agenda simulada: no se escriben eventos en Google Calendar.';
+if (audioMode === 'realtime') {
+  $('source').value = 'microphone';
+  $('text-lab').hidden = false;
+  $('description').textContent = `Conversación de voz con OpenAI Realtime a través de la Raspberry. El audio se envía a OpenAI; el historial se transcribe en paralelo. ${calendarDescription}`;
+  $('text-lab-description').textContent = `Voz y texto comparten historial y perfil de laboratorio; ${calendarDescription} Para continuar una propuesta en otro canal, escribe «Retomemos la cita» y recibirás una pregunta nueva.`;
+}
+let current = null, generation = 0;
+let textSending = false, pendingText = null;
+const network = {
+  secure_context: window.isSecureContext,
+  audio_mode: audioMode,
+  microphone_available: !!navigator.mediaDevices?.getUserMedia,
+  signaling: 'Sin comprobar', ice: 'Sin conexión', connection: 'Sin conexión',
+  audio_sent_packets: 0, audio_received_packets: 0, audio_received_bytes: 0,
+  playback: 'Sin audio', candidate_pair: null, diagnosis: '',
+};
+function showNetwork() { $('network').textContent = JSON.stringify(network, null, 2); }
+showNetwork();
+function show(value) {
+  $('status').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  if (value?.metrics?.voice_performance) {
+    $('measurements').hidden = false;
+    $('measurements-result').textContent = JSON.stringify({
+      backend: value.metrics.voice_performance, cost: value.metrics.voice_cost,
+      input_queued_frames: value.metrics.input_queued_frames,
+      playback_queued_ms: value.metrics.playback_queued_ms,
+      playback_peak_queued_ms: value.metrics.playback_peak_queued_ms,
+      sample_end_to_browser_playback_signal_ms: network.sample_end_to_browser_playback_signal_ms ?? null,
+    }, null, 2);
+  }
+}
+async function request(path, options = {}) {
+  const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json'}});
+  const data = await response.json();
+  if (!response.ok) { const error = new Error(data.detail || `HTTP ${response.status}`); error.status = response.status; error.sessionId = data.session_id; throw error; }
+  return data;
+}
+function releaseLocal(call) {
+  clearTimeout(call.poll);
+  clearInterval(call.playbackMeter);
+  if (call.peer) {
+    call.peer.onconnectionstatechange = null; call.peer.oniceconnectionstatechange = null;
+    call.peer.close();
+    if (!current || current === call) { network.connection = 'closed'; network.ice = 'closed'; showNetwork(); }
+  }
+  call.stream?.getTracks().forEach(track => track.stop());
+  if (call.oscillator) { call.oscillator.stop(); call.oscillator = null; }
+  if (call.sampleStarted) { call.sampleSource.stop(); call.sampleStarted = false; }
+  if (call.context) { call.context.close().catch(() => {}); call.context = null; }
+  if (call.playbackContext) { call.playbackContext.close().catch(() => {}); call.playbackContext = null; }
+  if (call.remoteStream && $('audio').srcObject === call.remoteStream) $('audio').srcObject = null;
+  if (!current || current === call) { network.playback = 'Sin audio'; showNetwork(); }
+}
+function controls(active) {
+  $('connect').disabled = active; $('hangup').disabled = !active;
+  $('source').disabled = active;
+  $('sample').disabled = active;
+}
+async function checkSignaling(ownerGeneration = generation) {
+  network.signaling = 'Comprobando HTTP…'; showNetwork();
+  try {
+    await request('/lab/health', {signal: AbortSignal.timeout(5000)});
+    if (generation === ownerGeneration) network.signaling = 'HTTP 200; señalización accesible (no acredita audio)';
+  } catch (error) {
+    if (generation === ownerGeneration) network.signaling = error.status ? `HTTP ${error.status}: ${error.message}` : 'Sin respuesta HTTP; revisa el túnel y el backend';
+    throw error;
+  } finally { if (generation === ownerGeneration) showNetwork(); }
+}
+async function sampleNetwork(call, state) {
+  const stats = await call.peer.getStats();
+  if (current !== call) return;
+  network.ice = call.peer.iceConnectionState;
+  network.connection = call.peer.connectionState;
+  for (const item of stats.values()) {
+    if (item.type === 'outbound-rtp' && (item.kind || item.mediaType) === 'audio') network.audio_sent_packets = item.packetsSent || 0;
+    if (item.type === 'inbound-rtp' && (item.kind || item.mediaType) === 'audio') {
+      network.audio_received_packets = item.packetsReceived || 0;
+      network.audio_received_bytes = item.bytesReceived || 0;
+    }
+    if (item.type === 'transport' && item.selectedCandidatePairId) {
+      const pair = stats.get(item.selectedCandidatePairId);
+      const local = stats.get(pair?.localCandidateId), remote = stats.get(pair?.remoteCandidateId);
+      network.candidate_pair = {local: local?.candidateType, remote: remote?.candidateType, protocol: local?.protocol};
+    }
+  }
+  const audio = $('audio');
+  network.playback = audio.srcObject ? (audio.paused ? 'Pausado; pulsa Reproducir' : `Reproduciendo (${audio.currentTime.toFixed(1)} s)`) : 'Sin audio';
+  if (state.metrics?.voice_failure_code) {
+    network.diagnosis = `Falló la sesión de voz: ${state.metrics.voice_failure_code}. Revisa el estado de OpenAI y el código seguro de la sesión.`;
+  } else if (state.reason === 'negotiation_timeout' || network.ice === 'failed' ||
+      (state.state === 'failed' && !network.audio_received_packets && network.connection !== 'connected')) {
+    network.diagnosis = 'HTTP respondió, pero WebRTC no conectó. Revisa LAN, VPN, aislamiento Wi-Fi y firewall UDP; evalúa STUN/TURN si no hay ruta directa.';
+  } else if (state.metrics?.non_silent_frames > 0 && network.audio_received_packets > 0) {
+    network.diagnosis = `Audio en ambos sentidos: la Pi recibe señal y el navegador recibe RTP. Confirma ${audioMode === 'realtime' ? 'la respuesta de OpenAI' : 'el saludo'} con tus altavoces.`;
+  } else if (network.connection === 'connected' && !state.metrics?.non_silent_frames) {
+    network.diagnosis = 'WebRTC conectado; la Pi espera señal de entrada. Habla o prueba el tono de 440 Hz para activar el saludo.';
+  } else { network.diagnosis = 'Esperando conectividad WebRTC y paquetes de audio…'; }
+  showNetwork();
+}
+async function hangup() {
+  const call = current;
+  if (!call) return;
+  const closingGeneration = ++generation;
+  current = null;
+  releaseLocal(call); controls(true);
+  $('hangup').disabled = true;
+  if (call.id) {
+    try { show(await request(`/lab/calls/${call.id}`, {method: 'DELETE'})); }
+    catch (error) {
+      if (generation === closingGeneration) {
+        current = call;
+        controls(true);
+        show(`Audio local cerrado. Pulsa Colgar para reintentar finalizar: ${error.message}`);
+        return;
+      }
+    }
+  } else { show('Conexión cancelada.'); }
+  if (generation === closingGeneration) controls(false);
+}
+async function poll(call) {
+  if (current !== call) return;
+  try {
+    const state = await request(`/lab/calls/${call.id}`);
+    if (current !== call) return;
+    await sampleNetwork(call, state);
+    if (current !== call) return;
+    show(state);
+    if (['ended', 'failed', 'interrupted'].includes(state.state)) {
+      current = null; releaseLocal(call); controls(false); return;
+    }
+    if (call.sampleSource && !call.sampleStarted && state.metrics?.voice_state === 'listening') {
+      call.sampleStarted = true; call.sampleSource.start();
+    }
+    call.poll = setTimeout(() => poll(call), 500);
+  } catch (error) {
+    if (current === call) { show(error.message); await hangup(); }
+  }
+}
+function gatherCandidates(peer) {
+  if (peer.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { peer.removeEventListener('icegatheringstatechange', check); reject(new Error('Expiró la negociación ICE')); }, 10000);
+    function check() {
+      if (peer.iceGatheringState === 'complete') { clearTimeout(timeout); peer.removeEventListener('icegatheringstatechange', check); resolve(); }
+    }
+    peer.addEventListener('icegatheringstatechange', check);
+    check();
+  });
+}
+$('connect').onclick = async () => {
+  if (textSending) { show('Espera a que termine el mensaje de texto.'); return; }
+  const call = {generation: ++generation}; current = call;
+  Object.assign(network, {ice: 'Sin conexión', connection: 'Sin conexión', audio_sent_packets: 0,
+    audio_received_packets: 0, audio_received_bytes: 0, playback: 'Sin audio', candidate_pair: null, diagnosis: '',
+    sample_end_to_browser_playback_signal_ms: null});
+  controls(true); show('Estableciendo conexión…');
+  try {
+    if (audioMode === 'realtime') {
+      call.playbackContext = new AudioContext(); await call.playbackContext.resume();
+    }
+    await checkSignaling(call.generation);
+    if (current !== call) return;
+    if ($('source').value === 'microphone') {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('El micrófono requiere HTTPS o http://localhost. Abre el cliente mediante el túnel SSH o usa el tono de prueba.');
+      }
+      call.stream = await navigator.mediaDevices.getUserMedia({audio: true, video: false});
+    } else if ($('source').value === 'sample') {
+      const file = $('sample').files[0];
+      if (!file || file.size > 2 * 1024 * 1024) throw new Error('Selecciona una muestra de audio de hasta 2 MB.');
+      call.context = new AudioContext(); await call.context.resume();
+      const buffer = await call.context.decodeAudioData(await file.arrayBuffer());
+      if (buffer.duration > 30) throw new Error('La muestra debe durar hasta 30 segundos.');
+      const destination = call.context.createMediaStreamDestination();
+      call.sampleSource = call.context.createBufferSource(); call.sampleSource.buffer = buffer;
+      call.sampleSource.onended = () => { call.sampleCompleteAt = performance.now(); };
+      call.sampleSource.connect(destination); call.stream = destination.stream;
+    } else {
+      call.context = new AudioContext(); await call.context.resume();
+      const destination = call.context.createMediaStreamDestination();
+      call.oscillator = call.context.createOscillator(); call.oscillator.frequency.value = 440;
+      const gain = call.context.createGain(); gain.gain.value = 0.15;
+      call.oscillator.connect(gain).connect(destination); call.oscillator.start();
+      call.stream = destination.stream;
+    }
+    if (current !== call) { releaseLocal(call); return; }
+    const peer = call.peer = new RTCPeerConnection({iceServers: []});
+    peer.ontrack = event => {
+      if (current !== call) return;
+      call.remoteStream = new MediaStream([event.track]);
+      $('audio').srcObject = call.remoteStream;
+      $('audio').play().catch(() => {});
+      if (call.playbackContext) {
+        const analyser = call.playbackContext.createAnalyser(); analyser.fftSize = 512;
+        call.playbackContext.createMediaStreamSource(call.remoteStream).connect(analyser);
+        const signal = new Float32Array(analyser.fftSize);
+        call.playbackMeter = setInterval(() => {
+          if (current !== call || !call.sampleCompleteAt || network.sample_end_to_browser_playback_signal_ms !== null || $('audio').paused) return;
+          analyser.getFloatTimeDomainData(signal);
+          if (signal.some(value => Math.abs(value) > .015)) {
+            network.sample_end_to_browser_playback_signal_ms = Math.round(performance.now() - call.sampleCompleteAt);
+            showNetwork();
+          }
+        }, 20);
+      }
+    };
+    peer.onconnectionstatechange = () => {
+      if (current === call) { network.connection = peer.connectionState; showNetwork(); }
+      if (current === call && peer.connectionState === 'connected' && audioMode !== 'realtime' && call.sampleSource && !call.sampleStarted) {
+        call.sampleStarted = true; call.sampleSource.start();
+      }
+    };
+    peer.oniceconnectionstatechange = () => {
+      if (current === call) { network.ice = peer.iceConnectionState; showNetwork(); }
+    };
+    call.stream.getAudioTracks().forEach(track => peer.addTrack(track, call.stream));
+    await peer.setLocalDescription(await peer.createOffer());
+    await gatherCandidates(peer);
+    if (current !== call) return;
+    const answer = await request('/lab/calls', {method: 'POST', body: JSON.stringify(peer.localDescription)});
+    call.id = answer.session_id;
+    if (current !== call) { await request(`/lab/calls/${call.id}`, {method: 'DELETE'}); return; }
+    await peer.setRemoteDescription({type: answer.type, sdp: answer.sdp});
+    await poll(call);
+  } catch (error) {
+    if (error.sessionId) call.id = error.sessionId;
+    if (current === call) {
+      await hangup();
+      if (current !== call) show(error.message);
+    } else if (call.id) {
+      try { await request(`/lab/calls/${call.id}`, {method: 'DELETE'}); }
+      catch (closingError) {
+        if (!current) { current = call; controls(true); show(`Pulsa Colgar para finalizar la sesión ${call.id}.`); }
+      }
+    }
+  }
+};
+$('hangup').onclick = hangup;
+$('source').onchange = () => { $('sample-label').hidden = $('source').value !== 'sample'; };
+async function refreshHistory() {
+  $('shared-history').textContent = JSON.stringify(await request('/lab/history'), null, 2);
+}
+$('refresh-history').onclick = async () => {
+  try { await refreshHistory(); }
+  catch (error) { $('text-result').textContent = error.message; }
+};
+$('send-text').onclick = async () => {
+  if (textSending) return;
+  const text = $('chat-text').value.trim();
+  if (!text) { $('text-result').textContent = 'Introduce un mensaje.'; return; }
+  if (!pendingText || pendingText.text !== text) pendingText = {message_id: crypto.randomUUID(), text};
+  textSending = true; $('send-text').disabled = true;
+  $('text-result').textContent = 'Procesando mensaje…';
+  try {
+    const response = await request('/lab/messages', {method: 'POST', body: JSON.stringify(pendingText)});
+    $('text-result').textContent = response.reply || response.state;
+    if (response.state !== 'processing') { pendingText = null; $('chat-text').value = ''; }
+    await refreshHistory();
+  } catch (error) { $('text-result').textContent = `${error.message}. Puedes reintentar el mismo mensaje.`; }
+  finally { textSending = false; $('send-text').disabled = false; }
+};
+window.addEventListener('pagehide', () => {
+  const call = current;
+  if (call?.id) fetch(`/lab/calls/${call.id}`, {method: 'DELETE', keepalive: true}).catch(() => {});
+  if (call) releaseLocal(call);
+});
+</script>
+</html>

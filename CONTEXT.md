@@ -166,8 +166,14 @@ _Evitar_: Sesion de llamada, cita, gestion pendiente
 
 **Sesion de llamada**:
 Encuentro de voz desde que se recibe una llamada del paciente de prueba hasta su
-finalizacion. Volver a llamar inicia otra sesion, aunque continue la misma conversacion.
+finalizacion; en laboratorio, participa un interlocutor de prueba. Volver a llamar
+inicia otra sesion, aunque continue la misma conversacion.
 _Evitar_: Conversacion del paciente, turno de voz, llamada telefonica convencional
+
+**Emision completa**:
+Salida hablada emitida hasta el final previsto. No demuestra por si sola que una
+persona la haya escuchado.
+_Evitar_: Respuesta escuchada, autorizacion verbal, mensaje escrito entregado
 
 **Turno de voz**:
 Intervencion completa del paciente de prueba durante una llamada y la respuesta

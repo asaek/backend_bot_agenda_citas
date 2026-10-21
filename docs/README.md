@@ -78,11 +78,49 @@ esten aprobados.
 ## Funcionalidad especificada, pendiente de implementacion
 
 - [021 - Llamadas entrantes de WhatsApp](./specs/021-whatsapp-inbound-calling/spec.md)
-  — borrador para revision, con simulacion y laboratorio antes de comprar numero.
+  — laboratorio de audio/Realtime implementado; Calling y continuidad operativa pendientes.
 - [Diseno de llamadas](./specs/021-whatsapp-inbound-calling/design.md) y
   [tareas por cortes](./specs/021-whatsapp-inbound-calling/tasks.md).
 - [ADR 0054 - Autorizacion ligada al origen](./decisions/0054-inbound-calling-with-scoped-confirmation.md)
   — propuesta, no adoptada por el runtime.
+
+## Laboratorio de audio implementado
+
+- [ADR 0055 - aiortc y laboratorio aislado](./decisions/0055-isolated-aiortc-audio-laboratory.md).
+- [Verificacion en Raspberry Pi](./verification/2026-10-18-aiortc-audio-laboratory.md):
+  Opus bidireccional, cliente Chromium, cierre, CPU y memoria.
+- [Cliente y conectividad LAN entre computadora y Pi](./verification/2026-10-18-webrtc-client-lan.md):
+  HTTP separado de ICE/RTP, Chrome en macOS, host/UDP sin STUN/TURN. Pendiente
+  escucha humana y microfono real.
+- [ADR 0056 - Voz nativa OpenAI Realtime](./decisions/0056-native-realtime-voice-laboratory.md).
+- [Verificacion de voz nativa y herramientas de laboratorio](./verification/2026-10-19-native-realtime-voice.md):
+  Chrome/Mac -> Pi -> OpenAI, transcripcion asincrona, consulta de disponibilidad,
+  confirmaciones con dobles y 431 tests; escucha/microfono humanos pendientes.
+- [ADR 0057 - Continuidad ficticia entre voz y texto](./decisions/0057-laboratory-voice-text-continuity.md).
+- [ADR 0058 - Google Calendar opcional para el laboratorio Realtime](./decisions/0058-google-calendar-for-realtime-laboratory.md):
+  selector fake/Google, propietario separado de WhatsApp y cliente HTML conservado.
+- [ADR 0059 - Sesiones ilimitadas temporalmente en el laboratorio de voz](./decisions/0059-unlimited-voice-lab-sessions.md):
+  `VOICE_MAX_SESSIONS=unlimited` solo para pruebas en la Pi; el default permanece en 5.
+- [ADR 0060 - Confirmacion explicita tras turnos VAD intermedios](./decisions/0060-explicit-voice-confirmation-after-vad-turns.md):
+  admite una secuencia posterior solo con afirmacion clara ligada al turno vigente.
+- [Verificacion de interrupciones, confirmaciones e historial compartido](./verification/2026-10-19-voice-text-controls.md):
+  445 tests, UI sin APIs y Chrome/Mac con OpenAI real; texto durante llamada y despues de colgar.
+- [Hito Realtime, rendimiento y presupuesto](./verification/2026-10-20-realtime-milestone.md):
+  453 tests, latencias/recursos/costo y laboratorio Mac/Pi disponible para prueba humana.
+- [Recuperacion de reserva tras interrumpir la pregunta](./verification/2026-10-20-interrupted-booking-confirmation.md):
+  causa observada, regresion de voz y nueva confirmacion conservando datos.
+- [Limite de cinco minutos para llamadas Realtime](./verification/2026-10-20-realtime-five-minute-limit.md):
+  maximo de sesion ampliado, con inactividad y cuota sin cambios.
+- [Google Calendar en el laboratorio Realtime](./verification/2026-10-20-voice-google-calendar.md):
+  causa de agenda falsa, proveedor Google optativo, aislamiento de eventos y runtime verificado.
+- [Cuota agotada de sesiones de voz](./verification/2026-10-20-voice-session-quota.md):
+  causa del rechazo de llamadas, limite persistente 5/5 y respuesta HTTP 429 accionable.
+- [Modo ilimitado del perfil de pruebas](./verification/2026-10-20-unlimited-voice-sessions.md):
+  configuración explícita en la Pi, límites de llamada conservados y cuota diaria pendiente.
+- [Recuperacion de confirmacion tras turnos VAD cancelados](./verification/2026-10-20-voice-confirmation-turn-sequence.md):
+  diagnostico del rechazo repetido y renovacion segura de la pregunta.
+- [Confirmacion de reprogramacion tras turnos VAD intermedios](./verification/2026-10-20-reschedule-confirmation-vad-loop.md):
+  reproduccion del ciclo y confirmacion solo con transcripcion afirmativa del turno actual.
 
 ## Funcionalidad implementada y verificada por cortes
 

@@ -167,20 +167,18 @@ class AgentOrchestrator:
         tool_call: ToolCall,
         patient_scope: PatientScope,
     ) -> ToolResult:
-        try:
-            tool_name = ToolName(tool_call.name)
-            request = ToolRequest(
-                tool_name=tool_name,
-                arguments=tool_call.arguments,
-                patient_scope=patient_scope,
-            )
-        except (TypeError, ValueError):
-            return tool_result_from_exception(
-                DomainValidationError("La herramienta solicitada no esta soportada")
-            )
-        except Exception as error:
-            return tool_result_from_exception(error)
-        return await self.tool_executor.execute(request)
+        return await execute_agent_tool(self.tool_executor, tool_call, patient_scope)
+
+
+async def execute_agent_tool(executor: ToolExecutor, tool_call: ToolCall, scope: PatientScope) -> ToolResult:
+    """Entrada compartida por chat y voz, posterior a su politica de autorizacion."""
+    try:
+        request = ToolRequest(tool_name=ToolName(tool_call.name), arguments=tool_call.arguments, patient_scope=scope)
+    except (TypeError, ValueError):
+        return tool_result_from_exception(DomainValidationError("La herramienta solicitada no esta soportada"))
+    except Exception as error:
+        return tool_result_from_exception(error)
+    return await executor.execute(request)
 
 
 def serialize_tool_result(result: ToolResult) -> str:

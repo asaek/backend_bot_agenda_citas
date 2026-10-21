@@ -47,4 +47,7 @@ NNN-nombre-de-la-funcionalidad/
 - [019 - Seleccion hibrida de horarios](./019-hybrid-slot-selection/spec.md)
 - [020 - Confirmacion de cita para el paciente](./020-patient-appointment-confirmation/spec.md)
 - [021 - Llamadas entrantes de WhatsApp](./021-whatsapp-inbound-calling/spec.md)
-  — borrador especificado; implementacion y conexion con Meta pendientes.
+  — laboratorio A-E implementado y verificado automaticamente en la Pi;
+  voz Realtime, agenda Google opcional de laboratorio y continuidad ficticia;
+  escucha fisica, identidad operativa e integracion con Meta pendientes. Incluye
+  metricas/costo (CA-18), agenda (CA-19), cuota visible (CA-20) y futura cuota diaria (CA-21).

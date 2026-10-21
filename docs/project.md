@@ -120,17 +120,66 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 ## Alcance propuesto: llamadas entrantes de WhatsApp
 
 El [corte 021](./specs/021-whatsapp-inbound-calling/spec.md) especifica llamadas
-de voz iniciadas por el paciente de prueba dentro de WhatsApp. Su estado es
-borrador para revision; la entrega del 18 de octubre de 2026 define documentos,
-sin habilitar llamadas ni introducir dependencias de audio en el backend actual.
+de voz iniciadas por el paciente de prueba dentro de WhatsApp. Calling y la
+continuidad operativa siguen propuestos. El 18 de octubre de 2026 se aprobo
+e implemento el laboratorio A-E: control local de sesiones, repositorio exclusivo,
+adaptador WebRTC, saludo WAV y API/cliente de prueba en otra aplicacion FastAPI.
+El extra `audio` adopta aiortc/PyAV tras comprobar Opus en la Raspberry (ADR 0055).
+La [evidencia](./verification/2026-10-18-aiortc-audio-laboratory.md) acredita medios
+y reproduccion Chromium en la misma Pi y [Chrome en la computadora por LAN](./verification/2026-10-18-webrtc-client-lan.md);
+la escucha humana y el microfono real siguen pendientes.
+Desde el 20 de octubre el laboratorio permite acceso sin token: el boton
+**Conectar e iniciar llamada** comprueba HTTP automaticamente e inicia WebRTC.
+Conserva diagnostico separado
+de ICE, RTP y reproduccion. La ruta inicial entre computadora y Pi usa la misma
+LAN, cliente en localhost mediante SSH y medios directos, sin STUN/TURN.
+
+El 19 de octubre se implemento conversacion de voz nativa con OpenAI Realtime,
+transcripcion paralela y herramientas validadas sobre agenda falsa por defecto
+(ADR 0056). Por decision ADR 0058, `VOICE_CALENDAR_PROVIDER=google` permite
+seleccionar Google Calendar para el laboratorio HTML sin reemplazar el modo falso.
+La Raspberry conserva el control de sesion, confirmaciones e historial exclusivo.
+Se comprobo Chrome en el Mac -> Pi -> OpenAI -> Pi -> Chrome, incluida una consulta
+de disponibilidad. El perfil continua siendo ficticio y no representa continuidad
+operativa con pacientes.
+
+El usuario aprobo probar continuidad de voz y mensajes con el mismo paciente
+ficticio (ADR 0057). `/lab` comparte historial, agenda y reglas entre ambos canales;
+fake sigue siendo el default, y el modo Google comparte los eventos del perfil de
+laboratorio con propietario separado. Retomar exige pregunta/permiso nuevos. El
+texto de laboratorio no se envia a WhatsApp ni vincula un paciente operativo.
+
+Si el paciente interrumpe la pregunta de reserva al responder, el laboratorio
+conserva nombre, motivo y horario y solicita otra confirmacion revalidada en el
+mismo canal/llamada. No exige recapturar esos datos ni ejecuta con la pregunta
+incompleta; la nueva pregunta necesita otra respuesta despues de emitirse completa.
+Si VAD divide una afirmacion posterior y cancela una respuesta intermedia, el
+backend evalua solo la transcripcion vinculada al turno actual (espera maxima: 1 s).
+Una afirmacion inequivoca puede confirmar la propuesta vigente; si falta o es
+ambigua, renueva la pregunta sin mutar la cita (ADR 0060).
+
+El incremento de medicion del 20 de octubre agrega latencias por turno,
+interrupcion local, herramientas, recursos/colas y costo estimado con transcripcion.
+Modelo configurable: candidato inicial `gpt-realtime-2.1`. Objetivos iniciales
+end-to-end sin herramientas: mediana hasta 1.5 s y p95 hasta 3 s. Las mediciones
+parciales explicitan su referencia; el hito humano de hablar, escuchar e
+interrumpir desde el Mac sigue pendiente de comprobacion fisica (CA-18 de 021).
+El maximo de una llamada Realtime se amplio a 300 s (5 minutos); el cierre tras
+30 s de inactividad se mantiene. `VOICE_MAX_SESSIONS` usa cinco sesiones por perfil
+por defecto; para las pruebas actuales de la Pi se configuro explicitamente
+`unlimited`. Un maximo numerico responde HTTP 429 con el conteo y persiste tras
+reiniciar. Antes de uso operativo se requiere diseñar una cuota diaria.
 
 El plan permite avanzar antes de comprar una linea:
 
 1. C0: especificacion, diseno y tareas.
 2. C1: control de llamada simulado con persistencia, duplicados, cierre y reinicio.
-3. C2: saludo y audio bidireccional en laboratorio sobre la Raspberry.
-4. C3: transcripcion -> bot existente -> sintesis, con turnos e interrupciones.
-5. C4: agenda falsa y continuidad entre chat y llamadas, con confirmacion verbal.
+3. C2: laboratorio A-E implementado y verificado automaticamente en la Raspberry;
+   avance independiente del cliente/eventos Calling de C1 por el alcance aprobado.
+4. C3: audio nativo con OpenAI Realtime, turnos, herramientas e historial asincrono
+   de laboratorio (ADR 0056), con interrupciones y costo medido.
+5. C4: identidad operativa y continuidad entre chat y voz, con confirmacion verbal
+   sobre las citas del paciente; el modo Google del laboratorio no satisface C4.
 6. C5: conexion con Meta y verificaciones reales; requiere numero registrado,
    elegible y con Calling habilitado.
 
@@ -141,8 +190,9 @@ las autorizaciones anteriores se invalidan. La voz requiere confirmacion antes
 de crear, reprogramar o cancelar, incluida una pregunta nueva al retomar.
 
 La ruta propuesta mantiene Meta directa y separa control, medios y proveedores
-de voz. Biblioteca WebRTC y proveedores/modelos de transcripcion y sintesis se
-decidiran en sus cortes con pruebas y costos documentados. La
+de voz. La biblioteca WebRTC de laboratorio esta adoptada en la ADR 0055;
+el modelo de voz se configura para OpenAI Realtime y su validacion real exige
+pruebas y costos documentados. La
 [ADR 0054](./decisions/0054-inbound-calling-with-scoped-confirmation.md) registra
 la propuesta, no una decision implementada. Telefonia convencional, llamadas
 salientes y notas de voz quedan fuera de este incremento.
