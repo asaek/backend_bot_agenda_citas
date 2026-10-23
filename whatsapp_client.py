@@ -24,6 +24,30 @@ class WhatsAppClient:
         self.http_client = http_client
 
     async def send_text(self, to: str, body: str) -> dict[str, Any]:
+        return await self._send({
+            "messaging_product": "whatsapp", "to": to,
+            "type": "text", "text": {"body": body},
+        })
+
+    async def send_template(
+        self,
+        to: str,
+        name: str,
+        language_code: str,
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Envia los componentes explicitos de una plantilla sin asumir su estructura."""
+        if not name.strip() or not language_code.strip():
+            raise WhatsAppConfigurationError("Nombre e idioma de plantilla son obligatorios")
+        template: dict[str, Any] = {"name": name, "language": {"code": language_code}}
+        if components is not None:
+            template["components"] = components
+        return await self._send({
+            "messaging_product": "whatsapp", "to": to,
+            "type": "template", "template": template,
+        })
+
+    async def _send(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.access_token:
             raise WhatsAppConfigurationError("WHATSAPP_ACCESS_TOKEN no esta configurado")
         if not self.phone_number_id:
@@ -34,13 +58,6 @@ class WhatsAppClient:
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"body": body},
-        }
-
         if self.http_client is not None:
             response = await self.http_client.post(url, headers=headers, json=payload)
             response.raise_for_status()

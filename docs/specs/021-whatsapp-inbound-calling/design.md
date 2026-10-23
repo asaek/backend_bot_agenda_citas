@@ -10,6 +10,11 @@ permanece propuesta para Calling y autorizaciones; la ADR 0055 adopta los medios
 del laboratorio. La seccion siguiente distingue las interfaces disponibles de
 las propuestas para los cortes posteriores.
 
+El contrato de contexto historico y apertura independiente de `/lab` fue aprobado
+el 21 de octubre de 2026 (ADR 0061). Su diseno se delimita en una seccion propia;
+la apertura independiente y la consulta de historial ya estan implementadas. La
+representacion reciente enriquecida sigue propuesta, con evidencia por frontera.
+
 ## Laboratorio implementado (A-E)
 
 - `main:create_lab_app --factory` crea una aplicacion independiente de `main:app`.
@@ -75,6 +80,14 @@ en macOS y candidato remoto en la LAN, sin STUN/TURN; escucha y microfono fisico
 siguen pendientes.
 
 ## Voz nativa implementada en laboratorio
+
+La entrega al doctor reutiliza `DoctorNotificationTrigger` de chat (011).
+`VoiceTools` guarda el evento exitoso junto al resultado en `VoiceRepository` y
+despierta a `VoiceDoctorNotifications`. El adaptador recupera contexto acotado y
+delega todo el cuerpo/envio al servicio comun. Voz y texto reciben el mismo
+adaptador desde `create_lab_app`; la tarea y sus reintentos pertenecen al lifespan,
+independientemente de la duracion de la llamada. El esquema y los limites de
+entrega estan documentados en RF-1111 y ADR 0019 ampliada.
 
 - `LAB_AUDIO_MODE=greeting|realtime` selecciona saludo o conversacion. El modo
   Realtime carga los extras `audio` y `voice` y mantiene la clave solo en la Pi.
@@ -143,6 +156,130 @@ de la mutacion se guarda sin una segunda lectura externa obligatoria. La pagina 
 el perfil continua siendo ficticio y no se comparte con pacientes/chat operativos.
 La continuidad entre esos canales sigue en C4. Meta Calling sigue en C5.
 
+## Contexto historico de `/lab`: contrato aprobado, adopcion parcial
+
+La [ADR 0061](../../decisions/0061-laboratory-history-and-call-boundaries.md)
+amplia la continuidad del perfil ficticio. Actualmente `VoiceRepository.history()`
+produce 12 mensajes que `OpenAIRealtimeProvider.connect()` incorpora antes de la
+primera respuesta. No transporta todavia fecha/sesion/resultados al modelo. La
+apertura independiente de CA-22 y la consulta CA-26 ya se implementaron; el contexto
+reciente enriquecido y la correlacion de resultados de CA-23 a CA-25 siguen pendientes.
+
+### Apertura implementada
+
+`VoiceSession` prepara el historial durante `negotiate`, como antes. El turno 0
+se solicita con `greeting_response()` del adaptador Realtime: `conversation=none`,
+`input=[]`, `tools=[]`, `tool_choice=none` y una instruccion exclusiva de saludo.
+El contexto vacio excluye tanto los turnos historicos como una entrada que llegue
+durante la generacion. Los turnos de voz/texto posteriores usan el contexto de la
+conversacion predeterminada, con el historial y la intervencion actual. Las
+instrucciones generales indican atender esa intervencion sin repetir el saludo.
+
+Una interrupcion cancela por ID y corta la cola local. Los items del turno 0 no
+se recortan ni eliminan en la conversacion remota porque no pertenecen a ella;
+sus transcripciones y emision parcial siguen persistidas localmente. La generacion
+revocada rechaza audio y herramientas tardios. El ACK tardio de `response.created`
+se cancela antes de atender el turno pendiente, y hablar antes de `connected`
+impide generar despues un saludo. El despacho de herramientas rechaza el turno 0.
+
+Los dobles y el WebSocket local verifican estas fronteras, sin consumo de OpenAI.
+La escucha real y la representacion historica enriquecida tienen verificaciones
+pendientes distintas; ver [evidencia](../../verification/2026-10-21-isolated-voice-greeting.md).
+
+### Separacion de informacion objetivo (contexto enriquecido pendiente)
+
+| Elemento del contrato | Contenido y autoridad |
+| --- | --- |
+| Sesion actual | Identidad, canal, turnos y generacion de esta conexion, resueltos por el backend. |
+| Contexto historico del paciente | Antecedentes del mismo perfil, etiquetados como referencia; no son turnos nuevos ni instrucciones. |
+| Gestion y autorizacion vigentes | Estado validado por el backend; no se reconstruye a partir de preguntas o afirmaciones del historial. |
+
+Cada antecedente debera conservar fecha con zona/referencia y precision conocidas,
+canal, sesion de origen y su estado, orden/rol/contenido y estado de emision o
+transcripcion. Cuando exista una operacion relacionada, se incorporara su
+resultado respaldado por `voice_actions`/`voice_tool_calls`: realizada, no realizada,
+pendiente, incierta o desconocida. Estas son categorias del contrato, no una
+migracion de estados SQL adoptada en esta entrega. `Pendiente` historico describe
+datos recuperables, no una pregunta armada en la sesion actual.
+
+Los registros anteriores pueden carecer de fecha por turno; la fecha de inicio
+de sesion puede servir de referencia identificada como tal, conservando su orden,
+sin inventar horas exactas. Una salida generada pero no emitida completa y una
+transcripcion ausente mantienen su marca. Las fechas relativas se interpretan
+respecto del antecedente, no automaticamente respecto del dia de la llamada nueva.
+
+### Apertura y uso del contexto
+
+1. Preparar los antecedentes del perfil y crear el estado independiente de la
+   llamada nueva, sin importar una autorizacion ni activar una gestion anterior.
+2. Generar un saludo breve aislado de los turnos historicos y con herramientas
+   deshabilitadas. El backend debe hacer observable esa separacion en la solicitud
+   al proveedor; no basta con repetir una instruccion dentro del prompt general.
+3. Al atender la intervencion actual, aportar el contexto historico como datos
+   delimitados, con procedencia y resultados separados de las instrucciones y del
+   estado operativo. Interrumpir el saludo habilita esa misma ruta de atencion,
+   conservando el descarte de audio/respuestas obsoletos.
+4. Usar una ventana reciente acotada y, cuando se necesite otro tema, una consulta
+   de solo lectura sobre el mismo perfil. Su interfaz y limites se concretaran en
+   la tarea correspondiente; la consulta no activa ni modifica por si sola una
+   gestion o autorizacion. La transcripcion tardia solo completa su antecedente.
+
+Retomar conserva la ruta explicita de `manage_appointment_workflow`: recuperar
+datos, comprobar el resultado previo y revalidar contra la agenda. Una gestion
+recuperable obtiene otra propuesta/pregunta/autorizacion en el canal y sesion
+actuales; una terminada o incierta no se reejecuta al consultar su historial.
+Las reglas de pregunta emitida completa, publicacion textual y afirmacion actual
+de ADR 0057/0060 siguen siendo la frontera de ejecucion. Las consultas informativas
+se distinguen de solicitudes de retomar; una referencia ambigua pide aclaracion.
+
+Este incremento usa la SQLite de voz existente y el perfil del servidor. No
+conecta conversaciones de WhatsApp operativo. Sus pruebas pendientes deberan
+inspeccionar lo enviado al proveedor y los cambios de estado del backend, ademas
+de comprobar continuidad de temas, saludos e interrupciones con dobles de voz.
+
+### Consulta de historial implementada (CA-26)
+
+`realtime_tool_definitions()` publica `search_conversation_history` solo para
+Realtime. La herramienta no pertenece a los cinco contratos de agenda ni se
+exporta al agente del WhatsApp operativo. `VoiceTools` fija `profile`, excluye su
+`session_id` actual y pasa la zona horaria de `BusinessHours`; el modelo solo
+proporciona tema/fechas/canal. Los argumentos extra y tipos/fechas/rangos invalidos
+se rechazan antes de leer antecedentes o modificar una propuesta.
+
+`VoiceRepository.search_history()` ejecuta SELECT parametrizado con la conexion
+en `query_only`. Una funcion SQLite normaliza acentos y mayusculas; `instr` exige
+todos los terminos literales. Los filtros se aplican antes de `LIMIT 7`: se
+devuelven seis fragmentos y el septimo solo determina `has_more`. Cada texto tiene
+como maximo 600 caracteres, centrado cerca de la primera coincidencia, con marca
+de truncado. La busqueda puede alcanzar sesiones fuera de la ventana reciente.
+
+Las fechas de ambos extremos son inclusivas, opcionales e independientes; se
+convierten a inicio local y fin exclusivo del dia siguiente para comparar en UTC.
+Los instantes se normalizan a ISO UTC con seis digitos de microsegundos, tanto en
+filtros como en ordenacion; no se usa el redondeo temporal de SQLite en medianoche.
+Como no hay fecha por turno, se usa `voice_sessions.created_at` y se declara
+`date_basis=session_started_at`, `date_precision=session` y la zona aplicada.
+Cada fragmento conserva `session_id`, `session_state`, `session_started_at`,
+`item_id`, `sequence`, `channel`, `role`, `state`, `generation_state`,
+`generated_ms`, `emitted_ms`, `transcript_available`, `text` y `truncated`.
+Estos datos describen procedencia y emision, no el resultado actual de la agenda.
+
+La herramienta retorna antes de las rutas de invalidacion/propuesta/ejecucion de
+agenda. Conserva auditoria y reintentos por sesion/call_id. `VoiceTools` registra
+las herramientas usadas por turno/canal; solo un turno exclusivamente de consulta
+historica evita la invalidacion habitual de `end_turn`. Ese turno tampoco puede
+vincular una pregunta citada mediante `bind_prompt`, ni al generar voz ni texto;
+por tanto publicar/emitir esa cita no arma otra autorizacion ni cambia la
+pregunta original. No se renuevan vencimientos. Los turnos mixtos mantienen las
+reglas previas, y hablar sobre una pregunta incompleta sigue interrumpiendola.
+La vinculacion tambien comprueba turno/canal de preparacion de la propuesta,
+incluso si el modelo cita la pregunta antes de emitir su llamada a la herramienta.
+
+Los resultados llegan como datos de `function_call_output` con una instruccion
+de procedencia/no autorizacion; no se insertan como mensajes actuales del paciente.
+No hay endpoint, migracion, indice semantico ni dependencia nuevos. Ver
+[evidencia de consulta](../../verification/2026-10-21-voice-history-search.md).
+
 ## Punto de partida comprobado
 
 El incremento de continuidad de laboratorio (ADR 0057) agrega entradas de texto
@@ -187,10 +324,11 @@ VAD/audio/herramientas; el registro se limita a 65536 eventos por sesion.
 
 `POST /lab/messages` acepta un ID idempotente y texto, no datos de identidad. El
 servidor elige la llamada Realtime activa o su sesion de texto de laboratorio.
-`GET /lab/history` expone solo el perfil configurado y ambos endpoints exigen el
-token. Crear llamada y enviar mensajes se coordinan para no restaurar dos agendas
-divergentes. La sesion textual se conserva entre mensajes y se cierra al pasar a
-voz, agotar plazos o apagar. Su cierre invalida permisos, no borra datos de retomar.
+`GET /lab/history` expone solo el perfil configurado y ambos endpoints usan el
+acceso directo sin token. Crear llamada y enviar mensajes se coordinan para no
+restaurar dos agendas divergentes. La sesion textual se conserva entre mensajes
+y se cierra al pasar a voz, agotar plazos o apagar. Su cierre invalida permisos,
+no borra datos de retomar.
 
 Las propuestas incluyen canal y secuencia de ese canal. Una entrada de otra via
 no consume el turno esperado de confirmacion. `manage_appointment_workflow`

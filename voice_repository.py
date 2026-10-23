@@ -2,15 +2,54 @@
 
 import fcntl
 import json
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from calling_repository import VoiceSessionQuotaExceededError, timestamp
+from notification_schema import doctor_notifications_schema, migrate_doctor_notifications
 
 
-TABLES = {"voice_profiles", "voice_sessions", "voice_turns", "voice_tool_calls", "voice_actions", "voice_appointments", "lab_text_messages"}
+TABLES = {"voice_profiles", "voice_sessions", "voice_turns", "voice_tool_calls", "voice_actions", "voice_appointments", "lab_text_messages",
+          "voice_notification_events", "doctor_notifications", "doctor_notification_attempts", "sqlite_sequence"}
+HISTORY_SEARCH_LIMIT = 6
+HISTORY_SNIPPET_CHARACTERS = 600
+
+
+def _normalize_history_text(text):
+    return "".join(char for char in unicodedata.normalize("NFKD", text.casefold())
+                   if not unicodedata.combining(char))
+
+
+def _history_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            return None
+        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _history_excerpt(text, terms):
+    position = 0
+    if terms:
+        match_at = _normalize_history_text(text).find(terms[0])
+        normalized_length = 0
+        for index, char in enumerate(text):
+            normalized_length += len(_normalize_history_text(char))
+            if normalized_length > match_at:
+                position = index
+                break
+    start = max(0, position - 120)
+    end = min(len(text), start + HISTORY_SNIPPET_CHARACTERS - 2)
+    return (("…" if start else "") + text[start:end] + ("…" if end < len(text) else ""),
+            start > 0 or end < len(text))
 
 
 class VoiceRepository:
@@ -71,7 +110,19 @@ class VoiceRepository:
                         body TEXT NOT NULL, result_json TEXT, state TEXT NOT NULL,
                         PRIMARY KEY(profile,message_id)
                     );
+                    CREATE TABLE IF NOT EXISTS voice_notification_events (
+                        action_id TEXT PRIMARY KEY REFERENCES voice_actions(action_id),
+                        session_id TEXT NOT NULL REFERENCES voice_sessions(session_id),
+                        event_json TEXT NOT NULL, patient_name TEXT,
+                        start_sequence INTEGER NOT NULL, end_sequence INTEGER NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent'))
+                    );
                 """)
+                db.executescript(doctor_notifications_schema(patient_references=False))
+                migrate_doctor_notifications(db)
+                session_columns = {row["name"] for row in db.execute("PRAGMA table_info(voice_sessions)")}
+                if "notification_start_sequence" not in session_columns:
+                    db.execute("ALTER TABLE voice_sessions ADD COLUMN notification_start_sequence INTEGER NOT NULL DEFAULT 0")
                 columns = {row["name"] for row in db.execute("PRAGMA table_info(voice_turns)")}
                 for name, definition in {
                     "channel": "TEXT NOT NULL DEFAULT 'voice'",
@@ -99,6 +150,10 @@ class VoiceRepository:
             self._lock.close()
             self._lock = None
 
+    def transaction(self):
+        """Adaptador de la bandeja compartida, sin abrir la base de pacientes."""
+        return self.connection()
+
     def begin(self, session_id: str, profile: str, maximum_sessions: int | None):
         with self.connection() as db:
             db.execute("INSERT OR IGNORE INTO voice_profiles(profile) VALUES (?)", (profile,))
@@ -110,7 +165,9 @@ class VoiceRepository:
             if maximum_sessions is not None and count >= maximum_sessions:
                 raise VoiceSessionQuotaExceededError(count, maximum_sessions)
             now = timestamp()
-            db.execute("INSERT INTO voice_sessions VALUES (?,?,'active',NULL,?,?, '{}')", (session_id, profile, now, now))
+            db.execute("""INSERT INTO voice_sessions
+                (session_id,profile,state,reason,created_at,updated_at,metrics_json)
+                VALUES (?,?,'active',NULL,?,?, '{}')""", (session_id, profile, now, now))
 
     def finish(self, session_id: str, reason: str, metrics: dict):
         with self.connection() as db:
@@ -179,6 +236,65 @@ class VoiceRepository:
                 JOIN voice_sessions s USING(session_id) WHERE s.profile=?
                 ORDER BY s.created_at DESC,t.sequence DESC LIMIT ?""", (profile, limit))][::-1]
 
+    def search_history(self, profile, *, exclude_session_id, query="", start_date=None,
+                       end_date=None, channel=None, timezone_name="UTC"):
+        """Consulta acotada del perfil del servidor; fechas referidas a la sesion."""
+        if not isinstance(query, str) or len(query) > 120:
+            raise ValueError("El tema de busqueda debe tener hasta 120 caracteres")
+        terms = _normalize_history_text(query).split()
+        if len(terms) > 8:
+            raise ValueError("Consulta hasta ocho palabras por busqueda")
+        if channel is not None and (not isinstance(channel, str) or channel not in {"voice", "text"}):
+            raise ValueError("El canal debe ser voice o text")
+        for value in (start_date, end_date):
+            if value is not None and (not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)):
+                raise ValueError("Las fechas de historial deben usar YYYY-MM-DD")
+        try:
+            first = date.fromisoformat(start_date) if start_date is not None else None
+            last = date.fromisoformat(end_date) if end_date is not None else None
+            after_last = last + timedelta(days=1) if last is not None else None
+        except (ValueError, OverflowError):
+            raise ValueError("Las fechas de historial no son validas") from None
+        if first is not None and last is not None and first > last:
+            raise ValueError("La fecha inicial no puede ser posterior a la final")
+        local_timezone = ZoneInfo(timezone_name)
+        conditions = ["s.profile=?", "s.session_id<>?"]
+        parameters = [profile, exclude_session_id]
+        for term in terms:
+            conditions.append("instr(history_normalize(t.transcript),?)>0")
+            parameters.append(term)
+        if channel is not None:
+            conditions.append("t.channel=?")
+            parameters.append(channel)
+        if first is not None:
+            conditions.append("history_timestamp(s.created_at)>=?")
+            parameters.append(_history_timestamp(datetime.combine(first, time.min, local_timezone).isoformat()))
+        if after_last is not None:
+            conditions.append("history_timestamp(s.created_at)<?")
+            parameters.append(_history_timestamp(datetime.combine(after_last, time.min, local_timezone).isoformat()))
+        if any(value is None for value in parameters):
+            raise ValueError("Las fechas de historial no son validas")
+        with self.connection() as db:
+            db.execute("PRAGMA query_only=ON")
+            db.create_function("history_normalize", 1, _normalize_history_text, deterministic=True)
+            db.create_function("history_timestamp", 1, _history_timestamp, deterministic=True)
+            rows = db.execute("""SELECT t.session_id,s.state AS session_state,s.created_at AS session_started_at,
+                t.item_id,t.sequence,t.channel,t.role,t.transcript,t.state,t.generation_state,t.generated_ms,t.emitted_ms
+                FROM voice_turns t JOIN voice_sessions s USING(session_id) WHERE """ + " AND ".join(conditions) + """
+                ORDER BY history_timestamp(s.created_at) DESC,s.session_id DESC,t.sequence DESC,t.item_id DESC LIMIT ?""",
+                (*parameters, HISTORY_SEARCH_LIMIT + 1)).fetchall()
+        fragments = []
+        for row in rows[:HISTORY_SEARCH_LIMIT]:
+            fragment = dict(row)
+            text = fragment.pop("transcript")
+            fragment["transcript_available"] = bool(text)
+            fragment["text"], fragment["truncated"] = _history_excerpt(text, terms)
+            if not text:
+                fragment["text"] = "[Intervencion sin transcripcion disponible.]" if row["role"] == "user" else "[Respuesta sin texto disponible.]"
+            fragments.append(fragment)
+        return {"fragments": fragments, "has_more": len(rows) > HISTORY_SEARCH_LIMIT,
+                "date_basis": "session_started_at", "date_precision": "session", "timezone": timezone_name}
+
     def claim_text(self, profile, message_id, body):
         with self.connection() as db:
             db.execute("INSERT OR IGNORE INTO voice_profiles(profile) VALUES (?)", (profile,))
@@ -236,7 +352,8 @@ class VoiceRepository:
                 db.commit()
                 return changed
 
-    def save_action_result(self, session_id: str, action_id: str, call_id: str, result: dict, profile: str, appointments: list[dict] | None, patient_name: str | None):
+    def save_action_result(self, session_id: str, action_id: str, call_id: str, result: dict, profile: str, appointments: list[dict] | None, patient_name: str | None,
+                           notification_event=None):
         with self.connection() as db:
             if appointments is not None:
                 db.execute("DELETE FROM voice_appointments WHERE profile=?", (profile,))
@@ -245,6 +362,50 @@ class VoiceRepository:
                 db.execute("UPDATE voice_profiles SET patient_name=? WHERE profile=?", (patient_name, profile))
             db.execute("UPDATE voice_actions SET state=? WHERE session_id=? AND action_id=?", ("completed" if result.get("ok") else "failed", session_id, action_id))
             db.execute("UPDATE voice_tool_calls SET state='completed',result_json=? WHERE session_id=? AND call_id=?", (json.dumps(result, ensure_ascii=False), session_id, call_id))
+            if notification_event is not None and result.get("ok"):
+                name = db.execute("SELECT patient_name FROM voice_profiles WHERE profile=?", (profile,)).fetchone()[0]
+                start = db.execute("SELECT COALESCE(MAX(end_sequence),0) FROM voice_notification_events WHERE session_id=?", (session_id,)).fetchone()[0]
+                workflow_start = db.execute("SELECT notification_start_sequence FROM voice_sessions WHERE session_id=?", (session_id,)).fetchone()[0]
+                start = max(start, workflow_start)
+                db.execute("""INSERT OR IGNORE INTO voice_notification_events
+                    (action_id,session_id,event_json,patient_name,start_sequence,end_sequence)
+                    VALUES (?,?,?,?,?,?)""", (action_id, session_id, notification_event.to_json(), name,
+                                               start, notification_event.incoming_message_id))
+
+    def last_sequence(self, session_id):
+        with self.connection() as db:
+            return db.execute("SELECT COALESCE(MAX(sequence),1) FROM voice_turns WHERE session_id=?", (session_id,)).fetchone()[0]
+
+    def pending_notifications(self):
+        with self.connection() as db:
+            return [dict(row) for row in db.execute("""SELECT e.* FROM voice_notification_events e
+                WHERE e.status='pending' OR EXISTS (
+                    SELECT 1 FROM doctor_notifications n
+                    WHERE n.event_key LIKE 'voice:' || e.session_id || ':' || e.action_id || ':%'
+                      AND n.status IN ('pending','failed','sending') AND n.event_json IS NULL)
+                ORDER BY e.rowid""")]
+
+    def notification_sent(self, action_id):
+        with self.connection() as db:
+            db.execute("UPDATE voice_notification_events SET status='sent' WHERE action_id=?", (action_id,))
+
+    def notification_context(self, record):
+        from notification_trigger import DoctorNotificationContext
+        from repositories import MessageRecord
+
+        with self.connection() as db:
+            rows = db.execute("""SELECT t.*,s.created_at FROM voice_turns t JOIN voice_sessions s USING(session_id)
+                WHERE t.session_id=? AND t.sequence>? AND t.sequence<=?
+                AND (t.role='user' OR t.state='completed')
+                ORDER BY t.sequence DESC""",
+                (record["session_id"], record["start_sequence"], record["end_sequence"])).fetchall()
+        history = tuple(MessageRecord(id=row["sequence"], conversation_id=1,
+            direction="incoming" if row["role"] == "user" else "outgoing", provider_message_id=None,
+            text=row["transcript"], message_type=row["channel"],
+            status="received" if row["role"] == "user" else "sent",
+            reply_to_message_id=row["sequence"] if row["role"] != "user" else None,
+            created_at=row["created_at"]) for row in reversed(rows) if row["transcript"])
+        return DoctorNotificationContext(record["patient_name"], history)
 
     def appointments(self, profile: str) -> list[dict]:
         with self.connection() as db:
@@ -258,7 +419,13 @@ class VoiceRepository:
             return None
         return {**json.loads(row["request_json"]), "action_id": row["action_id"], "session_id": row["session_id"], "state": row["state"]}
 
-    def replace_workflow(self, profile):
+    def replace_workflow(self, profile, session_id=None):
         with self.connection() as db:
             db.execute("""UPDATE voice_actions SET state='superseded' WHERE state IN ('pending','invalidated')
                 AND session_id IN (SELECT session_id FROM voice_sessions WHERE profile=?)""", (profile,))
+            if session_id is not None:
+                # La ultima entrada del paciente inicia la gestion nueva. Una
+                # salida/placeholder del asistente puede tener secuencia mayor.
+                db.execute("""UPDATE voice_sessions SET notification_start_sequence=(
+                    SELECT MAX(COALESCE(MAX(sequence),1)-1,0) FROM voice_turns WHERE session_id=? AND role='user'
+                    ) WHERE session_id=? AND profile=?""", (session_id, session_id, profile))

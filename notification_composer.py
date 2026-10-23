@@ -14,7 +14,7 @@ from appointment_reason_evaluation import (
     priority_signal_messages,
     priority_signals_for_texts,
 )
-from appointment_messages import AppointmentMessageAudience, render_appointment_message
+from appointment_messages import AppointmentMessageAudience, appointment_message_fields, render_appointment_message
 from llm_provider import ChatMessage, LLMProvider, ToolCall
 from notification_domain import AppointmentNotificationEvent
 from persistence import SQLiteDatabase
@@ -90,6 +90,7 @@ class DoctorNotificationMessage:
     body: str
     summary: str
     priority_signals: tuple[str, ...]
+    template_data: dict[str, str]
 
 
 class DoctorNotificationComposer:
@@ -112,14 +113,16 @@ class DoctorNotificationComposer:
         patient_name: str | None,
         history: Sequence[MessageRecord],
     ) -> DoctorNotificationMessage:
-        event_history = _history_for_event(event, history)
-        recent_history = tuple(event_history[-self.max_history_messages :])
+        recent_history = self.history_for_event(event, history)
         summary = await self._summarize(event, recent_history)
         return render_doctor_notification(
             event,
             patient_name=patient_name,
             summary=summary,
         )
+
+    def history_for_event(self, event, history):
+        return tuple(_history_for_event(event, history)[-self.max_history_messages:])
 
     async def _summarize(
         self,
@@ -185,10 +188,7 @@ class DoctorNotificationService:
         self.messages = MessageRepository()
         self.notifications = DoctorNotificationRepository()
 
-    async def compose(
-        self,
-        event: AppointmentNotificationEvent,
-    ) -> DoctorNotificationMessage:
+    def context_for_event(self, event: AppointmentNotificationEvent):
         with self.database.transaction() as connection:
             patient = self.patients.get_by_id(
                 connection,
@@ -219,11 +219,11 @@ class DoctorNotificationService:
             )
             history = [message for message in history if message.id > previous_event_message_id]
 
-        return await self.composer.compose(
-            event,
-            patient_name=patient.name,
-            history=history,
-        )
+        return patient.name, self.composer.history_for_event(event, history)
+
+    async def compose(self, event: AppointmentNotificationEvent) -> DoctorNotificationMessage:
+        patient_name, history = self.context_for_event(event)
+        return await self.composer.compose(event, patient_name=patient_name, history=history)
 
 
 def render_doctor_notification(
@@ -280,6 +280,15 @@ def render_doctor_notification(
         body=body,
         summary=safe_summary,
         priority_signals=safe_priority_signals,
+        template_data={
+            **{key: value for key, value in appointment_message_fields(
+                replace(appointment, reason=safe_reason), tool_name=event.tool_name,
+                patient_name=safe_name, audience=AppointmentMessageAudience.DOCTOR,
+            ).items() if key != "title"},
+            "summary": safe_summary,
+            "priority_signals": "; ".join(safe_priority_signals) or "Ninguna detectada.",
+            "notification_body": body,
+        },
     )
 
 

@@ -113,6 +113,19 @@ class CallingLaboratoryAPITests(unittest.TestCase):
                 with TestClient(lab) as client:
                     self.assertEqual(client.get("/lab/health").status_code, 200)
 
+    def test_invalid_doctor_configuration_does_not_prevent_voice_laboratory_startup(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "invalid",
+            "VOICE_CALENDAR_PROVIDER": "fake",
+        }):
+            lab = create_lab_app(enabled=True, audio_mode="realtime",
+                repository=CallingRepository(Path(directory) / "lab.sqlite3"),
+                voice_database_path=Path(directory) / "voice.sqlite3",
+                media_factory=FakeMedia, realtime_provider_factory=FakeRealtimeProvider,
+                voice_settings=RealtimeSettings(api_key="test-only", maximum_sessions=10))
+            with TestClient(lab) as client:
+                self.assertEqual(client.get("/lab/health").status_code, 200)
+
     def test_voice_session_quota_returns_actionable_error_without_increasing_limit(self):
         with tempfile.TemporaryDirectory() as directory:
             voice_path = Path(directory) / "voice.sqlite3"

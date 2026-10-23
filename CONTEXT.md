@@ -123,6 +123,39 @@ agendada, modificada o cancelada correctamente. Incluye los datos de la cita y u
 resumen de la conversacion relacionado con ese evento.
 _Evitar_: Respuesta al paciente, alerta de diagnostico
 
+**Notificacion pendiente de configuracion**:
+Aviso de una cita ya gestionada que se conserva mientras falta completar la
+configuracion necesaria para entregarlo al doctor. No significa que el doctor
+lo haya recibido ni que la cita siga pendiente.
+_Evitar_: Cita pendiente, aviso enviado, operacion fallida
+
+**Mapeo de plantilla**:
+Correspondencia explicita entre los datos de una notificacion y las variables
+de un mensaje aprobado para su entrega. Determina la agrupacion y el orden de
+esos datos, sin cambiar la cita ni elegir al doctor destinatario.
+_Evitar_: Destinatario, resumen generado, plantilla aprobada automaticamente
+
+**Entrega incierta de un aviso**:
+Intento cuyo resultado no permite saber si el proveedor acepto el mensaje.
+Necesita una comprobacion del resultado antes de decidir si corresponde otro envio.
+_Evitar_: Aviso rechazado, aviso entregado, reintento seguro
+
+**Conciliacion de un aviso**:
+Resolucion de una entrega incierta con evidencia de aceptacion o de ausencia de
+entrega, manteniendo la relacion con el intento original. No modifica la cita.
+_Evitar_: Reenvio automatico, nueva cita, recepcion supuesta
+
+**Aceptacion de un aviso**:
+Reconocimiento del proveedor de que recibio la solicitud de envio y le asigno
+un identificador. Por si sola no demuestra que el mensaje llego al destinatario.
+_Evitar_: Aviso entregado, aviso leido
+
+**Estado de entrega de un aviso**:
+Resultado informado por el proveedor sobre el envio, entrega, lectura o fallo de
+un mensaje concreto. La evidencia de un intento anterior no reemplaza el estado
+de otro intento del mismo aviso.
+_Evitar_: Estado de la cita, confirmacion al paciente, aceptacion supuesta
+
 **Señal de prioridad**:
 Indicador interno derivado del motivo y de lo expresado por el paciente durante la
 gestion de la cita actual que advierte que una solicitud podria
@@ -169,6 +202,18 @@ Encuentro de voz desde que se recibe una llamada del paciente de prueba hasta su
 finalizacion; en laboratorio, participa un interlocutor de prueba. Volver a llamar
 inicia otra sesion, aunque continue la misma conversacion.
 _Evitar_: Conversacion del paciente, turno de voz, llamada telefonica convencional
+
+**Contexto historico del paciente**:
+Informacion de conversaciones anteriores del mismo paciente, con su fecha, canal,
+sesion de origen y resultado conocido. Recordarla no equivale a retomar una gestion
+ni a recibir una autorizacion actual.
+_Evitar_: Gestion activa, confirmacion vigente, nueva intervencion del paciente
+
+**Resultado conocido de una gestion**:
+Situacion respaldada por el registro de una operacion: realizada, no realizada,
+pendiente, incierta o desconocida. Lo que dijo el asistente no demuestra por si
+solo que una cita haya cambiado ni que siga vigente.
+_Evitar_: Resultado supuesto, respuesta hablada, estado actual de agenda
 
 **Emision completa**:
 Salida hablada emitida hasta el final previsto. No demuestra por si sola que una

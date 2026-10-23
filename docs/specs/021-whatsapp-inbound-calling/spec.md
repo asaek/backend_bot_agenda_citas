@@ -23,11 +23,27 @@ crear un evento operativo. Ver
 [`2026-10-20-voice-google-calendar.md`](../../verification/2026-10-20-voice-google-calendar.md).
 La conexion Calling sigue pendiente.
 
+Desde el 22 de octubre, voz y texto de `/lab` tambien disparan las notificaciones
+al doctor de 011 usando el mismo compositor y entregador del chat. Los avisos se
+guardan con el resultado de la accion y se reintentan desde el lifespan, sin repetir
+agenda. El perfil conserva su identidad ficticia y muestra telefono no informado.
+Esto no completa Calling ni continuidad operativa; la entrega requiere credenciales
+Meta vigentes. Ver RF-1111 de [011](../011-doctor-notifications/spec.md).
+
 La continuidad de laboratorio aprobada en ADR 0057 permite mensajes escritos en
 `/lab` con el mismo perfil ficticio. Canal y secuencia los fija el servidor. Un
 `si` cruzado no confirma otra via; retomar conserva datos y revalida, pero crea
 otra propuesta/pregunta/autorizacion. Texto, voz e historial asincrono comparten
 el contexto sin convertir una transcripcion en otro turno ni en una herramienta.
+
+El 21 de octubre de 2026 el usuario aprobo delimitar la apertura de cada llamada
+y conservar el contexto historico de voz y mensajes del mismo paciente ficticio
+de `/lab` (ADR 0061). Este incremento tiene contrato documentado y criterios
+CA-22 a CA-25. La apertura independiente (CA-22) esta implementada y comprobada
+con dobles y WebSocket local. La consulta de temas antiguos tambien esta
+implementada (CA-26); el contexto reciente enriquecido sigue pendiente.
+No incluye conversaciones ni identidad del WhatsApp
+operativo ni acredita una nueva escucha humana con OpenAI real.
 
 El laboratorio se implementa como aplicacion FastAPI separada, con SQLite de
 prueba, habilitacion explicita y acceso por loopback/SSH sin token. Puede verificar
@@ -85,6 +101,16 @@ configurados, con `managed_by=whatsapp_voice_lab`; el adaptador de WhatsApp usa 
 propietario distinto y no los presenta a pacientes. La continuidad y las entregas
 sobre pacientes operativos siguen en C4/C5.
 
+El incremento de contexto historico de laboratorio comprende un saludo propio
+por llamada, antecedentes con procedencia y resultado conocido, y recuperacion
+informativa de temas de voz/texto. Retomar una gestion se distingue de consultar
+su historial y exige revalidacion y nueva pregunta. La ventana reciente y la
+consulta de antecedentes mas antiguos conservaran el alcance del perfil ficticio.
+El runtime ya separa el saludo mediante una respuesta fuera de banda con entrada
+vacia y herramientas deshabilitadas. La consulta bajo demanda recupera fragmentos
+anteriores del mismo perfil por tema, fecha y canal (CA-26). La representacion
+reciente enriquecida con resultados de acciones mantiene implementacion pendiente.
+
 ## Fuera de este incremento
 
 - Llamadas salientes, devoluciones de llamada y permisos para iniciarlas.
@@ -110,6 +136,12 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
    si es voz y a la version exacta de la accion presentada.
 5. La identidad se resuelve desde el origen confiable de la comunicacion. El nombre
    dicho, un telefono dictado o los argumentos del LLM no cambian el paciente.
+6. El **contexto historico del paciente** es informacion con procedencia, no un
+   turno actual, una gestion activa ni una autorizacion. Consultarlo no cambia
+   por si mismo el estado de una gestion.
+7. El **resultado conocido de una gestion** procede del registro de la operacion.
+   Una frase del asistente no acredita que se realizo; un resultado historico
+   exitoso tampoco prueba el estado actual de la agenda.
 
 ## Requisitos y criterios de aceptacion
 
@@ -197,6 +229,57 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   entrega posterior no deshace la cita ni vuelve a ejecutarla. Los eventos para
   notificar al doctor corresponden solo a operaciones exitosas y no se duplican.
 
+### Contexto historico de `/lab` (contrato aprobado; adopcion parcial)
+
+CA-22 y CA-26 estan implementados y comprobados con dobles. CA-23/CA-24 tienen la
+lectura historica adoptada; el contexto reciente enriquecido y los resultados de
+acciones de CA-23 a CA-25 siguen pendientes. Los controles de autorizacion
+existentes permanecen vigentes.
+
+- **CA-22 — Apertura independiente.** Cada llamada nueva comienza con un saludo
+  breve que identifica al asistente virtual. Su generacion se separa de los turnos
+  historicos y no invoca herramientas, responde a afirmaciones antiguas ni anuncia
+  que falta una confirmacion anterior. Si el paciente interrumpe el saludo, se
+  atiende su intervencion y no se reproduce despues un saludo obsoleto.
+- **CA-23 — Antecedentes con procedencia y resultado.** El agente puede recuperar
+  temas anteriores de voz y texto del mismo perfil ficticio, incluso fuera de la
+  ventana reciente mediante una consulta acotada. Los antecedentes distinguen
+  fecha y su precision conocida, canal, sesion de origen/estado, orden, contenido,
+  emision completa/interrumpida y transcripcion ausente. El resultado asociado se
+  identifica como realizado, no realizado, pendiente, incierto o desconocido segun
+  registros del backend, sin inferir exito del texto del asistente. Un dato ausente
+  se marca como tal; una fecha de sesion no se presenta como hora exacta del turno.
+  Las expresiones relativas antiguas conservan su referencia temporal de origen.
+- **CA-24 — Recuperacion informativa.** Consultar o recordar antecedentes no activa,
+  reemplaza, confirma ni retoma una gestion y no habilita una pregunta anterior.
+  El contenido recuperado se presenta como referencia historica, separado de las
+  instrucciones y turnos actuales. Un `Si` del historial no autoriza ninguna accion
+  actual. Si se pregunta por citas vigentes, se consulta la agenda configurada; un
+  resultado incierto o desconocido no permite repetir automaticamente la operacion.
+- **CA-25 — Retomar con nueva pregunta.** Una solicitud explicita de retomar
+  recupera datos utiles, revalida la cita y la disponibilidad que corresponda, e
+  invalida la autorizacion anterior. Una gestion recuperable genera otra propuesta,
+  pregunta y autorizacion en el canal/sesion actuales. La pregunta debe presentarse
+  completa antes de una nueva afirmacion del paciente; para texto, publicarse
+  conforme a los controles existentes. Si el horario ya no esta disponible se
+  solicitan otras opciones; si la gestion ya termino se informa su resultado sin
+  reejecutarla. Varias referencias posibles requieren aclaracion.
+- **CA-26 — Consulta historica acotada y sin efectos de agenda.** La herramienta
+  `search_conversation_history` admite `query` de hasta 120 caracteres/ocho palabras,
+  fechas inclusivas `start_date`/`end_date` (`YYYY-MM-DD`) y canal `voice`/`text`,
+  todos opcionales. Combina palabras literales AND, sin distinguir acentos ni
+  mayusculas; las fechas usan el inicio de sesion en la zona de agenda. Solo busca
+  en el perfil del servidor y excluye la sesion actual, sin aceptar identidad,
+  sesion, zona ni limites elegidos por el modelo. Devuelve hasta seis fragmentos
+  de 600 caracteres, los mas recientes primero, con sesion/fecha/precision, orden,
+  canal, rol, emision/transcripcion y `has_more`. La ausencia de coincidencias no
+  inventa antecedentes. Buscar, fallar o reintentar la consulta no activa ni
+  modifica una propuesta, su pregunta, autorizacion o vencimiento, ni ejecuta
+  herramientas de agenda. La auditoria de la consulta puede persistirse.
+  Un turno de solo consulta conserva la propuesta al finalizar; citar una pregunta
+  historica por voz/texto no la vuelve a vincular ni habilitar. Una interrupcion,
+  cierre u otra herramienta mantienen sus reglas existentes de invalidacion.
+
 ### Configuracion y verificaciones
 
 - **CA-18 — Rendimiento y presupuesto del laboratorio.** Cada sesion conserva
@@ -261,6 +344,23 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
 | Corrige la hora mientras escucha la confirmacion | Se detiene la pregunta anterior, se revalida el horario y se presenta una version nueva. |
 | Cuelga despues de iniciar una reserva confirmada | Se conserva el resultado real; volver a llamar no dispara otra reserva. |
 | Reinicia el servidor con una mutacion en curso | La llamada queda interrumpida y la operacion incierta requiere conciliacion. |
+
+### Escenarios del contrato de contexto historico de `/lab`
+
+Apertura, interrupcion y consulta de temas antiguos comprobadas con dobles;
+contexto reciente enriquecido pendiente. No acreditan continuidad operativa.
+
+| Situacion | Resultado esperado |
+| --- | --- |
+| Una llamada termina con una reserva confirmada y se inicia otra | Saludo propio; no se vuelve a confirmar ni se reclama un ID anterior. |
+| Hay una pregunta sin confirmar al colgar y se vuelve a llamar | Saludo propio; la gestion permanece recuperable sin autorizacion activa. |
+| El paciente pregunta que comento por texto o en otra llamada | Se recupera el tema con su fecha/canal/origen, sin retomar ni mutar una gestion. |
+| El tema quedo fuera de la ventana reciente | La consulta acotada de historial permite localizarlo dentro del mismo perfil. |
+| El historial incluye un `Si`, una salida interrumpida o una transcripcion ausente | Se conservan las marcas y ninguna se usa como autorizacion actual. |
+| Pide retomar una propuesta anterior y su horario sigue disponible | Se conservan los datos utiles y se emite una pregunta nueva antes de aceptar otra afirmacion. |
+| Pide retomar una propuesta cuyo horario ya no esta libre | Se revalida y se ofrecen otras opciones sin ejecutar la propuesta anterior. |
+| Consulta una operacion con resultado incierto o sin resultado registrado | Se explicita la incertidumbre; no se deduce exito ni se repite automaticamente. |
+| Habla durante el saludo de la llamada nueva | Se atiende el turno actual con contexto historico, sin reactivar el saludo cancelado. |
 
 ## Dependencias y pendientes delimitados
 

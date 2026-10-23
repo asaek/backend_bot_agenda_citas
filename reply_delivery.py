@@ -3,8 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -12,9 +11,8 @@ from weakref import WeakValueDictionary
 
 import httpx
 
-from calendar_domain import Appointment, AppointmentStatus, PatientScope, ToolName
 from conversation_service import ConversationContext, utc_now
-from notification_domain import AppointmentNotificationEvent, AppointmentNotificationType
+from notification_domain import AppointmentNotificationEvent
 from persistence import SQLiteDatabase
 from reply_delivery_repository import ReplyDeliveryRepository
 from repositories import MessageRepository
@@ -46,27 +44,11 @@ class ReplyPlan:
 
 
 def _encode_events(events: Sequence[AppointmentNotificationEvent]) -> str:
-    return json.dumps([asdict(event) for event in events], default=lambda value: value.isoformat())
+    return "[" + ",".join(event.to_json() for event in events) + "]"
 
 
 def _decode_events(raw: str) -> tuple[AppointmentNotificationEvent, ...]:
-    events = []
-    for value in json.loads(raw):
-        scope = PatientScope(**value["patient_scope"])
-        appointment = dict(value["appointment"])
-        appointment["patient_scope"] = PatientScope(**appointment["patient_scope"])
-        appointment["start_at"] = datetime.fromisoformat(appointment["start_at"])
-        appointment["end_at"] = datetime.fromisoformat(appointment["end_at"])
-        appointment["status"] = AppointmentStatus(appointment["status"])
-        events.append(AppointmentNotificationEvent(
-            notification_type=AppointmentNotificationType(value["notification_type"]),
-            tool_name=ToolName(value["tool_name"]),
-            appointment=Appointment(**appointment),
-            patient_scope=scope,
-            incoming_message_id=value["incoming_message_id"],
-            tool_call_id=value["tool_call_id"],
-        ))
-    return tuple(events)
+    return tuple(AppointmentNotificationEvent.from_json(json.dumps(value)) for value in json.loads(raw))
 
 
 class ReplyDeliveryService:

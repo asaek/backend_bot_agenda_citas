@@ -14,6 +14,15 @@ class PreparedReplyRecord:
 
 
 class ReplyDeliveryRepository:
+    def pending_notifications(self, connection):
+        return connection.execute("""SELECT r.* FROM reply_outbox r
+            WHERE r.status='sent' AND r.notification_events_json <> '[]'
+              AND (r.notifications_completed=0 OR EXISTS (
+                SELECT 1 FROM doctor_notifications n
+                WHERE n.event_key LIKE 'appointment:' || r.incoming_message_id || ':%'
+                  AND n.status IN ('pending','failed','sending') AND n.event_json IS NULL))
+            ORDER BY r.incoming_message_id""").fetchall()
+
     def get(self, connection: sqlite3.Connection, incoming_id: int) -> PreparedReplyRecord | None:
         row = connection.execute(
             "SELECT * FROM reply_outbox WHERE incoming_message_id = ?", (incoming_id,),

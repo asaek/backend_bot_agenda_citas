@@ -70,6 +70,7 @@ class VoiceSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_audio_crosses_provider_and_partial_playback_is_cancelled_without_late_resurrection(self):
         self.media.input_audio.put_nowait(b"\2\0" * 480)
         await self.wait(lambda: any(event["type"] == "input_audio_buffer.append" for event in self.provider.commands))
+        await self.speech("first-input")
         old_response = self.session._active_response
         await self.audio(old_response, "old-audio", "Una frase incompleta")
         self.assertTrue(self.media.audio)
@@ -81,8 +82,8 @@ class VoiceSessionTests(unittest.IsolatedAsyncioTestCase):
             "item_id": "old-audio", "delta": base64.b64encode(b"\3\0" * 480).decode()})
         await asyncio.sleep(.03)
         self.assertFalse(self.media.audio)
-        self.assertEqual(self.repository.turns("session")[0]["state"], "interrupted")
-        interrupted = self.repository.turns("session")[0]
+        interrupted = next(item for item in self.repository.turns("session") if item["item_id"] == "old-audio")
+        self.assertEqual(interrupted["state"], "interrupted")
         self.assertEqual(interrupted["generation_state"], "completed")
         self.assertEqual(interrupted["generated_ms"], 20)
         self.assertEqual(interrupted["emitted_ms"], 10)

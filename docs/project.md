@@ -74,6 +74,28 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Resumir la charla con el paciente en la notificacion al doctor: motivo, molestias,
   dudas y detalles expresados, sin repetir fecha, horario, zona, estado o confirmacion
   de la cita ni inventar sintomas cuando solo se proporciona un motivo general.
+- Compartir disparador, resumen, formato, destinatarios y entrega al doctor entre
+  el chat de WhatsApp y voz/texto de `/lab`. Persistir los avisos de laboratorio
+  junto al resultado y recuperarlos tras reiniciar, sin repetir operaciones de agenda;
+  mantener sus identidades y base separadas de pacientes operativos.
+  El modo `text` usa texto libre dentro de la ventana de 24 h del doctor; las
+  credenciales y el seguimiento durable de estados de entrega de Meta siguen
+  siendo requisitos independientes. Aceptacion no equivale a recepcion.
+- Preparar la configuracion de plantilla con nombre e idioma vacios, reteniendo
+  avisos por evento/doctor mientras el transporte no este disponible. La captura
+  y la confirmacion al paciente continuan; chat conserva el snapshot para reintento
+  y laboratorio usa su ciclo existente. El adaptador de plantillas usa el mapeo
+  explicito configurado, sin asumir componentes ni cantidad de variables. La
+  plantilla real aprobada sigue pendiente. Los datos y el payload
+  se conservan para reintentos mediante snapshots compartidos por chat y voz.
+- Recuperar avisos registrados en chat y laboratorio al arrancar y cada 60 s,
+  conservando contexto, destinatarios y contenido. Persistir espera exponencial,
+  bloqueos por configuracion y auditoria de intentos. Conciliar resultados inciertos
+  con evidencia antes de otro despacho, sin repetir operaciones de agenda.
+- Registrar callbacks de Meta en una bandeja durable y correlacionarlos con
+  mensaje/destinatario de chat y voz. Distinguir aceptacion de envio, entrega,
+  lectura y fallo; soportar duplicados, desorden y callbacks tempranos. Los fallos
+  asincronos alimentan el control de reintentos sin repetir el mismo fallo.
 - Mostrar los horarios libres de un dia cuando el paciente solicita agendar, incluso
   con variantes como `sacar cita`, sin indicar una hora exacta.
 - Presentar las listas de disponibilidad, citas y opciones de reprogramacion en
@@ -148,6 +170,23 @@ ficticio (ADR 0057). `/lab` comparte historial, agenda y reglas entre ambos cana
 fake sigue siendo el default, y el modo Google comparte los eventos del perfil de
 laboratorio con propietario separado. Retomar exige pregunta/permiso nuevos. El
 texto de laboratorio no se envia a WhatsApp ni vincula un paciente operativo.
+
+El 21 de octubre el usuario aprobo el contrato de contexto historico y apertura
+independiente de llamadas del mismo perfil ficticio de `/lab`
+([ADR 0061](./decisions/0061-laboratory-history-and-call-boundaries.md)). Cada
+llamada tendra saludo propio y conservara antecedentes de voz/texto con fecha,
+canal, sesion de origen y resultado conocido. Recuperar informacion no activara
+gestiones ni reutilizara confirmaciones; retomar exigira revalidacion y otra
+pregunta. Los criterios CA-22 a CA-25 de 021 delimitan el contrato. Ya se implemento
+la apertura independiente con contexto vacio y herramientas deshabilitadas para
+el saludo, conservando el historial para los turnos actuales e interrupciones por
+voz/texto (CA-22, comprobado con dobles). `search_conversation_history` ya permite
+buscar temas por palabras, fechas y canal en sesiones anteriores del mismo perfil:
+hasta seis fragmentos de 600 caracteres con procedencia y precision temporal de
+sesion. La consulta conserva propuestas y vencimientos, incluso al citar una
+pregunta antigua (CA-26). El contexto reciente enriquecido con resultados de
+acciones mantiene implementacion pendiente. La continuidad con el WhatsApp operativo
+conserva el alcance posterior de C4/C5.
 
 Si el paciente interrumpe la pregunta de reserva al responder, el laboratorio
 conserva nombre, motivo y horario y solicita otra confirmacion revalidada en el

@@ -76,3 +76,5 @@ indique cual decision anterior queda obsoleta.
   — override explicito de pruebas; default 5 y cuota diaria pendiente.
 - [0060 - Confirmacion explicita tras turnos VAD intermedios](./0060-explicit-voice-confirmation-after-vad-turns.md)
   — permite la secuencia posterior solo con transcripcion afirmativa actual y pregunta completa.
+- [0061 - Contexto historico y apertura independiente de llamadas de laboratorio](./0061-laboratory-history-and-call-boundaries.md)
+  — adopcion parcial en `/lab`: saludo aislado y consulta historica implementados; contexto reciente enriquecido pendiente.

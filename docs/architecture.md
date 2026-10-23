@@ -21,7 +21,7 @@ ngrok
 FastAPI + Uvicorn
     |
     v
-FastAPI parsea mensajes de texto
+FastAPI procesa mensajes de texto y callbacks de entrega
     |
     v
 Conversation Service
@@ -214,6 +214,37 @@ emitio completa, permite confirmarla. Sin transcripcion clara se renueva la
 pregunta; no se utiliza texto de turnos anteriores ni de otra sesion (ADR 0060).
 
 ## Arquitectura objetivo
+
+### Incremento aprobado: contexto historico de `/lab` (ADR 0061)
+
+Contrato documentado el 21 de octubre de 2026, con apertura independiente adoptada
+y comprobada con dobles (CA-22). Se propone separar tres responsabilidades: sesion
+actual, antecedentes historicos del perfil y gestion/autorizacion vigentes del
+backend. Cada llamada
+genera su saludo con `conversation=none`, `input=[]`, `tools=[]` y `tool_choice=none`;
+los turnos actuales conservan la conversacion predeterminada con historial. La
+cancelacion del saludo corta audio y cancela por ID sin recortar items remotos
+fuera de banda. El contexto enriquecido con fecha, canal, sesion y resultado
+conocido mantiene implementacion pendiente.
+
+La ventana reciente conserva 12 mensajes y `search_conversation_history` ya
+consulta temas mas antiguos por palabras, fecha de sesion y canal, limitada al
+perfil del servidor y excluyendo la sesion actual. `VoiceRepository.search_history`
+usa SELECT parametrizado/read-only y retorna hasta seis fragmentos de 600
+caracteres con procedencia y precision temporal declarada. La auditoria sigue en
+`voice_tool_calls`. Un turno de solo consulta no invalida propuestas al finalizar
+ni vincula preguntas citadas a una autorizacion actual, tanto en voz como en texto.
+Los vencimientos y las reglas de interrupcion/cierre mantienen su control previo.
+El resultado de una gestion se respaldara en registros de acciones/herramientas; la agenda
+seguira determinando la vigencia actual. Leer antecedentes no activa gestiones ni
+autoriza acciones. Retomar explicitamente revalida datos/agenda y exige propuesta
+y pregunta nuevas conforme a los controles existentes de voz y texto.
+
+La [ADR 0061](./decisions/0061-laboratory-history-and-call-boundaries.md) y los
+criterios CA-22 a CA-26 de 021 fijan esa frontera para el paciente ficticio de
+`/lab`; las conversaciones del WhatsApp operativo mantienen su integracion aparte.
+
+### Direccion general
 
 ```text
 WhatsApp
@@ -424,6 +455,71 @@ y agrega resumen/prioridad despues. Spec 020 y ADR 0053 registran el alcance.
 
 ### Notificaciones al doctor
 
+La captura y la disponibilidad del transporte son independientes. Con
+`DOCTOR_NOTIFICATION_TRANSPORT=template`, nombre o idioma pendientes conservan
+las entregas en `pending` con un motivo y sin llamadas de resumen/envio. La puerta
+se aplica en el disparador y en el entregador. Las bandejas existentes guardan el
+evento: chat mantiene `notifications_completed=0` en `reply_outbox`; ambos canales
+lo recuperan en sus ciclos de lifespan, incluso sin otro mensaje del paciente.
+Los marcadores de composicion diferida nunca se despachan. El transporte omitido
+mantiene `text` por compatibilidad. El adaptador de plantillas requiere tambien un
+mapeo explicito de componentes; completar dos variables no acredita aprobacion de Meta.
+
+Limite operativo comprobado: el modo `text` envia texto libre, sujeto a la
+ventana de 24 h iniciada por un mensaje del doctor al numero del bot. Meta puede
+aceptar el POST y luego devolver `failed/131047`. El `sent` local actual significa
+aceptacion inicial, no recepcion. `delivery_status` distingue esa aceptacion de los
+estados confirmados por Meta. El envio por plantilla y los callbacks estan
+implementados, con configuracion real aprobada pendiente en 011. La integracion de voz no elimina esas
+restricciones de WhatsApp.
+
+Los callbacks entran a `whatsapp_delivery_receipts` en la base de chat antes de
+confirmarse al proveedor. `notification_statuses.py` correlaciona por ID y
+destinatario con intentos de chat y voz; proyecta en segundo plano y recupera
+pendientes cada 5 s. Una transaccion por destino y el ACK individual del inbox
+permiten reaplicar tras reiniciar sin perder callbacks tempranos, duplicar
+programaciones ni retroceder estados. Solo se guardan codigos de error seguros.
+La base de voz conserva su esquema e identidades aislados.
+
+`notification_template.py` adapta los datos saneados del compositor al orden y
+agrupacion del JSON de componentes configurado. El cuerpo y `template_data_json`
+se congelan por evento; al reclamar la entrega se conserva `template_payload_json`
+con nombre, idioma y componentes. Las bases de chat y voz usan una migracion
+compartida y opcional para esos snapshots. `WhatsAppClient.send_template()` utiliza
+el mismo HTTP de texto y el destinatario de la entrega, sin un servicio adicional.
+El mapeo real permanece vacio; los layouts de pruebas son ficticios.
+
+`notification_recovery.py` comparte el ciclo de arranque/polling entre los
+adaptadores de chat y laboratorio. `notification_retry.py` clasifica los fallos y
+calcula la espera persistida. La elegibilidad tambien se exige al reclamar en SQL.
+Los rechazos de configuracion quedan detenidos por huella relevante; `sending`
+incierto espera conciliacion explicita. No se liberan reclamaciones por tiempo.
+`doctor_notification_attempts` audita contenido, version local y parametros de cada
+despacho y su conciliacion. La bandeja guarda evento y contexto congelados, de
+modo que su recuperacion no depende de volver a consultar o modificar la agenda.
+
+`notification_trigger.py` es la entrada comun de chat y voz/texto de `/lab` para
+composicion y entrega. Ambas entradas usan la conversion tipada de
+`notification_domain.py`, el mismo compositor, bloques, destinatarios y cliente
+WhatsApp. El webhook conserva la entrega posterior a la respuesta al paciente.
+`VoiceTools` guarda el evento con el resultado definitivo y despierta a
+`VoiceDoctorNotifications`, una tarea del lifespan que recupera pendientes al
+arrancar y cada 60 s, sin añadir latencia de resumen/envio al turno de audio.
+
+La SQLite exclusiva de voz agrega `voice_notification_events` y reutiliza
+`doctor_notifications` mediante `notification_schema.py`; conserva identidades
+ficticias sin referencias a la base operativa. Nombre y limites de secuencia se
+congelan por evento; el contexto solo incluye transcripciones disponibles de la
+sesion/gestion y salidas completas. La clave `voice:<sesion>:<accion>:<herramienta>`
+evita colisiones con chat y otras llamadas. No se notifican retroactivamente
+acciones antiguas que carecen de evento persistido. El perfil ficticio no tiene
+telefono vinculado y el mismo formato presenta `Telefono: No informado`.
+
+Un reintento reutiliza el cuerpo preparado y nunca ejecuta de nuevo la agenda.
+Los fallos previos de resumen permiten completar el cuerpo antes del primer
+envio. Una fila ya reclamada no puede enviarse concurrentemente; `sending` incierto
+queda para conciliacion. El detalle esta en RF-1111 de 011 y ADR 0019 ampliada.
+
 Esta capacidad esta implementada en `specs/011-doctor-notifications/`. Los cortes 1
 a 5 implementaron la emision de eventos internos despues de una operacion exitosa
 de `create_appointment`, `reschedule_appointment` o `cancel_appointment`, una
@@ -477,7 +573,7 @@ ToolExecutor
     respuesta al paciente confirmada
             |
             v
-    DoctorNotificationService -> SQLite -> DoctorNotificationDeliveryService
+    DoctorNotificationTrigger -> SQLite -> DoctorNotificationDeliveryService
                                       -> WhatsAppClient -> Doctores configurados
 ```
 

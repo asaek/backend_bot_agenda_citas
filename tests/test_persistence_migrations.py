@@ -2,11 +2,62 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
+from itertools import product
 
 from persistence import SQLiteDatabase
+from repositories import DoctorNotificationRepository
+from voice_repository import VoiceRepository
 
 
 class PersistenceMigrationTests(unittest.TestCase):
+    def test_existing_chat_and_voice_notices_gain_template_snapshots_without_rewriting_them(self) -> None:
+        for kind, status in product(("chat", "voice"), ("sent", "failed", "sending")):
+            with self.subTest(kind=kind, status=status), tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, "notices.sqlite3")
+                with closing(sqlite3.connect(path)) as connection:
+                    connection.executescript("""
+                        CREATE TABLE doctor_notifications (
+                            id INTEGER PRIMARY KEY, event_key TEXT NOT NULL, recipient_number TEXT NOT NULL,
+                            notification_type TEXT NOT NULL, patient_id INTEGER NOT NULL,
+                            conversation_id INTEGER NOT NULL, appointment_id TEXT NOT NULL, body TEXT NOT NULL,
+                            status TEXT NOT NULL, attempt_count INTEGER NOT NULL, last_error TEXT,
+                            provider_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                            sent_at TEXT, UNIQUE(event_key, recipient_number)
+                        );
+                        INSERT INTO doctor_notifications VALUES (
+                            1, 'legacy-event', '5491100000001', 'appointment_scheduled', 1, 1,
+                            'appointment-1', 'Aviso historico', 'sent', 1, NULL, 'wamid.legacy',
+                            '2026-10-17T12:00:00+00:00', '2026-10-17T12:00:00+00:00',
+                            '2026-10-17T12:00:00+00:00'
+                        );
+                    """)
+                    connection.execute("UPDATE doctor_notifications SET status=?", (status,))
+                    connection.commit()
+                if kind == "chat":
+                    repository = SQLiteDatabase(path)
+                    repository.initialize()
+                else:
+                    repository = VoiceRepository(path)
+                    repository.start()
+                    repository.close()
+                    repository.start()
+                try:
+                    with closing(sqlite3.connect(path)) as connection:
+                        connection.row_factory = sqlite3.Row
+                        record = DoctorNotificationRepository().get_by_id(connection, 1)
+                    self.assertEqual((record.body, record.status, record.attempt_count, record.provider_message_id),
+                                     ("Aviso historico", status, 1, "wamid.legacy"))
+                    self.assertIsNone(record.template_data_json)
+                    self.assertIsNone(record.template_payload_json)
+                    self.assertEqual(record.retry_kind, {"sent": "ready", "failed": "configuration", "sending": "uncertain"}[status])
+                    self.assertIsNone(record.next_attempt_at)
+                    self.assertEqual(record.delivery_status, "accepted" if status == "sent" else None)
+                    self.assertIsNone(record.delivery_status_at)
+                finally:
+                    if kind == "voice":
+                        repository.close()
+
     def test_reply_outbox_is_added_without_rewriting_historical_messages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database_path = os.path.join(directory, "chatbot.sqlite3")

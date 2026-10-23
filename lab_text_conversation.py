@@ -33,9 +33,11 @@ class TextMedia:
 
 
 class LaboratoryTextConversation:
-    def __init__(self, *, repository, settings, provider_factory, business_hours, profile):
+    def __init__(self, *, repository, settings, provider_factory, business_hours, profile,
+                 calendar_provider_name="fake", notifications=None):
         self.repository, self.settings = repository, settings
         self.provider_factory, self.business_hours, self.profile = provider_factory, business_hours, profile
+        self.calendar_provider_name, self.notifications = calendar_provider_name, notifications
         self.session = None
         self._watcher = None
 
@@ -44,7 +46,8 @@ class LaboratoryTextConversation:
             return self.session
         await self.close()
         session = VoiceSession(session_id="text-" + uuid4().hex, media=TextMedia(), provider=self.provider_factory(),
-            repository=self.repository, settings=self.settings, business_hours=self.business_hours, profile=self.profile)
+            repository=self.repository, settings=self.settings, business_hours=self.business_hours, profile=self.profile,
+            calendar_provider_name=self.calendar_provider_name, notifications=self.notifications)
         self.session = session
         try:
             await session.negotiate("")

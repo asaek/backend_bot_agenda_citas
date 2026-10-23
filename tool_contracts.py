@@ -194,6 +194,19 @@ def realtime_tool_definitions() -> list[dict[str, object]]:
         "description": "Retoma una propuesta en este canal o inicia una gestion nueva solo cuando el paciente lo pide explicitamente. Retomar devuelve una pregunta y autorizacion nuevas.",
         "parameters": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["resume", "new"]}},
                        "required": ["mode"], "additionalProperties": False}})
+    definitions.append({"type": "function", "name": "search_conversation_history",
+        "description": (
+            "Consulta antecedentes de voz o texto del mismo paciente, incluso fuera del historial reciente. "
+            "Busca palabras del tema sin distinguir acentos/mayusculas; hasta ocho palabras. "
+            "Las fechas inclusivas YYYY-MM-DD filtran el inicio de sesion en la zona de la agenda, no la hora exacta del turno. "
+            "Devuelve hasta seis fragmentos de 600 caracteres con procedencia. Solo consulta: no retoma ni confirma gestiones."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "maxLength": 120, "description": "Palabras del tema; omite para consultar solo por fecha/canal."},
+            "start_date": {"type": "string", "format": "date", "description": "Primera fecha incluida, YYYY-MM-DD."},
+            "end_date": {"type": "string", "format": "date", "description": "Ultima fecha incluida, YYYY-MM-DD."},
+            "channel": {"type": "string", "enum": ["voice", "text"], "description": "Canal de origen; omite para consultar ambos."},
+        }, "additionalProperties": False}})
     return definitions
 
 

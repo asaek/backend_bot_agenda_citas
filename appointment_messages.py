@@ -12,13 +12,13 @@ class AppointmentMessageAudience(StrEnum):
     DOCTOR = "doctor"
 
 
-def render_appointment_message(
+def appointment_message_fields(
     appointment: Appointment,
     *,
     tool_name: ToolName,
     patient_name: str | None,
     audience: AppointmentMessageAudience,
-) -> str:
+) -> dict[str, str]:
     """Presenta datos definitivos sin consultas externas ni identificadores internos."""
     event_label = {
         ToolName.CREATE_APPOINTMENT: "Cita agendada",
@@ -43,21 +43,39 @@ def render_appointment_message(
         date_label = f"{start:%d/%m/%Y}"
         time_label = format_patient_time(start)
     name = _compact_text(patient_name or "") or "No informado"
-    phone = re.sub(r"\D", "", appointment.patient_scope.whatsapp_number)
+    number = appointment.patient_scope.whatsapp_number
+    phone = re.sub(r"\D", "", number)[-10:] if re.fullmatch(r"\+?\d+", number) else "No informado"
+    return {
+        "title": title, "event_type": event_label, "date": date_label, "time": time_label,
+        "reason": _compact_text(appointment.reason), "status": status_label,
+        "patient_name": name, "patient_phone": phone,
+    }
+
+
+def render_appointment_message(
+    appointment: Appointment,
+    *,
+    tool_name: ToolName,
+    patient_name: str | None,
+    audience: AppointmentMessageAudience,
+) -> str:
+    fields = appointment_message_fields(
+        appointment, tool_name=tool_name, patient_name=patient_name, audience=audience,
+    )
     return "\n".join(
         (
-            title,
-            f"Tipo de evento: {event_label}",
+            fields["title"],
+            f"Tipo de evento: {fields['event_type']}",
             "",
             "CITA",
-            f"Fecha: {date_label}",
-            f"Hora: {time_label}",
-            f"Motivo: {_compact_text(appointment.reason)}",
-            f"Estado: {status_label}",
+            f"Fecha: {fields['date']}",
+            f"Hora: {fields['time']}",
+            f"Motivo: {fields['reason']}",
+            f"Estado: {fields['status']}",
             "",
             "PACIENTE",
-            f"Nombre: {name}",
-            f"Telefono: {phone[-10:]}",
+            f"Nombre: {fields['patient_name']}",
+            f"Telefono: {fields['patient_phone']}",
         )
     )
 

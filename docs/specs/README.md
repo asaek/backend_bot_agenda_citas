@@ -51,3 +51,6 @@ NNN-nombre-de-la-funcionalidad/
   voz Realtime, agenda Google opcional de laboratorio y continuidad ficticia;
   escucha fisica, identidad operativa e integracion con Meta pendientes. Incluye
   metricas/costo (CA-18), agenda (CA-19), cuota visible (CA-20) y futura cuota diaria (CA-21).
+  El contrato de contexto historico y apertura propia de `/lab` (CA-22 a CA-25,
+  ADR 0061) tiene adopcion parcial: apertura aislada CA-22 comprobada con dobles;
+  consulta de temas antiguos CA-26 disponible; contexto reciente enriquecido pendiente.

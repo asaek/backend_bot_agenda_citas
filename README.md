@@ -136,6 +136,16 @@ acepta `unlimited` para pruebas controladas. Es una cuota de sesiones, no un lim
 monetario de OpenAI; la cuota diaria queda pendiente antes de uso operativo.
 
 En `http://localhost:8001/lab`, deja **Micrófono** y pulsa **Conectar e iniciar llamada**.
+Cada llamada comienza con un saludo generado con contexto vacio y herramientas
+deshabilitadas. El historial reciente de voz/texto se prepara al conectar y sigue
+disponible para atender tu intervencion. Puedes interrumpir el saludo hablando
+o escribiendo: se cancela y se atiende tu turno, sin reiniciarlo despues. La ventana
+actual conserva 12 mensajes. El agente puede consultar antecedentes mas antiguos
+con `search_conversation_history`, por palabras del tema, fechas inclusivas y canal.
+Recibe hasta seis fragmentos de 600 caracteres del mismo perfil, con procedencia
+y fecha de inicio de sesion identificada como tal. Consultar no retoma gestiones,
+modifica propuestas ni renueva autorizaciones. El contexto reciente enriquecido
+con resultados de acciones sigue pendiente.
 Tambien puedes elegir **Muestra de voz (archivo)**: acepta hasta 30 s/2 MB y envia
 la muestra despues del saludo del modelo. `assets/voice-availability-sample.wav`
 pregunta por disponibilidad de mañana y permite probar una herramienta sin microfono.
@@ -447,6 +457,167 @@ normaliza numeros E.164 y elimina duplicados. El webhook recolecta los eventos d
 agenda confirmados, envia y persiste primero la respuesta del paciente y despues
 compone y entrega las notificaciones.
 
+La configuracion de entrega al doctor agrega:
+
+```dotenv
+DOCTOR_NOTIFICATION_TRANSPORT=template
+DOCTOR_WHATSAPP_TEMPLATE_NAME=
+DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE=
+DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS=
+```
+
+La bandera de avisos habilita su captura, independientemente de la disponibilidad
+del transporte. Con `template` y datos vacios, el aviso queda `pending` con el
+motivo `Configuración de plantilla incompleta.`, sin reclamar un intento de envio
+ni invocar el resumidor. La cita y su confirmacion al paciente siguen su curso.
+Un transporte desconocido o datos mal formados tambien retienen el aviso con un
+motivo estable. Nombre e idioma se recortan y validan por formato; esta validacion
+no acredita aprobacion por Meta. `WhatsAppClient.send_template()` implementa el
+envio mediante la misma Cloud API. Al completar nombre e idioma tambien se requiere
+un mapeo explicito en `DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS`; vacio conserva el aviso
+con `Mapeo de plantilla pendiente.`. Los tres valores de la plantilla real siguen
+pendientes de recibir los datos aprobados.
+
+El mapeo es un arreglo JSON de componentes de texto (`header`, `body` y botones
+`url`), conservando el orden y los nombres `parameter_name` cuando la plantilla
+los requiera. Cada parametro usa `text` con referencias a `event_type`, `status`,
+`date`, `time`, `reason`, `patient_name`, `patient_phone`, `summary` y
+`priority_signals`. Se pueden agrupar varios datos en una variable, sin fijar su
+cantidad. `notification_body` representa el aviso completo como alternativa. El
+mapeo debe conservar todos los datos del aviso; referencias desconocidas o un
+mapeo incompleto retienen el evento. El texto de los parametros se compacta para
+evitar saltos y tabuladores, conservando el cuerpo original en SQLite.
+
+Ejemplo **ficticio**, no configurado como plantilla real:
+
+```json
+[
+  {"type":"header","parameters":[{"type":"text","text":"{event_type}: {status}"}]},
+  {"type":"body","parameters":[
+    {"type":"text","parameter_name":"cita","text":"{date} {time}; {reason}"},
+    {"type":"text","parameter_name":"paciente","text":"{patient_name}: {patient_phone}"},
+    {"type":"text","parameter_name":"resumen","text":"{summary} {priority_signals}"}
+  ]}
+]
+```
+
+La estructura real debe copiar los componentes, el orden y los nombres que Meta
+apruebe. Los datos estructurados se guardan junto al cuerpo y, al reclamar el primer
+envio, se congela nombre, idioma y componentes por entrega. Los reintentos conocidos
+reutilizan ese contenido incluso tras reiniciar; una respuesta perdida o sin ID
+queda incierta y no causa otro envio automatico.
+
+Si la variable de transporte no existe se conserva `text`, por compatibilidad;
+`.env.example` selecciona `template` explicitamente. Los destinatarios siguen
+resolviendose exclusivamente desde `DOCTOR_WHATSAPP_NUMBERS`. Chat conserva el
+snapshot del evento y deja su notificacion sin completar en `reply_outbox`; un
+webhook repetido puede retomarla sin repetir la cita ni la respuesta del paciente.
+El laboratorio conserva el evento y lo recupera mediante su ciclo existente.
+Chat y laboratorio recuperan sus avisos al arrancar y cada 60 s mediante el mismo
+ciclo de recuperacion. El chat puede hacerlo sin otro mensaje del paciente y
+recupera tambien la interrupcion entre confirmar al paciente y capturar el aviso.
+Se usan solamente eventos persistidos; la recuperacion no llama herramientas de agenda.
+
+Cada entrega conserva evento, contexto acotado, contenido y datos de plantilla.
+Los intentos quedan en `doctor_notification_attempts`, con cuerpo, payload,
+revision local de plantilla, fechas y resultado. La revision local identifica la
+configuracion utilizada, no inventa una revision interna de Meta.
+
+- Fallos de conexion previos al despacho, HTTP 429/5xx y errores transitorios de
+  Meta: espera persistida de 60, 120, 240 segundos, etc., hasta 3600 s. Se respeta
+  `Retry-After` cuando exige mas espera, hasta 24 horas.
+- Rechazos de autenticacion/configuracion: quedan detenidos hasta detectar una
+  correccion de los datos relevantes o credenciales. Los errores de composicion
+  tambien tienen espera y no incrementan los intentos de envio.
+- Respuesta perdida o sin ID, tanto en texto como plantilla: estado `sending`
+  incierto, sin vencimiento que autorice otro envio.
+
+Las correcciones se sincronizan y cargan mediante la recarga habitual del backend
+y laboratorio. Una entrega ya registrada mantiene sus destinatarios; agregar otro
+doctor solo afecta eventos nuevos. Un destinatario retirado queda detenido mientras
+no este configurado. Los reintentos transitorios usan el payload original. Si Meta
+rechazo definitivamente una configuracion y esta se corrige, el siguiente intento
+puede usar la configuracion corregida, conservando la anterior en su auditoria.
+
+Para conciliar un envio incierto, comprueba primero que el intento termino y
+obtiene evidencia externa. Si el proceso se interrumpio, verifica que ya no siga
+despachando. Sustituye `ID` y `N` en el comando ejecutado desde la raiz de Raspberry:
+
+```sh
+.venv/bin/python scripts/reconcile_doctor_notification.py \
+  --database data/chatbot.sqlite3 --notification-id ID --attempt N \
+  --outcome accepted --provider-message-id wamid.RECUPERADO \
+  --reason "Referencia tecnica de la comprobacion"
+```
+
+`accepted` exige el ID recuperado de Meta y evita otro envio; `not_delivered`
+habilita un nuevo intento solo con ausencia de entrega comprobada. La utilidad
+guarda la referencia y rechaza un numero de intento obsoleto. `configuration_fixed`
+permite liberar un bloqueo tras una correccion externa que no cambio las variables
+(por ejemplo, aprobacion en Meta). Para laboratorio se usa
+`data/calling-lab-voice.sqlite3`. La utilidad concilia, pero no envia mensajes.
+
+Para verificar dos conversaciones distintas, usa un WhatsApp de paciente diferente
+de los numeros de `DOCTOR_WHATSAPP_NUMBERS`. Si pruebas como paciente desde el mismo
+numero del doctor, la `CONFIRMACION DE CITA` y la `NOTIFICACION INTERNA DE CITA`
+son mensajes separados dirigidos a la misma cuenta y aparecen en un solo chat.
+El resumen y las señales de prioridad pertenecen al aviso interno. La
+[auditoria de destinatarios](docs/verification/2026-10-22-doctor-notification-routing.md)
+contrasta los registros y la configuracion efectiva de Raspberry.
+
+El chat y voz/texto de `/lab` usan `DoctorNotificationTrigger`: comparten formato,
+resumen, señales de prioridad, destinatarios y envio. En laboratorio, el evento
+se guarda junto al resultado de la cita y se procesa fuera del audio; los avisos
+pendientes se recuperan al arrancar y cada 60 segundos, sin repetir la agenda.
+Los reintentos conservan el cuerpo preparado. Una propuesta, un rechazo o un fallo
+de agenda no notifica. Las acciones antiguas sin evento persistido no se reejecutan
+ni notifican retroactivamente. El perfil ficticio muestra `Telefono: No informado`.
+`DOCTOR_NOTIFICATIONS_ENABLED=true` habilita tambien estos envios: con agenda fake
+los datos son simulados, pero el destinatario y el envio WhatsApp son los configurados.
+La entrega efectiva requiere un token de Meta vigente. En modo `text` el envio es
+texto libre: Meta exige que el doctor le haya escrito al numero del bot dentro de las
+ultimas 24 horas. Fuera de esa ventana se necesita una plantilla aprobada por Meta;
+el adaptador esta implementado, pero la plantilla real y su mapeo aprobado siguen
+pendientes. Un HTTP 200 con ID de mensaje confirma
+aceptacion inicial, pero Meta puede rechazar la entrega despues con `131047`.
+El control interno `status=sent` conserva el significado de aceptacion inicial;
+la entrega real se consulta en `delivery_status`, no se deduce de HTTP 200. Ver el
+[diagnostico de entrega](docs/verification/2026-10-22-whatsapp-doctor-delivery-window.md).
+
+El webhook persiste los estados de Meta en `whatsapp_delivery_receipts` dentro de
+la base operativa de chat. El historial conserva ID, destinatario normalizado,
+estado, timestamp y codigos numericos de error, sin guardar cuerpos de error crudos.
+La proyeccion actualiza tanto avisos de chat como de voz por ID de Meta **y**
+destinatario. No usa el telefono por si solo ni ejecuta conversacion o envios.
+
+| `delivery_status` | Significado |
+| --- | --- |
+| `accepted` | La API devolvio un identificador; todavia no confirma envio al destinatario |
+| `sent` | Meta informa que envio el mensaje |
+| `delivered` | Meta informa que llego al destinatario |
+| `read` | Meta informa lectura |
+| `failed` | Meta informa fallo de entrega |
+
+`api_accepted_at` conserva la aceptacion aunque despues falle; `delivery_status_at`
+conserva la fecha del estado de Meta. La auditoria de cada intento mantiene su
+propio estado. Los callbacks tardios de un intento antiguo no cambian el intento
+actual. Los avisos historicos con ID se migran como `accepted`, sin inventar entrega.
+
+Primero se confirma el almacenamiento del callback y despues se proyecta en
+segundo plano. Un ciclo al arrancar y cada 5 s retoma los que llegaron antes de
+guardar el ID o mientras la base de voz estaba indisponible. Duplicados exactos no
+crean otra entrada; un estado atrasado no revierte lectura o entrega. `failed`
+prevalece sobre `sent`, pero no sobre evidencia de `delivered`/`read`. El historial
+completo se conserva incluso ante estados contradictorios. Un callback nuevo que
+llegue durante otra proyeccion conserva su propio estado pendiente.
+
+Un fallo asincrono del intento actual alimenta la espera o bloqueo de configuracion
+existentes, sin programar el mismo fallo dos veces. La aceptacion de otro intento
+no reinicia la espera exponencial; la entrega/lectura confirmada si la reinicia y
+cancela el reintento pendiente. La conciliacion de una respuesta perdida puede
+recuperar el ID y permitir correlacionar callbacks ya guardados. Si no se consigue
+persistir un callback valido, el webhook devuelve 503 para que Meta lo repita.
+
 Cuando se usa Google, SQLite conserva la identidad local de cada cita en la tabla
 `appointments`. El ID que reciben las herramientas es el `id` interno; el
 `google_event_id` queda separado junto con `calendar_id`, paciente, estado, fechas,
@@ -498,7 +669,7 @@ posteriores al evento y sintomas sugeridos por el asistente. Pocas lagañas al
 despertar o sintomas negados no fuerzan una señal.
 `DoctorNotificationDeliveryService` reutiliza `WhatsAppClient`, intenta
 cada destinatario de forma independiente y normaliza los errores antes de
-persistirlos. `main.py` conecta el compositor y el entregador al ciclo del webhook;
+persistirlos. `main.py` conecta el disparador compartido al webhook y al laboratorio;
 los errores del doctor se registran sin cambiar la respuesta ya enviada al paciente.
 Su alcance, diseno y cortes estan documentados en
 `docs/specs/011-doctor-notifications/`.

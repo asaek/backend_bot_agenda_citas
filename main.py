@@ -1,6 +1,8 @@
 import json
+import asyncio
 import logging
 import os
+import sqlite3
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import time
@@ -9,7 +11,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
@@ -33,14 +35,8 @@ from llm_provider import (
     create_llm_provider,
     load_llm_settings,
 )
-from notification_composer import (
-    DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES,
-    DoctorNotificationService,
-)
-from notification_delivery import (
-    DoctorNotificationDeliveryService,
-    create_doctor_notification_delivery,
-)
+from notification_trigger import DoctorNotificationTrigger
+from notification_composer import DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES
 from debug_reporting import format_debug_fallback_reply
 from notification_domain import AppointmentNotificationEvent
 from persistence import DEFAULT_DATABASE_PATH, SQLiteDatabase
@@ -62,7 +58,21 @@ async def application_lifespan(application: FastAPI):
             application.state.calendar_provider,
             availability_provider=application.state.availability_provider,
         )
-    yield
+    notifications = create_chat_notification_worker()
+    statuses = create_meta_status_worker()
+    application.state.doctor_notifications = notifications
+    application.state.meta_status_worker = statuses
+    if notifications:
+        notifications.start()
+    if statuses:
+        statuses.start()
+    try:
+        yield
+    finally:
+        if notifications:
+            await notifications.close()
+        if statuses:
+            await statuses.close()
 
 
 app = FastAPI(title="WhatsApp Chatbot", lifespan=application_lifespan)
@@ -253,98 +263,64 @@ def _environment_flag(value: str | None, *, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def create_doctor_notification_service(
-    database: SQLiteDatabase,
-    summary_provider: LLMProvider | None,
-    *,
-    max_history_messages: int = DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES,
-) -> DoctorNotificationService | None:
-    """Compone el servicio de resumen con el mismo proveedor LLM del runtime."""
-    if summary_provider is None:
+def create_chat_notification_worker():
+    if not _environment_flag(os.getenv("DOCTOR_NOTIFICATIONS_ENABLED"), default=False):
         return None
-    return DoctorNotificationService(
-        database,
-        summary_provider,
-        max_history_messages=max_history_messages,
-    )
+    from chat_notifications import ChatDoctorNotifications
+
+    def trigger_factory(database):
+        provider = None
+        limit = DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES
+        try:
+            settings = load_llm_settings()
+            provider = create_llm_provider(settings)
+            limit = settings.max_history_messages
+        except LLMConfigurationError:
+            pass
+        return DoctorNotificationTrigger(database, provider, max_history_messages=limit)
+
+    return ChatDoctorNotifications(os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH), trigger_factory)
+
+
+def create_meta_status_service():
+    from notification_statuses import MetaDeliveryStatusService
+    chat_path = os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)
+    lab_path = Path(os.getenv("LAB_DATABASE_PATH", "data/calling-lab.sqlite3"))
+    voice_path = os.getenv("VOICE_DATABASE_PATH", str(lab_path.with_name(lab_path.stem + "-voice.sqlite3")))
+    return MetaDeliveryStatusService(chat_path, {"chat": chat_path, "voice": voice_path})
+
+
+def create_meta_status_worker():
+    from notification_statuses import MetaDeliveryStatusWorker
+    return MetaDeliveryStatusWorker(create_meta_status_service())
 
 
 async def deliver_doctor_notifications(
     conversation_service: ConversationService,
     whatsapp_client: WhatsAppClient,
     events: list[AppointmentNotificationEvent],
-) -> None:
+) -> bool:
     """Entrega eventos ya confirmados sin propagar fallos al paciente."""
     if not events:
-        return
+        return True
 
     try:
-        delivery_service: DoctorNotificationDeliveryService = (
-            create_doctor_notification_delivery(
-                conversation_service.database,
-                whatsapp_client=whatsapp_client,
-            )
-        )
+        trigger = DoctorNotificationTrigger(conversation_service.database, conversation_service.llm_provider,
+            whatsapp_client=whatsapp_client, max_history_messages=conversation_service.max_history_messages)
     except Exception as error:
         logger.warning(
             "No se pudo configurar la entrega al doctor: %s",
             type(error).__name__,
         )
-        return
+        return False
 
-    if not delivery_service.settings.enabled:
-        return
-
-    composition_service = create_doctor_notification_service(
-        conversation_service.database,
-        conversation_service.llm_provider,
-        max_history_messages=conversation_service.max_history_messages,
-    )
-    if composition_service is None:
-        logger.warning("No hay proveedor LLM para componer la notificacion al doctor")
-        return
-
+    if not trigger.enabled:
+        return True
+    completed = True
     for event in events:
-        try:
-            notification = await composition_service.compose(event)
-        except Exception as error:
-            try:
-                delivery_service.record_failed(
-                    event,
-                    error="No se pudo construir la notificacion al doctor.",
-                )
-            except Exception as persistence_error:
-                logger.warning(
-                    "No se pudo registrar el fallo de notificacion (%s): %s",
-                    event.notification_type.value,
-                    type(persistence_error).__name__,
-                )
-            logger.warning(
-                "No se pudo componer la notificacion al doctor (%s): %s",
-                event.notification_type.value,
-                type(error).__name__,
-            )
-            continue
-
-        try:
-            await delivery_service.deliver(event, notification.body)
-        except Exception as error:
-            try:
-                delivery_service.record_failed(
-                    event,
-                    error="No se pudo persistir la notificacion al doctor.",
-                )
-            except Exception as persistence_error:
-                logger.warning(
-                    "No se pudo registrar el fallo de notificacion (%s): %s",
-                    event.notification_type.value,
-                    type(persistence_error).__name__,
-                )
-            logger.warning(
-                "No se pudo completar la notificacion al doctor (%s): %s",
-                event.notification_type.value,
-                type(error).__name__,
-            )
+        notified = await trigger.notify(event)
+        completed = notified and completed
+    return completed
 
 
 def create_lab_app(
@@ -356,6 +332,7 @@ def create_lab_app(
     realtime_provider_factory=None,
     voice_settings=None,
     voice_database_path: str | Path | None = None,
+    doctor_notification_trigger_factory=None,
 ) -> FastAPI:
     """Crea solo el laboratorio: `uvicorn main:create_lab_app --factory`."""
     import asyncio
@@ -393,6 +370,7 @@ def create_lab_app(
         factory = media_factory
         session_factory = None
         voice_repository = None
+        doctor_notifications = None
         text_conversation = None
         maximum_seconds = float(os.getenv("LAB_MAXIMUM_SECONDS", "600"))
         if audio_mode == "realtime":
@@ -400,12 +378,27 @@ def create_lab_app(
             from voice_repository import VoiceRepository
             from voice_session import VoiceSession
             from lab_text_conversation import LaboratoryTextConversation
+            from voice_notifications import VoiceDoctorNotifications
 
             settings = voice_settings or RealtimeSettings.from_environment()
             voice_path = Path(voice_database_path or os.getenv("VOICE_DATABASE_PATH", str(repository.path.with_name(repository.path.stem + "-voice.sqlite3"))))
             if voice_path.resolve() in {repository.path.resolve(), Path(os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH)).resolve()}:
                 raise ValueError("VOICE_DATABASE_PATH requiere una base separada de llamadas y pacientes")
             voice_repository = VoiceRepository(voice_path)
+            if doctor_notification_trigger_factory is not None:
+                trigger = doctor_notification_trigger_factory(voice_repository)
+            else:
+                summary_provider = None
+                summary_history_limit = DEFAULT_NOTIFICATION_MAX_HISTORY_MESSAGES
+                try:
+                    summary_settings = load_llm_settings()
+                    summary_provider = create_llm_provider(summary_settings)
+                    summary_history_limit = summary_settings.max_history_messages
+                except LLMConfigurationError:
+                    logger.warning("No hay proveedor LLM configurado para los avisos de voz al doctor")
+                trigger = DoctorNotificationTrigger(voice_repository, summary_provider,
+                    max_history_messages=summary_history_limit)
+            doctor_notifications = VoiceDoctorNotifications(voice_repository, trigger)
             hours = create_business_hours()
             profile = os.getenv("VOICE_LAB_PROFILE", "developer").strip()
             if not profile or len(profile) > 100:
@@ -418,10 +411,12 @@ def create_lab_app(
                 provider=realtime_provider_factory() if realtime_provider_factory else OpenAIRealtimeProvider(settings),
                 repository=voice_repository, settings=settings, business_hours=hours, profile=profile,
                 calendar_provider_name=calendar_provider_name,
+                notifications=doctor_notifications,
             )
             text_conversation = LaboratoryTextConversation(repository=voice_repository, settings=settings,
                 provider_factory=realtime_provider_factory or (lambda: OpenAIRealtimeProvider(settings)),
-                business_hours=hours, profile=profile)
+                business_hours=hours, profile=profile, calendar_provider_name=calendar_provider_name,
+                notifications=doctor_notifications)
             maximum_seconds = min(maximum_seconds, settings.maximum_seconds)
         elif factory is None:
             from call_media import AiortcCallMedia, validate_greeting
@@ -439,11 +434,14 @@ def create_lab_app(
         try:
             if voice_repository:
                 voice_repository.start()
+            if doctor_notifications:
+                doctor_notifications.start()
             await service.start()
             laboratory.state.calling_service = service
             laboratory.state.conversation_lock = asyncio.Lock()
             laboratory.state.text_conversation = text_conversation
             laboratory.state.voice_repository = voice_repository
+            laboratory.state.doctor_notifications = doctor_notifications
             laboratory.state.pending_text_results = {}
             yield
         finally:
@@ -454,6 +452,8 @@ def create_lab_app(
                 finally:
                     await service.shutdown()
             finally:
+                if doctor_notifications:
+                    await doctor_notifications.close()
                 if voice_repository:
                     voice_repository.close()
 
@@ -769,12 +769,22 @@ async def verify_webhook(
 
 
 @app.post("/webhook/whatsapp")
-async def receive_webhook(request: Request) -> dict[str, str]:
+async def receive_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Procesa mensajes de texto, conserva la conversacion y responde."""
     try:
         payload = await request.json()
     except json.JSONDecodeError as error:
         raise HTTPException(status_code=400, detail="El cuerpo debe ser JSON valido") from error
+
+    from notification_statuses import extract_delivery_statuses
+    if extract_delivery_statuses(payload):
+        service = create_meta_status_service()
+        try:
+            await asyncio.to_thread(service.receive, payload, reconcile=False)
+        except (sqlite3.Error, OSError) as error:
+            logger.warning("No se pudo persistir un callback Meta: %s", type(error).__name__)
+            raise HTTPException(status_code=503, detail="No se pudo registrar el estado de entrega") from error
+        background_tasks.add_task(service.flush)
 
     messages = extract_text_messages(payload)
     if not messages:
@@ -867,5 +877,5 @@ async def _process_reply(
             body=reply,
             provider_message_id=extract_provider_message_id(result),
         )
-    await deliver_doctor_notifications(conversation_service, whatsapp_client, appointment_events)
-    delivery.complete_notifications(context)
+    if await deliver_doctor_notifications(conversation_service, whatsapp_client, appointment_events):
+        delivery.complete_notifications(context)

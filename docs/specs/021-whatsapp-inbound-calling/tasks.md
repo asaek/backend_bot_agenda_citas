@@ -235,7 +235,58 @@ Ver [causa y verificacion del formato](../../verification/2026-10-21-voice-mexic
 
 Ver [resultado de controles y continuidad ficticia](../../verification/2026-10-19-voice-text-controls.md).
 
+### Contexto historico y apertura independiente de `/lab` (21 de octubre)
+
+Contrato y alcance aprobados por el usuario. Se completaron el paso 1 documental
+y, por solicitud explicita posterior, el paso 3 de apertura independiente antes
+del contexto enriquecido del paso 2. La consulta historica del paso 4 tambien esta
+implementada; los pasos 2 y 5 mantienen trabajo pendiente.
+Corresponde a CA-22 a CA-26 y a la ADR 0061, exclusivamente para voz y mensajes
+del perfil ficticio de `/lab`.
+
+- [x] **Paso 1 — Contrato y SDD:** documentar saludo propio por llamada, historial
+      con fecha/canal/sesion/resultado conocido, recuperacion solo informativa y
+      retomar con revalidacion y pregunta nueva. Alinear especificacion, diseno,
+      alcance, arquitectura, vocabulario e indices, manteniendo el runtime pendiente.
+- [ ] **Paso 2 — Contexto historico:** construir antecedentes con procedencia y
+      resultado de herramientas/acciones, separados del estado vigente. Acotar la
+      ventana reciente y representar registros antiguos, emision interrumpida,
+      transcripcion ausente y resultado desconocido sin inferencias.
+- [x] **Paso 3 — Apertura de llamada:** aislar la generacion del saludo, deshabilitar
+      sus herramientas e incorporar los antecedentes al atender al paciente.
+      Comprobar interrupcion y ausencia de respuestas tardias del saludo cancelado.
+- [x] **Paso 4 — Consulta de historial:** concretar interfaz/limites e implementar
+      busqueda acotada por tema, fecha y canal dentro del perfil. Consultar no
+      activa, reemplaza ni retoma gestiones y no reutiliza autorizaciones.
+- [ ] **Paso 5 — Verificacion:** probar llamadas consecutivas tras gestion terminada
+      o pendiente, recuperacion texto/voz y fuera de ventana, resultado incierto,
+      interrupcion del saludo y retomar con pregunta nueva/disponibilidad cambiada.
+      Inspeccionar contexto enviado al proveedor y ausencia de mutaciones por leer
+      historial; sincronizar y ejecutar regresiones en la Pi antes de registrar
+      adopcion del contrato y evidencia de comportamiento.
+
+Salida actual: contrato aprobado y apertura independiente implementada (CA-22),
+con pruebas de memoria preparada, contexto vacio/sin herramientas, continuidad de
+voz/texto e interrupcion antes/despues del ACK y del evento de conexion. La ventana
+existente de 12 mensajes conserva su representacion previa. La consulta CA-26 ya
+busca fuera de esa ventana con aislamiento, filtros y fragmentos de procedencia;
+preserva propuestas incluso al terminar el turno o citar preguntas antiguas por
+voz/texto. El contexto reciente enriquecido y la correlacion de resultados siguen
+pendientes. Ver [apertura](../../verification/2026-10-21-isolated-voice-greeting.md)
+y [consulta historica](../../verification/2026-10-21-voice-history-search.md).
+
 ### Integracion operativa posterior
+
+Notificaciones de laboratorio, 22 de octubre de 2026:
+
+- [x] Compartir conversion de eventos, disparador, compositor y entregador con chat.
+- [x] Registrar avisos de crear/reprogramar/cancelar con el resultado de la accion.
+- [x] Recuperar avisos tras reinicios y reintentar solo la entrega fuera del audio.
+- [x] Pasar el mismo adaptador y proveedor de agenda a voz y texto de `/lab`.
+- [x] Verificar los tres eventos y fallos/reintentos con dobles en la Raspberry.
+
+Este avance parcial de entregas no completa las autorizaciones ni identidades
+operativas de C4. Evidencia: `2026-10-22-shared-doctor-notifications.md`.
 
 - [ ] Antes de uso operativo, diseñar e implementar una cuota diaria por perfil,
       con zona horaria y conteo persistente; `unlimited` queda reservado al entorno

@@ -1,8 +1,10 @@
 import asyncio
+import copy
+import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -24,6 +26,11 @@ class FakeDoctorWhatsAppClient:
     def __init__(self, failures: dict[str, Exception] | None = None) -> None:
         self.failures = failures or {}
         self.sent_messages: list[tuple[str, str]] = []
+        self.sent_templates = []
+
+    async def send_template(self, to, name, language_code, components):
+        self.sent_templates.append((to, name, language_code, copy.deepcopy(components)))
+        return {"messages": [{"id": "wamid.template"}]}
 
     async def send_text(self, to: str, body: str) -> dict[str, Any]:
         failure = self.failures.get(to)
@@ -102,7 +109,7 @@ class NotificationDeliveryTests(unittest.TestCase):
 
     def now(self) -> str:
         self.now_value += 1
-        return f"2026-09-20T12:00:{self.now_value:02d}+00:00"
+        return (datetime(2026, 9, 20, 12, tzinfo=timezone.utc) + timedelta(seconds=self.now_value)).isoformat()
 
     def service(
         self,
@@ -147,6 +154,80 @@ class NotificationDeliveryTests(unittest.TestCase):
             DoctorNotificationSettings(enabled=False, recipient_numbers=()),
         )
 
+    def test_incomplete_template_keeps_notification_capture_enabled(self) -> None:
+        settings = load_doctor_notification_settings({
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+            "DOCTOR_WHATSAPP_NUMBERS": "+5491100000001",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "template",
+            "DOCTOR_WHATSAPP_TEMPLATE_NAME": "",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "",
+        })
+
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.recipient_numbers, ("5491100000001",))
+        self.assertEqual(settings.transport, "template")
+        self.assertEqual(settings.template_name, "")
+        self.assertEqual(settings.template_language, "")
+        self.assertEqual(settings.configuration_error, "Configuración de plantilla incompleta.")
+
+    def test_template_delivery_freezes_fields_and_components_for_retries_after_reopening(self) -> None:
+        class FailOnceTemplateClient(FakeDoctorWhatsAppClient):
+            async def send_template(client, to, name, language_code, components):
+                result = await super().send_template(to, name, language_code, components)
+                if len(client.sent_templates) == 1:
+                    raise httpx.ConnectError("connection unavailable")
+                return result
+
+        fields = {
+            "event_type": "Cita agendada", "status": "confirmada", "date": "2026-09-21",
+            "time": "10:00-10:30", "reason": "Revision", "patient_name": "Ana Prueba",
+            "patient_phone": "1100000000", "summary": "Solicita una revision general.",
+            "priority_signals": "Ninguna detectada.",
+        }
+        mapping = [
+            {"type": "header", "parameters": [{"type": "text", "text": "{event_type}: {status}"}]},
+            {"type": "body", "parameters": [
+                {"type": "text", "parameter_name": "cita", "text": "{date} {time}; {reason}"},
+                {"type": "text", "parameter_name": "paciente", "text": "{patient_name}: {patient_phone}"},
+                {"type": "text", "parameter_name": "resumen", "text": "{summary} {priority_signals}"},
+            ]},
+        ]
+        settings = load_doctor_notification_settings({
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "template", "DOCTOR_WHATSAPP_TEMPLATE_NAME": "fixture_cita",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "es_MX",
+            "DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS": json.dumps(mapping),
+        })
+        client = FailOnceTemplateClient()
+        service = DoctorNotificationDeliveryService(self.database, client, settings, now=self.now)
+        first = asyncio.run(service.deliver(self.event, self.body, template_data=fields))
+        self.assertEqual(first.deliveries[0].status, "failed")
+        self.now_value += 60
+
+        reopened = SQLiteDatabase(self.database.path)
+        changed = load_doctor_notification_settings({
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "template", "DOCTOR_WHATSAPP_TEMPLATE_NAME": "otra_fixture",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "en_US",
+            "DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS": json.dumps(mapping),
+        })
+        service = DoctorNotificationDeliveryService(reopened, client, changed, now=self.now)
+        second = asyncio.run(service.deliver(self.event, "Otro cuerpo", template_data={"summary": "Otro resumen"}))
+        asyncio.run(service.deliver(self.event, "Otro intento"))
+        self.assertEqual(second.deliveries[0].status, "sent")
+        self.assertEqual(second.deliveries[0].attempt_count, 2)
+        self.assertEqual(client.sent_messages, [])
+        self.assertEqual(len(client.sent_templates), 2)
+        self.assertEqual(client.sent_templates[0], client.sent_templates[1])
+        self.assertEqual(client.sent_templates[1], ("5491100000001", "fixture_cita", "es_MX", [
+            {"type": "header", "parameters": [{"type": "text", "text": "Cita agendada: confirmada"}]},
+            {"type": "body", "parameters": [
+                {"type": "text", "parameter_name": "cita", "text": "2026-09-21 10:00-10:30; Revision"},
+                {"type": "text", "parameter_name": "paciente", "text": "Ana Prueba: 1100000000"},
+                {"type": "text", "parameter_name": "resumen", "text": "Solicita una revision general. Ninguna detectada."},
+            ]},
+        ]))
+
     def test_enabled_configuration_requires_valid_unique_recipients(self) -> None:
         invalid_values = ("", "5491100000001,", "not-a-number")
         for value in invalid_values:
@@ -158,6 +239,93 @@ class NotificationDeliveryTests(unittest.TestCase):
                             "DOCTOR_WHATSAPP_NUMBERS": value,
                         }
                     )
+
+    def test_template_gate_retains_notices_for_each_doctor_without_text_fallback(self) -> None:
+        cases = (
+            ({}, "Configuración de plantilla incompleta."),
+            ({"DOCTOR_WHATSAPP_TEMPLATE_NAME": "cita"}, "Configuración de plantilla incompleta."),
+            ({"DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "es_MX"}, "Configuración de plantilla incompleta."),
+            ({"DOCTOR_WHATSAPP_TEMPLATE_NAME": "Nombre Invalido", "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "es_MX"}, "Nombre de plantilla no válido."),
+            ({"DOCTOR_WHATSAPP_TEMPLATE_NAME": "cita", "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "spanish"}, "Idioma de plantilla no válido."),
+            ({"DOCTOR_NOTIFICATION_TRANSPORT": "unsupported"}, "Transporte de notificaciones no válido."),
+            ({"DOCTOR_WHATSAPP_TEMPLATE_NAME": " cita ", "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": " es_MX "}, "Mapeo de plantilla pendiente."),
+        )
+        client = FakeDoctorWhatsAppClient()
+        for changes, reason in cases:
+            with self.subTest(changes=changes):
+                settings = load_doctor_notification_settings({
+                    "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+                    "DOCTOR_WHATSAPP_NUMBERS": "5491100000001,5491100000002",
+                    "DOCTOR_NOTIFICATION_TRANSPORT": "template",
+                    **changes,
+                })
+                service = DoctorNotificationDeliveryService(self.database, client, settings, now=self.now)
+                batch = asyncio.run(service.deliver(self.event, self.body))
+                self.assertTrue(batch.enabled)
+                self.assertEqual([r.recipient_number for r in batch.deliveries], ["5491100000001", "5491100000002"])
+                self.assertEqual([r.status for r in batch.deliveries], ["pending", "pending"])
+                self.assertEqual([r.last_error for r in batch.deliveries], [reason, reason])
+                self.assertEqual([r.attempt_count for r in batch.deliveries], [0, 0])
+                self.assertTrue(all(r.body == self.body and r.provider_message_id is None for r in batch.deliveries))
+        self.assertEqual(client.sent_messages, [])
+
+    def test_template_with_unavailable_fields_is_pending_without_a_dispatch_attempt(self) -> None:
+        client = FakeDoctorWhatsAppClient()
+        mapping = [{"type": "body", "parameters": [{"type": "text", "text":
+            "{event_type} {status} {date} {time} {reason} {patient_name} {patient_phone} {summary} {priority_signals}"}]}]
+        settings = DoctorNotificationSettings(True, ("5491100000001",), "template", "fixture_cita", "es_MX", json.dumps(mapping))
+        batch = asyncio.run(DoctorNotificationDeliveryService(self.database, client, settings).deliver(self.event, self.body))
+        self.assertEqual(batch.deliveries[0].status, "pending")
+        self.assertEqual(batch.deliveries[0].last_error, "Datos de plantilla no disponibles para este aviso.")
+        self.assertEqual(batch.deliveries[0].attempt_count, 0)
+        self.assertEqual(client.sent_templates, [])
+        self.assertEqual(client.sent_messages, [])
+
+    def test_template_response_lost_does_not_resend_after_reopening(self) -> None:
+        class LostResponseClient(FakeDoctorWhatsAppClient):
+            async def send_template(client, to, name, language_code, components):
+                await super().send_template(to, name, language_code, components)
+                raise httpx.ReadTimeout("response lost")
+        client = LostResponseClient()
+        mapping = json.dumps([{"type": "body", "parameters": [{"type": "text", "text": "{notification_body}"}]}])
+        settings = DoctorNotificationSettings(True, ("5491100000001",), "template", "fixture_cita", "es_MX", mapping)
+        service = DoctorNotificationDeliveryService(self.database, client, settings)
+        first = asyncio.run(service.deliver(self.event, self.body))
+        reopened = DoctorNotificationDeliveryService(SQLiteDatabase(self.database.path), client, settings)
+        second = asyncio.run(reopened.deliver(self.event, "No reemplazar"))
+        self.assertEqual(first.deliveries[0].status, "sending")
+        self.assertEqual(second.deliveries[0].status, "sending")
+        self.assertEqual(second.deliveries[0].attempt_count, 1)
+        self.assertEqual(len(client.sent_templates), 1)
+
+    def test_template_acceptance_without_message_id_is_uncertain_and_not_resent(self) -> None:
+        class MissingIdClient(FakeDoctorWhatsAppClient):
+            async def send_template(client, to, name, language_code, components):
+                await super().send_template(to, name, language_code, components)
+                return {}
+        client = MissingIdClient()
+        mapping = json.dumps([{"type": "body", "parameters": [{"type": "text", "text": "{notification_body}"}]}])
+        settings = DoctorNotificationSettings(True, ("5491100000001",), "template", "fixture_cita", "es_MX", mapping)
+        service = DoctorNotificationDeliveryService(self.database, client, settings)
+        first = asyncio.run(service.deliver(self.event, self.body))
+        second = asyncio.run(service.deliver(self.event, self.body))
+        self.assertEqual(first.deliveries[0].status, "sending")
+        self.assertEqual(second.deliveries[0].attempt_count, 1)
+        self.assertEqual(len(client.sent_templates), 1)
+
+    def test_configuration_hold_preserves_sent_and_uncertain_deliveries(self) -> None:
+        client = FakeDoctorWhatsAppClient(failures={"5491100000002": httpx.ReadTimeout("response lost")})
+        service = self.service(client, recipients=("5491100000001", "5491100000002"))
+        original = asyncio.run(service.deliver(self.event, self.body))
+        blocked = DoctorNotificationDeliveryService(self.database, client, DoctorNotificationSettings(
+            enabled=True, recipient_numbers=("5491100000001", "5491100000002"), transport="template",
+        ), now=self.now)
+
+        held = asyncio.run(blocked.deliver(self.event, "Otro cuerpo que no debe reemplazar al original."))
+
+        self.assertEqual(held.deliveries, original.deliveries)
+        self.assertEqual([r.status for r in held.deliveries], ["sent", "sending"])
+        self.assertEqual(client.sent_messages, [("5491100000001", self.body)])
 
     def test_sends_same_body_to_each_doctor_and_persists_provider_ids(self) -> None:
         client = FakeDoctorWhatsAppClient()
@@ -217,6 +385,7 @@ class NotificationDeliveryTests(unittest.TestCase):
         service = self.service(client, recipients=(recipient,))
 
         first = asyncio.run(service.deliver(self.event, self.body))
+        self.now_value += 60
         second = asyncio.run(service.deliver(self.event, self.body))
         third = asyncio.run(service.deliver(self.event, self.body))
 
@@ -227,6 +396,35 @@ class NotificationDeliveryTests(unittest.TestCase):
         self.assertEqual(third.deliveries[0].attempt_count, 2)
         self.assertEqual(client.attempts, 2)
         self.assertEqual(client.sent_messages, [(recipient, self.body)])
+
+    def test_concurrent_delivery_freezes_one_body_for_all_doctors_without_duplicate_sends(self) -> None:
+        async def scenario():
+            entered, release = asyncio.Event(), asyncio.Event()
+
+            class SlowClient(FakeDoctorWhatsAppClient):
+                attempts = 0
+
+                async def send_text(client, to, body):
+                    client.attempts += 1
+                    if client.attempts == 1:
+                        entered.set()
+                        await release.wait()
+                    return await super().send_text(to, body)
+
+            client = SlowClient()
+            service = self.service(client, recipients=("5491100000001", "5491100000002"))
+            first = asyncio.create_task(service.deliver(self.event, self.body))
+            await asyncio.wait_for(entered.wait(), 1)
+            try:
+                await asyncio.wait_for(service.deliver(self.event, "Otro resumen concurrente."), 1)
+            finally:
+                release.set()
+                await first
+            self.assertEqual(sorted(client.sent_messages), [
+                ("5491100000001", self.body), ("5491100000002", self.body),
+            ])
+
+        asyncio.run(scenario())
 
     def test_disabled_service_does_not_persist_or_send(self) -> None:
         client = FakeDoctorWhatsAppClient()

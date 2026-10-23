@@ -9,6 +9,41 @@ implementadas. La evidencia de ejecucion queda en
 
 ## Flujo implementado
 
+Desde el 22 de octubre, `DoctorNotificationTrigger` centraliza la politica de
+composicion, recuperacion del cuerpo preparado, entrega y aislamiento de errores.
+El webhook lo invoca despues de persistir la respuesta al paciente. `VoiceTools`
+usa el mismo `appointment_notification_event_from_result()` tras una mutacion
+confirmada; guarda el evento junto al resultado antes de despertar al adaptador
+`VoiceDoctorNotifications`. No se dispara por el texto que pronuncie el modelo.
+
+El adaptador de voz solo recupera el nombre y el historial de la sesion/gestion,
+los convierte en `DoctorNotificationContext` y llama al disparador compartido.
+La tarea pertenece al lifespan de `/lab`, se despierta con cada mutacion y revisa
+pendientes al arrancar y cada 60 s. Voz y texto del laboratorio reciben el mismo
+adaptador y proveedor de agenda. No se abren tablas de pacientes operativos.
+
+`voice_notification_events` conserva evento, nombre y limites de secuencia en la
+misma transaccion que el resultado de la accion. Su identidad incluye sesion y
+accion (`voice:<session_id>:<action_id>:<tool_name>`); las claves de chat conservan
+su formato previo. Las entregas usan el mismo esquema y repositorio de
+`doctor_notifications`, sin referencias a pacientes reales en la base exclusiva
+del laboratorio. El aviso usa las transcripciones disponibles hasta ese limite;
+una transcripcion ausente no se inventa ni bloquea la cita.
+Iniciar explicitamente otra gestion actualiza `voice_sessions.notification_start_sequence`;
+el evento congela el mayor limite entre ese inicio y el ultimo evento de la sesion.
+
+El compositor y `appointment_messages.py` son los unicos responsables del cuerpo
+para ambos canales. Un perfil sin numero vinculado muestra `No informado`. Se
+congela el cuerpo al prepararlo; un fallo previo de resumen permite completar
+el cuerpo antes de enviarlo. La preparacion del cuerpo y de todos sus destinatarios
+ocurre en una transaccion `BEGIN IMMEDIATE`: solo se completan marcadores de
+composicion fallida, sin sustituir otro cuerpo ya preparado. Solo quien reclama
+una fila puede enviarla. Un cierre durante un envio, una respuesta perdida o un
+fallo al persistir su resultado conserva `sending` para
+conciliacion, sin un reenvio automatico potencialmente duplicado.
+Un error de configuracion de doctores conserva el evento en su fuente con un log seguro,
+sin impedir arrancar voz ni responder al paciente.
+
 ```text
 Mensaje del paciente
     |
@@ -31,7 +66,7 @@ AgentOrchestrator -> ToolExecutor -> CalendarProvider
                            enviada y persistida
                                        |
                                        v
-                           DoctorNotificationService
+                           DoctorNotificationTrigger
                                |
                                +-- SQLite: doctor_notifications
                                |
@@ -64,7 +99,8 @@ unica `(event_key, recipient_number)` conserva una sola entrega por destinatario
 para cada mutacion.
 
 `DoctorNotificationRepository` inserta entregas en `pending` sin reemplazar una
-fila existente, reclama de forma atomica filas `pending` o `failed` como `sending`,
+fila existente, salvo completar un cuerpo que aun no tuvo intentos tras un fallo
+de resumen. Reclama de forma atomica filas `pending` o `failed` como `sending`,
 registra los reintentos, conserva `last_error` y `provider_message_id`, y evita que
 una fila `sent` vuelva a `failed` o se reclame otra vez. Las entregas de varios
 destinatarios permanecen separadas aunque compartan `event_key`.
@@ -213,20 +249,170 @@ posteriores sin introducir una cola distribuida.
 
 ## Entrega
 
-`DoctorNotificationDeliveryService` reutiliza `WhatsAppClient.send_text()` una vez por cada numero de
+En modo `text`, `DoctorNotificationDeliveryService` reutiliza `WhatsAppClient.send_text()` una vez por cada numero de
 `DOCTOR_WHATSAPP_NUMBERS`. La variable contendra numeros separados por comas; el
 backend debe recortar espacios, eliminar duplicados y validar que no quede ningun
 destinatario vacio. Todos recibiran el mismo cuerpo logico del evento.
 
+La respuesta al paciente usa el remitente entrante normalizado; el aviso interno
+usa `recipient_number` de la entrega persistida para un doctor configurado. La
+conversacion visible de WhatsApp depende del destinatario, no de `conversation_id`
+de SQLite. Si el numero del paciente coincide con el de un doctor tras normalizar
+el prefijo mexicano, ambos envios aparecen en la misma conversacion. Esto no
+mezcla los cuerpos: el resumen y la prioridad solo se componen para el doctor.
+
 La configuracion se habilitara mediante una bandera para mantener el comportamiento
 actual por defecto.
 
-Si la politica de Meta exige una plantilla para iniciar una conversacion fuera de
-la ventana permitida, se agregara un metodo de plantillas en un corte separado. No
+El modo `template` usa `send_template()` con nombre, idioma y componentes del
+mapeo explicito. Si falta alguno de esos datos conserva el aviso pendiente. No
 se deben ocultar errores de configuracion ni marcar como enviada una notificacion
 sin confirmacion del proveedor.
 
+La prueba real del 22 de octubre confirmo `failed/131047` despues de un HTTP 200
+con ID. El envio vigente usa texto libre y requiere un mensaje del doctor al bot
+dentro de las ultimas 24 horas; el permiso no lo abre una llamada a `/lab`.
+`doctor_notifications.status=sent` refleja actualmente aceptacion por la API.
+En ese diagnostico, `receive_webhook()` reconocia sin persistir los eventos de
+estado. El corte de callbacks incorpora la bandeja y proyeccion durables descritas
+abajo; la instrumentacion temporal del diagnostico se retiro al terminar la captura.
+La configuracion y prueba de la plantilla real aprobada siguen pendientes.
+
 ## Fallos y reintentos
+
+### Corte de configuracion de plantilla
+
+`DoctorNotificationSettings` incorpora `transport`, `template_name` y
+`template_language`. `enabled` sigue indicando captura, no disponibilidad para
+despachar. El cargador normaliza espacios y valida los destinatarios; el error de
+transporte/plantilla se expone sin convertir una captura habilitada en deshabilitada.
+El transporte omitido sigue siendo `text`; el ejemplo y la configuracion local
+seleccionan `template` con nombre e idioma vacios.
+
+`DoctorNotificationDeliveryService.blocked_reason` distingue datos incompletos,
+datos invalidos y mapeo de plantilla pendiente. `record_deferred()` crea o
+recupera las filas dentro de una transaccion inmediata, retiene las entregas
+`pending`/`failed` y guarda el motivo sin aumentar `attempt_count`. Las filas
+`sent` y `sending` permanecen intactas. `deliver()` aplica la misma puerta, por lo
+que un consumidor directo tampoco puede caer en texto libre al seleccionar plantilla.
+
+El disparador evalua la puerta antes de componer y usa un marcador de composicion
+pendiente. El repositorio y el disparador distinguen ese marcador y el de fallo de
+un cuerpo real; al recuperar el aviso, la composicion se completa antes del envio.
+Un cuerpo ya preparado se conserva. Esto no requiere migrar SQLite: los eventos
+ya estan en `reply_outbox.notification_events_json` y `voice_notification_events`.
+
+`deliver_doctor_notifications()` devuelve si concluyeron todos los avisos. El
+webhook solo marca `notifications_completed` cuando corresponde y su rama de
+reintento carga el snapshot con `send_required=False`. El laboratorio usa su
+evento pendiente y el contexto original en el ciclo compartido de 60 s. El corte
+de recuperacion agrega ese ciclo al lifespan de chat.
+
+La validacion local de nombre/idioma es solo sintactica. La validacion contra la
+plantilla real aprobada sigue pendiente. El envio
+requiere tambien un mapeo explicito, no solo llenar dos variables.
+
+### Corte de envio mediante plantilla
+
+`notification_template.py` valida el arreglo de componentes configurado en
+`DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS`. Conserva el orden, los metadatos de botones
+URL y los nombres opcionales de parametros. Las referencias simples a los datos
+del aviso permiten agrupar varios campos sin asumir la cantidad de variables.
+Se exige cubrir todos los campos actuales o el cuerpo completo. La resolucion
+trabaja sobre una copia del JSON y no interpreta instrucciones del paciente.
+
+`appointment_message_fields()` comparte los valores de presentacion con el
+renderizador. El compositor expone `template_data` a partir de esos valores
+saneados, resumen y señales, sin parsear el mensaje renderizado. El disparador
+entrega cuerpo y datos al mismo servicio tanto en chat como en laboratorio.
+
+Las migraciones compartidas agregan `template_data_json` y `template_payload_json`
+opcionales a `doctor_notifications` en ambas bases. El repositorio congela datos
+y cuerpo conjuntamente; al reclamar una entrega conserva nombre, idioma y
+componentes con `COALESCE`, evitando reemplazarlos en un reintento. El payload
+persistido determina el envio de los intentos posteriores. Los registros antiguos
+permanecen validos con snapshots nulos; solo su cuerpo completo esta disponible
+como respaldo explicito, sin recomponer datos que podrian pertenecer a otra gestion.
+
+`WhatsAppClient` comparte `_send()` para texto y plantilla, manteniendo la misma
+version de Cloud API y autenticacion. Los errores de mapeo o campos ausentes se
+retienen antes de reclamar intentos. Los errores HTTP conocidos quedan fallidos;
+respuestas perdidas o sin ID de Meta quedan inciertas sin reenvio automatico.
+
+La plantilla real conserva nombre, idioma y componentes vacios hasta recibir su
+contrato aprobado. Las pruebas usan diferentes layouts ficticios; ninguno se
+presenta como estructura aceptada por Meta para la cuenta operativa.
+
+### Corte de recuperacion y espera durable
+
+`NotificationRecoveryWorker` comparte ciclo, cierre y exclusiones entre
+`ChatDoctorNotifications` y `VoiceDoctorNotifications`. El adaptador de chat lee
+respuestas `sent` con eventos incompletos, incluida una fuente antigua completada
+que conserve una entrega pendiente sin snapshot. Nunca llama al servicio
+conversacional ni a herramientas. El laboratorio adapta los eventos ya guardados.
+Despues de cada fuente se recuperan tambien las entregas con su propio `event_json`.
+El chat refresca el disparador desde el entorno efectivo; la recarga habitual
+aplica cambios de `.env` en ambos procesos.
+
+El disparador registra primero las entregas y un contexto acotado. El repositorio
+usa snapshots de solo escritura inicial; una composicion posterior utiliza el
+contexto ganador de esa transaccion, no un perfil actualizado. Los destinatarios
+quedan fijados al primer registro, y las entregas a doctores retirados se detienen.
+
+La puerta de elegibilidad se aplica antes de componer y en la reclamacion SQL.
+`next_attempt_at` impide saltarse la espera desde otro worker o un webhook. La
+politica comun distingue fallos transitorios, rechazos de configuracion y
+resultados inciertos. El tiempo de espera y la clasificacion se conservan tras
+reiniciar. Una huella por destinatario identifica cambios relevantes de transporte,
+plantilla y credenciales sin guardarlas literalmente ni mostrarlas en los logs.
+
+La reclamacion guarda un registro de `doctor_notification_attempts` en la misma
+transaccion: numero de intento, cuerpo, payload y revision local. Las finalizaciones
+comparan el numero de intento para evitar que una respuesta tardia sobreescriba
+un resultado conciliado. El payload solo puede cambiar tras un rechazo conocido
+de configuracion y su correccion; los intentos anteriores siguen auditados.
+
+`reconcile_doctor_notification.py` opera sobre un aviso y numero de intento
+verificados. Registra evidencia de aceptacion o ausencia de entrega y permite
+liberar una correccion externa de configuracion. No consulta ni muta la agenda,
+ni envia por si misma. Un `sending` no tiene vencimiento automatico. Los
+callbacks de Meta usan esta auditoria en el corte siguiente.
+
+### Corte de callbacks durables
+
+`notification_statuses.py` extrae y normaliza los estados y almacena su identidad
+canonica en `whatsapp_delivery_receipts`, exclusivamente en la base de chat.
+El webhook confirma esa escritura en un thread antes de devolver 200 y agrega
+una proyeccion de fondo. Si falla la escritura retorna 503, sin volcar valores
+del proveedor al error. Un worker del lifespan repite pendientes cada 5 s y al
+arrancar, incluso si el envio de avisos esta deshabilitado.
+
+La proyeccion busca primero intentos por ID y destinatario; puede usar el ID del
+registro historico si aun no tenia auditoria. Se liga durablemente el recibo al
+canal/aviso/intento antes de actualizar el destino. Cada destino usa una transaccion
+inmediata e idempotente; el inbox se marca despues. No se necesita una transaccion
+distribuida entre las dos SQLite. Si se interrumpe entre ambas escrituras, el
+recibo se reaplica sin duplicar la programacion del fallo.
+
+`delivery_status`, `delivery_status_at`, `delivery_error_codes_json` y
+`api_accepted_at` se agregan tanto al aviso como al intento. La evidencia se reduce
+por progreso (`read`/`delivered` sobre `failed`, y `failed` sobre `sent`) y timestamp
+del mismo nivel. La proyeccion mantiene el resultado mas fuerte ya observado para
+resolver escritores concurrentes. El snapshot de eventos se marca individualmente
+por clave, evitando confirmar un callback que llego durante otra proyeccion.
+
+El intento conserva la huella de configuracion al reclamarlo. Un fallo asincrono
+del intento actual aplica la politica de espera/bloqueo sin borrar ID ni aceptacion.
+Los callbacks tardios de intentos anteriores solo actualizan su historial. Una
+confirmacion de entrega/lectura del intento actual cancela reintentos; un nuevo
+HTTP aceptado no borra el contador de fallos de entrega aun pendientes.
+
+Los callbacks desconocidos no crean avisos, pacientes o intentos. Los asociados a
+respuestas al paciente se marcan como tales. La proyeccion a voz y la utilidad de
+conciliacion usan conexiones a la base existente, sin introducir tablas de pacientes
+ni arrancar un `VoiceRepository` con efectos de recuperacion de sesiones.
+
+### Resultado de los intentos
 
 - Un fallo de composicion o persistencia no afecta al paciente y no propaga la
   excepcion al webhook.
@@ -236,8 +422,8 @@ sin confirmacion del proveedor.
 - Una entrega `sent` nunca se vuelve a enviar por un webhook duplicado.
 - El fallo de una entrega no cancela ni oculta las entregas dirigidas a otros
   destinatarios.
-- Una entrega `failed` queda disponible para una llamada posterior del servicio sin
-  introducir un worker distribuido.
+- Una entrega `failed` queda disponible segun su espera o tras corregir el bloqueo;
+  los ciclos de recuperacion son locales al lifespan, sin un worker distribuido.
 
 ## Privacidad
 

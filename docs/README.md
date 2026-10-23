@@ -33,6 +33,13 @@ esten aprobados.
 - [Decisiones](./decisions/README.md)
 - [Verificaciones](./verification/2026-09-21-whatsapp-check-availability.md)
 - [Verificacion del webhook y notificaciones al doctor](./verification/2026-09-22-doctor-notifications-webhook.md)
+- [Disparador compartido de avisos al doctor para chat y voz](./verification/2026-10-22-shared-doctor-notifications.md)
+- [Diagnostico de la ventana de entrega al doctor y error 131047](./verification/2026-10-22-whatsapp-doctor-delivery-window.md)
+- [Auditoria de destinatarios y numero compartido entre paciente y doctor](./verification/2026-10-22-doctor-notification-routing.md)
+- [Configuracion de plantilla y captura diferida de avisos al doctor](./verification/2026-10-22-doctor-template-configuration.md)
+- [Envio por plantilla con mapeo explicito y snapshots de reintento](./verification/2026-10-22-doctor-template-delivery.md)
+- [Recuperacion de pendientes, espera durable y conciliacion de avisos](./verification/2026-10-22-doctor-notification-retries.md)
+- [Callbacks persistentes de Meta y estados reales de entrega de chat/voz](./verification/2026-10-22-meta-delivery-statuses.md)
 - [Verificacion de sincronizacion de Google Calendar](./verification/2026-09-24-google-calendar-event-sync.md)
 - [Verificacion del motivo antes de agendar](./verification/2026-09-24-appointment-reason.md)
 - [Verificacion de validacion minima del motivo](./verification/2026-09-25-appointment-reason-validation.md)
@@ -83,6 +90,9 @@ esten aprobados.
   [tareas por cortes](./specs/021-whatsapp-inbound-calling/tasks.md).
 - [ADR 0054 - Autorizacion ligada al origen](./decisions/0054-inbound-calling-with-scoped-confirmation.md)
   — propuesta, no adoptada por el runtime.
+- [ADR 0061 - Contexto historico y apertura independiente de llamadas de laboratorio](./decisions/0061-laboratory-history-and-call-boundaries.md)
+  — adopcion parcial para voz y mensajes de `/lab`: apertura aislada CA-22
+  implementada y consulta historica CA-26 disponible; contexto reciente enriquecido pendiente.
 
 ## Laboratorio de audio implementado
 
@@ -123,6 +133,10 @@ esten aprobados.
   reproduccion del ciclo y confirmacion solo con transcripcion afirmativa del turno actual.
 - [Formato de fecha en confirmaciones habladas](./verification/2026-10-21-voice-mexican-date-format.md):
   hora AM/PM primero, seguida de la fecha `DD/MM/YYYY`; regresion y recarga verificadas.
+- [Saludo aislado y continuidad de voz/texto](./verification/2026-10-21-isolated-voice-greeting.md):
+  entrada vacia, herramientas deshabilitadas e interrupcion; contexto enriquecido pendiente.
+- [Consulta historica acotada de voz/texto](./verification/2026-10-21-voice-history-search.md):
+  filtros por tema/fecha/canal, aislamiento y preservacion de propuestas y preguntas.
 
 ## Funcionalidad implementada y verificada por cortes
 

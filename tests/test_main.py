@@ -57,6 +57,11 @@ def open_database(path: str) -> Iterator[sqlite3.Connection]:
 class FakeWhatsAppClient:
     def __init__(self) -> None:
         self.sent_messages: list[tuple[str, str]] = []
+        self.sent_templates = []
+
+    async def send_template(self, to, name, language_code, components):
+        self.sent_templates.append((to, name, language_code, components))
+        return {"messages": [{"id": f"wamid.template.{len(self.sent_templates)}"}]}
 
     async def send_text(self, to: str, body: str) -> dict[str, Any]:
         self.sent_messages.append((to, body))
@@ -395,6 +400,10 @@ class WebhookTests(unittest.TestCase):
             "LLM_REASON_EVALUATION_ENABLED": "false",
             "DOCTOR_NOTIFICATIONS_ENABLED": "false",
             "DOCTOR_WHATSAPP_NUMBERS": "",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "text",
+            "DOCTOR_WHATSAPP_TEMPLATE_NAME": "",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "",
+            "DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS": "",
             "DEBUG_MODE": "false",
             "DEBUG_WHATSAPP_NUMBERS": "",
         }
@@ -406,7 +415,8 @@ class WebhookTests(unittest.TestCase):
         ):
             with patch("main.WhatsAppClient", return_value=whatsapp_client):
                 with patch("main.create_llm_provider", return_value=provider):
-                    yield provider
+                    with patch("main.create_chat_notification_worker", return_value=None), patch("main.create_meta_status_worker", return_value=None):
+                        yield provider
 
     def text_payload(
         self,
@@ -1263,6 +1273,16 @@ class WebhookTests(unittest.TestCase):
             ],
         )
         doctor_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000001"]
+        patient_bodies = [body for recipient, body in fake_client.sent_messages if recipient == "5491100000000"]
+        self.assertEqual(sum(body.startswith("CONFIRMACION DE CITA\n") for body in patient_bodies), 3)
+        for body in patient_bodies:
+            self.assertNotIn("NOTIFICACION INTERNA DE CITA", body)
+            self.assertNotIn("RESUMEN DE LA CONVERSACION", body)
+            self.assertNotIn("SENALES DE PRIORIDAD", body)
+        for body in doctor_bodies:
+            self.assertTrue(body.startswith("NOTIFICACION INTERNA DE CITA\n"))
+            self.assertIn("RESUMEN DE LA CONVERSACION", body)
+            self.assertIn("SENALES DE PRIORIDAD", body)
         self.assertIn("Tipo de evento: Cita agendada", doctor_bodies[0])
         self.assertIn("Nombre: Ana Prueba", doctor_bodies[0])
         self.assertIn("Tipo de evento: Cita modificada", doctor_bodies[1])
@@ -1292,6 +1312,175 @@ class WebhookTests(unittest.TestCase):
                 ("appointment_cancelled", "sent", 1),
             ],
         )
+
+    def test_all_appointment_events_use_template_fields_only_for_the_configured_doctor(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        provider = FakeLLMProvider(replies=(
+            ToolCall(name="create_appointment", arguments={"start_at": "2026-09-21T10:00:00", "reason": "Revision"}, call_id="template-create"),
+            '{"summary":"Solicita una revision general.","priority_signals":[]}',
+            ToolCall(name="reschedule_appointment", arguments={"appointment_id": "appointment-1", "new_start_at": "2026-09-21T11:00:00"}, call_id="template-reschedule"),
+            '{"summary":"Solicita una revision general.","priority_signals":[]}',
+            ToolCall(name="cancel_appointment", arguments={"appointment_id": "appointment-1"}, call_id="template-cancel"),
+            '{"summary":"Solicita una revision general.","priority_signals":[]}',
+        ))
+        mapping = [{"type": "body", "parameters": [{"type": "text", "parameter_name": "aviso",
+            "text": "{event_type}|{status}|{date}|{time}|{reason}|{patient_name}|{patient_phone}|{summary}|{priority_signals}"}]}]
+        confirmation = self.text_payload(message_id="wamid.template-cancel-confirm", text="Si")
+        with self.configured_runtime(fake_client, provider, {
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "template", "DOCTOR_WHATSAPP_TEMPLATE_NAME": "fixture_cita",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "es_MX", "DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS": json.dumps(mapping),
+        }):
+            with TestClient(app) as client:
+                responses = self.post_messages(client,
+                    self.text_payload(message_id="wamid.template-new", text="Agendar para el lunes a las 10"),
+                    self.text_payload(message_id="wamid.template-patient", text="Ana Prueba"),
+                    self.text_payload(message_id="wamid.template-reason-full", text="Revision"),
+                    self.text_payload(message_id="wamid.template-change", text="Cambiar"),
+                    self.text_payload(message_id="wamid.template-change-slot", text="11:00"),
+                    self.text_payload(message_id="wamid.template-change-confirm", text="Si"),
+                    self.text_payload(message_id="wamid.template-cancel", text="Cancelar"),
+                    confirmation, confirmation,
+                )
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(len(fake_client.sent_messages), 8)
+        self.assertTrue(all(to == "5491100000000" for to, _ in fake_client.sent_messages))
+        self.assertTrue(all("RESUMEN DE LA CONVERSACION" not in body for _, body in fake_client.sent_messages))
+        self.assertEqual(len(fake_client.sent_templates), 3)
+        events = ("Cita agendada", "Cita modificada", "Cita cancelada")
+        times = ("10:00-10:30", "11:00-11:30", "11:00-11:30")
+        for index, (to, name, language, components) in enumerate(fake_client.sent_templates):
+            self.assertEqual((to, name, language), ("5491100000001", "fixture_cita", "es_MX"))
+            self.assertEqual(components[0]["parameters"][0]["parameter_name"], "aviso")
+            values = components[0]["parameters"][0]["text"].split("|")
+            self.assertEqual(values[0], events[index])
+            self.assertEqual(values[2:], ["2026-09-21", times[index], "Revision", "Ana Prueba", "1100000000",
+                                        "Solicita una revision general.", "Ninguna detectada."])
+        self.assertEqual(values[1], "cancelada")
+
+    def test_incomplete_template_preserves_notice_across_retries_and_reopening(self) -> None:
+        self.set_fixed_calendar_runtime()
+        fake_client = FakeWhatsAppClient()
+        provider = FakeLLMProvider(replies=(
+            ToolCall(
+                name="create_appointment",
+                arguments={"start_at": "2026-09-21T10:00:00", "reason": "Revision"},
+                call_id="call-waiting-template",
+            ),
+            '{"summary":"El paciente solicita una revision general.","priority_signals":[]}',
+        ))
+        reason = self.text_payload(message_id="wamid.template-reason", text="Revision")
+        with self.configured_runtime(fake_client, provider, {
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+            "DOCTOR_WHATSAPP_NUMBERS": "5491100000001",
+            "DOCTOR_NOTIFICATION_TRANSPORT": "template",
+            "DOCTOR_WHATSAPP_TEMPLATE_NAME": "",
+            "DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE": "",
+        }):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(message_id="wamid.template-request", text="Agendar para el lunes a las 10"),
+                    self.text_payload(message_id="wamid.template-name", text="Ana Prueba"),
+                    reason, reason,
+                )
+            self.assertTrue(all(response.status_code == 200 for response in responses))
+            self.assertEqual([to for to, _ in fake_client.sent_messages], ["5491100000000"] * 3)
+            self.assertTrue(fake_client.sent_messages[-1][1].startswith("CONFIRMACION DE CITA\n"))
+            self.assertEqual(provider.call_count, 1)
+            with open_database(self.database_path) as connection:
+                rows = connection.execute(
+                    "SELECT status, last_error, attempt_count FROM doctor_notifications"
+                ).fetchall()
+                pending_turns = connection.execute(
+                    "SELECT notification_events_json FROM reply_outbox WHERE notifications_completed=0"
+                ).fetchall()
+            self.assertEqual(rows, [("pending", "Configuración de plantilla incompleta.", 0)])
+            self.assertEqual(len(pending_turns), 1)
+            self.assertEqual(len(json.loads(pending_turns[0][0])), 1)
+
+            # Una instancia nueva recupera el aviso, sin repetir la cita ni la confirmacion.
+            with TestClient(app) as client:
+                self.assertEqual(client.post("/webhook/whatsapp", json=reason).status_code, 200)
+                self.assertEqual(len(fake_client.sent_messages), 3)
+                # El transporte de texto existente permite verificar la recuperacion
+                # sin inventar los componentes de la plantilla todavia en revision.
+                with patch.dict(os.environ, {"DOCTOR_NOTIFICATION_TRANSPORT": "text"}):
+                    self.assertEqual(client.post("/webhook/whatsapp", json=reason).status_code, 200)
+                    self.assertEqual(client.post("/webhook/whatsapp", json=reason).status_code, 200)
+
+        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+        self.assertEqual(len(fake_client.sent_messages), 4)
+        self.assertEqual(fake_client.sent_messages[-1][0], "5491100000001")
+        self.assertTrue(fake_client.sent_messages[-1][1].startswith("NOTIFICACION INTERNA DE CITA\n"))
+        self.assertEqual(provider.call_count, 2)
+
+    def test_patient_using_a_doctor_number_gets_separate_bodies_at_the_same_recipient(self) -> None:
+        self.set_fixed_calendar_runtime()
+        shared_number = "525500000000"
+        incoming_number = "5215500000000"
+        fake_client = FakeWhatsAppClient()
+        tool_provider = FakeLLMProvider(replies=(
+            ToolCall(
+                name="create_appointment",
+                arguments={"start_at": "2026-09-21T10:00:00", "reason": "Revision"},
+                call_id="call-shared-number",
+            ),
+            '{"summary":"El paciente solicita una revision general.","priority_signals":[]}',
+        ))
+        reason_payload = self.text_payload(
+            sender=incoming_number, message_id="wamid.shared-reason", text="Revision",
+        )
+        with self.configured_runtime(fake_client, tool_provider, {
+            "DOCTOR_NOTIFICATIONS_ENABLED": "true",
+            "DOCTOR_WHATSAPP_NUMBERS": "+" + shared_number,
+        }):
+            with TestClient(app) as client:
+                responses = self.post_messages(
+                    client,
+                    self.text_payload(
+                        sender=incoming_number, message_id="wamid.shared-request",
+                        text="Agendar para el lunes a las 10",
+                    ),
+                    self.text_payload(
+                        sender=incoming_number, message_id="wamid.shared-name", text="Ana Prueba",
+                    ),
+                    reason_payload, reason_payload,
+                )
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual([recipient for recipient, _ in fake_client.sent_messages], [shared_number] * 4)
+        patient_confirmation = fake_client.sent_messages[-2][1]
+        doctor_notice = fake_client.sent_messages[-1][1]
+        self.assertTrue(patient_confirmation.startswith("CONFIRMACION DE CITA\n"))
+        self.assertNotIn("RESUMEN DE LA CONVERSACION", patient_confirmation)
+        self.assertNotIn("SENALES DE PRIORIDAD", patient_confirmation)
+        self.assertTrue(doctor_notice.startswith("NOTIFICACION INTERNA DE CITA\n"))
+        self.assertIn("RESUMEN DE LA CONVERSACION", doctor_notice)
+        self.assertIn("SENALES DE PRIORIDAD", doctor_notice)
+        with open_database(self.database_path) as connection:
+            notifications = connection.execute(
+                "SELECT recipient_number, status, attempt_count FROM doctor_notifications"
+            ).fetchall()
+            outgoing_bodies = [row[0] for row in connection.execute(
+                "SELECT text FROM messages WHERE direction='outgoing'"
+            )]
+        self.assertEqual(notifications, [(shared_number, "sent", 1)])
+        self.assertEqual(len(outgoing_bodies), 3)
+        self.assertTrue(all("NOTIFICACION INTERNA DE CITA" not in body for body in outgoing_bodies))
+        from notification_statuses import MetaDeliveryStatusService
+        from test_notification_statuses import status_payload
+        statuses = MetaDeliveryStatusService(self.database_path, {"chat": self.database_path})
+        with open_database(self.database_path) as connection:
+            patient_message_id = connection.execute("SELECT provider_message_id FROM messages WHERE direction='outgoing' ORDER BY id DESC LIMIT 1").fetchone()[0]
+            doctor_message_id = connection.execute("SELECT provider_message_id FROM doctor_notifications").fetchone()[0]
+        statuses.receive(status_payload(patient_message_id, "read", recipient=incoming_number))
+        with open_database(self.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT delivery_status FROM doctor_notifications").fetchone()[0], "accepted")
+        statuses.receive(status_payload(doctor_message_id, "delivered", recipient=incoming_number))
+        with open_database(self.database_path) as connection:
+            self.assertEqual(connection.execute("SELECT delivery_status FROM doctor_notifications").fetchone()[0], "delivered")
 
     def test_suspicious_names_are_clarified_before_notifying_the_doctor(self) -> None:
         self.set_fixed_calendar_runtime()
@@ -1813,6 +2002,43 @@ class WebhookTests(unittest.TestCase):
 
 
 class WhatsAppClientTests(unittest.TestCase):
+    def test_template_request_propagates_meta_rejection(self) -> None:
+        async def scenario(status):
+            def handler(request):
+                return httpx.Response(status, json={"error": {"code": 100}})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+                client = WhatsAppClient(access_token="test-token", phone_number_id="phone-id", http_client=http_client)
+                with self.assertRaises(httpx.HTTPStatusError):
+                    await client.send_template("5491100000001", "fixture_cita", "es_MX", [])
+        for status in (400, 401, 429):
+            with self.subTest(status=status):
+                asyncio.run(scenario(status))
+
+    def test_builds_cloud_api_template_request_preserving_component_order(self) -> None:
+        requests = []
+        components = [
+            {"type": "header", "parameters": [{"type": "text", "text": "Cita agendada"}]},
+            {"type": "body", "parameters": [{"type": "text", "parameter_name": "paciente", "text": "Ana Prueba"}]},
+            {"type": "button", "sub_type": "url", "index": "0", "parameters": [{"type": "text", "text": "detalle"}]},
+        ]
+
+        async def scenario():
+            def handler(request):
+                requests.append(request)
+                return httpx.Response(200, json={"messages": [{"id": "wamid.template"}]})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+                client = WhatsAppClient(access_token="access-token", phone_number_id="phone-id", http_client=http_client)
+                result = await client.send_template("5491100000001", "plantilla_ficticia", "es_MX", components)
+                self.assertEqual(result, {"messages": [{"id": "wamid.template"}]})
+
+        asyncio.run(scenario())
+        self.assertEqual(str(requests[0].url), f"https://graph.facebook.com/{GRAPH_API_VERSION}/phone-id/messages")
+        self.assertEqual(requests[0].headers["Authorization"], "Bearer access-token")
+        self.assertEqual(json.loads(requests[0].content), {
+            "messaging_product": "whatsapp", "to": "5491100000001", "type": "template",
+            "template": {"name": "plantilla_ficticia", "language": {"code": "es_MX"}, "components": components},
+        })
+
     def test_builds_cloud_api_text_request(self) -> None:
         requests: list[httpx.Request] = []
 

@@ -65,6 +65,22 @@ class RealtimeProvider(Protocol):
     async def close(self) -> None: ...
 
 
+def greeting_response(metadata: dict[str, str]) -> dict:
+    """Saludo fuera de la conversacion: no recibe historial ni herramientas."""
+    return {
+        "metadata": metadata,
+        "conversation": "none",
+        "input": [],
+        "output_modalities": ["audio"],
+        "tools": [],
+        "tool_choice": "none",
+        "instructions": (
+            "Habla español de Mexico, con voz natural. Di unicamente: "
+            "Hola, soy el asistente virtual del consultorio. ¿En qué puedo ayudarte hoy?"
+        ),
+    }
+
+
 class OpenAIRealtimeProvider:
     def __init__(self, settings: RealtimeSettings, *, connector=None):
         self.settings = settings

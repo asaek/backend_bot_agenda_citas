@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import sqlite3
 
-from notification_domain import AppointmentNotificationEvent
+from notification_domain import AppointmentNotificationEvent, UNPREPARED_NOTIFICATION_BODIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +64,19 @@ class DoctorNotificationRecord:
     created_at: str
     updated_at: str
     sent_at: str | None
+    template_data_json: str | None = None
+    template_payload_json: str | None = None
+    template_version: str | None = None
+    event_json: str | None = None
+    context_json: str | None = None
+    next_attempt_at: str | None = None
+    retry_kind: str = "ready"
+    blocked_configuration_key: str | None = None
+    failure_count: int = 0
+    delivery_status: str | None = None
+    delivery_status_at: str | None = None
+    delivery_error_codes_json: str | None = None
+    api_accepted_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +163,19 @@ def _doctor_notification_from_row(row: sqlite3.Row) -> DoctorNotificationRecord:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         sent_at=row["sent_at"],
+        template_data_json=row["template_data_json"],
+        template_payload_json=row["template_payload_json"],
+        template_version=row["template_version"],
+        event_json=row["event_json"],
+        context_json=row["context_json"],
+        next_attempt_at=row["next_attempt_at"],
+        retry_kind=row["retry_kind"],
+        blocked_configuration_key=row["blocked_configuration_key"],
+        failure_count=row["failure_count"],
+        delivery_status=row["delivery_status"],
+        delivery_status_at=row["delivery_status_at"],
+        delivery_error_codes_json=row["delivery_error_codes_json"],
+        api_accepted_at=row["api_accepted_at"],
     )
 
 
@@ -512,6 +538,7 @@ class DoctorNotificationRepository:
         appointment_id: str,
         body: str,
         now: str,
+        template_data_json: str | None = None,
     ) -> DoctorNotificationRecord:
         event_key = event_key.strip()
         recipient_number = recipient_number.strip()
@@ -521,8 +548,8 @@ class DoctorNotificationRepository:
             INSERT INTO doctor_notifications (
                 event_key, recipient_number, notification_type,
                 patient_id, conversation_id, appointment_id, body,
-                status, attempt_count, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+                status, attempt_count, created_at, updated_at, template_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
             ON CONFLICT(event_key, recipient_number) DO NOTHING
             """,
             (
@@ -535,6 +562,7 @@ class DoctorNotificationRepository:
                 body,
                 now,
                 now,
+                template_data_json,
             ),
         )
         record = self.get_by_event_and_recipient(
@@ -554,6 +582,7 @@ class DoctorNotificationRepository:
         recipient_number: str,
         body: str,
         now: str,
+        template_data_json: str | None = None,
     ) -> DoctorNotificationRecord:
         return self.create_pending(
             connection,
@@ -565,7 +594,49 @@ class DoctorNotificationRepository:
             appointment_id=event.appointment.id,
             body=body,
             now=now,
+            template_data_json=template_data_json,
         )
+
+    def prepare_content(
+        self, connection: sqlite3.Connection, *, event_key: str, body: str,
+        template_data_json: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Congela un cuerpo por evento; solo completa marcadores sin intentos."""
+        records = self.list_for_event(connection, event_key)
+        prepared = next((record for record in records if record.body not in UNPREPARED_NOTIFICATION_BODIES), None)
+        if prepared is not None:
+            body = prepared.body
+            template_data_json = prepared.template_data_json
+        connection.execute("""UPDATE doctor_notifications SET body=?, template_data_json=?
+            WHERE event_key=? AND status IN ('pending','failed') AND attempt_count=0 AND body IN (?,?)""",
+            (body, template_data_json, event_key, *UNPREPARED_NOTIFICATION_BODIES))
+        return body, template_data_json
+
+    def mark_pending(
+        self, connection: sqlite3.Connection, notification_id: int, *, reason: str, now: str,
+        configuration_key: str | None = None,
+    ) -> DoctorNotificationRecord:
+        """Retiene un aviso sin reclamar un envio ni alterar resultados definitivos."""
+        connection.execute(
+            """UPDATE doctor_notifications SET status='pending', last_error=?, updated_at=?,
+                   retry_kind='configuration', blocked_configuration_key=?
+               WHERE id=? AND status IN ('pending','failed')""",
+            (reason, now, configuration_key, notification_id),
+        )
+        record = self.get_by_id(connection, notification_id)
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la notificacion pendiente")
+        return record
+
+    def save_event_context(self, connection, event_key, event_json, context_json):
+        connection.execute("""UPDATE doctor_notifications
+            SET event_json=COALESCE(event_json,?), context_json=COALESCE(context_json,?)
+            WHERE event_key=?""", (event_json, context_json, event_key))
+
+    def recovery_records(self, connection):
+        rows = connection.execute("""SELECT * FROM doctor_notifications
+            WHERE status IN ('pending','failed') AND event_json IS NOT NULL ORDER BY id""").fetchall()
+        return [_doctor_notification_from_row(row) for row in rows]
 
     def list_for_event(
         self,
@@ -615,6 +686,10 @@ class DoctorNotificationRepository:
         connection: sqlite3.Connection,
         notification_id: int,
         now: str,
+        template_payload_json: str | None = None,
+        configuration_key: str = "",
+        template_version: str | None = None,
+        replace_payload: bool = False,
     ) -> DoctorNotificationRecord | None:
         """Claims one pending/failed row without claiming it twice concurrently."""
         cursor = connection.execute(
@@ -625,14 +700,28 @@ class DoctorNotificationRepository:
                 last_error = NULL,
                 provider_message_id = NULL,
                 sent_at = NULL,
+                template_payload_json = CASE WHEN ? THEN ? ELSE COALESCE(template_payload_json, ?) END,
+                template_version = CASE WHEN ? THEN ? ELSE COALESCE(template_version, ?) END,
+                retry_kind = 'uncertain', blocked_configuration_key = NULL, next_attempt_at = NULL,
+                delivery_status = NULL, delivery_status_at = NULL, delivery_error_codes_json = NULL, api_accepted_at = NULL,
                 updated_at = ?
             WHERE id = ? AND status IN ('pending', 'failed')
+                AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                AND (retry_kind <> 'configuration' OR
+                     (blocked_configuration_key IS NOT NULL AND blocked_configuration_key <> ?))
             """,
-            (now, notification_id),
+            (replace_payload, template_payload_json, template_payload_json,
+             replace_payload, template_version, template_version, now, notification_id, now, configuration_key),
         )
         if cursor.rowcount != 1:
             return None
-        return self.get_by_id(connection, notification_id)
+        record = self.get_by_id(connection, notification_id)
+        connection.execute("""INSERT INTO doctor_notification_attempts
+            (notification_id,attempt_number,state,transport,body,template_payload_json,template_version,started_at,configuration_key)
+            VALUES (?,?,'sending',?,?,?,?,?,?)""",
+            (record.id, record.attempt_count, "template" if record.template_payload_json else "text",
+             record.body, record.template_payload_json, record.template_version, now, configuration_key))
+        return record
 
     def mark_sent(
         self,
@@ -641,6 +730,7 @@ class DoctorNotificationRepository:
         *,
         provider_message_id: str | None,
         now: str,
+        expected_attempt: int | None = None,
     ) -> DoctorNotificationRecord:
         normalized_provider_message_id = (
             provider_message_id.strip()
@@ -652,18 +742,28 @@ class DoctorNotificationRepository:
             UPDATE doctor_notifications
             SET status = 'sent',
                 last_error = NULL,
+                retry_kind = 'ready', next_attempt_at = NULL, blocked_configuration_key = NULL,
                 provider_message_id = ?,
+                delivery_status = COALESCE(delivery_status,'accepted'), api_accepted_at = COALESCE(api_accepted_at,?),
                 sent_at = ?,
                 updated_at = ?
-            WHERE id = ? AND status <> 'sent'
+            WHERE id = ? AND status <> 'sent' AND (? IS NULL OR (status='sending' AND attempt_count=?))
             """,
             (
                 normalized_provider_message_id,
                 now,
                 now,
+                now,
                 notification_id,
+                expected_attempt,
+                expected_attempt,
             ),
         )
+        if expected_attempt is not None:
+            connection.execute("""UPDATE doctor_notification_attempts SET state='sent', completed_at=?, provider_message_id=?,
+                    delivery_status=COALESCE(delivery_status,'accepted'), api_accepted_at=COALESCE(api_accepted_at,?)
+                WHERE notification_id=? AND attempt_number=? AND state='sending'""",
+                (now, normalized_provider_message_id, now, notification_id, expected_attempt))
         record = self.get_by_id(connection, notification_id)
         if record is None:
             raise RuntimeError("No se pudo recuperar la notificacion enviada")
@@ -676,6 +776,12 @@ class DoctorNotificationRepository:
         *,
         error: str,
         now: str,
+        retry_kind: str = "transient",
+        next_attempt_at: str | None = None,
+        configuration_key: str | None = None,
+        expected_attempt: int | None = None,
+        http_status: int | None = None,
+        provider_code: int | None = None,
     ) -> DoctorNotificationRecord:
         error = error.strip()
         if not error:
@@ -685,17 +791,81 @@ class DoctorNotificationRepository:
             UPDATE doctor_notifications
             SET status = 'failed',
                 last_error = ?,
+                retry_kind = ?, next_attempt_at = ?, blocked_configuration_key = ?,
+                failure_count = failure_count + 1,
                 provider_message_id = NULL,
                 sent_at = NULL,
                 updated_at = ?
-            WHERE id = ? AND status <> 'sent'
+            WHERE id = ? AND status <> 'sent' AND (? IS NULL OR (status='sending' AND attempt_count=?))
             """,
-            (error, now, notification_id),
+            (error, retry_kind, next_attempt_at, configuration_key, now, notification_id, expected_attempt, expected_attempt),
         )
+        if expected_attempt is not None:
+            connection.execute("""UPDATE doctor_notification_attempts
+                SET state='failed', completed_at=?, classification=?, http_status=?, provider_code=?
+                WHERE notification_id=? AND attempt_number=? AND state='sending'""",
+                (now, retry_kind, http_status, provider_code, notification_id, expected_attempt))
         record = self.get_by_id(connection, notification_id)
         if record is None:
             raise RuntimeError("No se pudo recuperar la notificacion fallida")
         return record
+
+    def mark_uncertain(
+        self, connection: sqlite3.Connection, notification_id: int, *, error: str, now: str,
+        expected_attempt: int | None = None,
+    ) -> DoctorNotificationRecord:
+        connection.execute("""UPDATE doctor_notifications SET last_error=?, updated_at=?, retry_kind='uncertain'
+            WHERE id=? AND status='sending' AND (? IS NULL OR attempt_count=?)""",
+            (error, now, notification_id, expected_attempt, expected_attempt))
+        if expected_attempt is not None:
+            connection.execute("""UPDATE doctor_notification_attempts
+                SET state='uncertain', completed_at=?, classification='uncertain'
+                WHERE notification_id=? AND attempt_number=? AND state='sending'""", (now, notification_id, expected_attempt))
+        record = self.get_by_id(connection, notification_id)
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la notificacion incierta")
+        return record
+
+    def reconcile(self, connection, notification_id, *, attempt_number, outcome, reason, now,
+                  provider_message_id=None):
+        record = self.get_by_id(connection, notification_id)
+        if record is None or record.attempt_count != attempt_number:
+            raise ValueError("El aviso o el numero de intento no coincide")
+        if outcome == "configuration_fixed":
+            if record.status not in {"pending", "failed"} or record.retry_kind != "configuration":
+                raise ValueError("El aviso no esta detenido por configuracion")
+            connection.execute("""UPDATE doctor_notifications SET retry_kind='ready',
+                blocked_configuration_key=NULL, next_attempt_at=?, last_error=?, updated_at=?,
+                template_payload_json=NULL, template_version=NULL WHERE id=?""",
+                (now, reason, now, notification_id))
+        else:
+            if record.status != "sending" or outcome not in {"accepted", "not_delivered"}:
+                raise ValueError("Solo se concilian envios inciertos")
+            if outcome == "accepted" and not (provider_message_id or "").strip():
+                raise ValueError("Se requiere el identificador recuperado de Meta")
+            connection.execute("""INSERT INTO doctor_notification_attempts
+                (notification_id,attempt_number,state,transport,body,template_payload_json,template_version)
+                VALUES (?,?,'uncertain',?,?,?,?) ON CONFLICT(notification_id,attempt_number) DO NOTHING""",
+                (record.id, record.attempt_count, "template" if record.template_payload_json else "text",
+                 record.body, record.template_payload_json, record.template_version))
+            if outcome == "accepted":
+                connection.execute("""UPDATE doctor_notifications SET status='sent', retry_kind='ready',
+                    provider_message_id=?, next_attempt_at=NULL, last_error=NULL, sent_at=?, updated_at=?,
+                    delivery_status=COALESCE(delivery_status,'accepted'), api_accepted_at=COALESCE(api_accepted_at,?) WHERE id=?""",
+                    (provider_message_id.strip(), now, now, now, notification_id))
+            else:
+                connection.execute("""UPDATE doctor_notifications SET status='failed', retry_kind='transient',
+                    blocked_configuration_key=NULL, next_attempt_at=?, last_error=?, updated_at=? WHERE id=?""",
+                    (now, reason, now, notification_id))
+        connection.execute("""UPDATE doctor_notification_attempts
+            SET state=CASE WHEN ?='accepted' THEN 'sent' ELSE 'failed' END,
+                reconciliation_outcome=?, reconciliation_reason=?, reconciled_at=?
+                , provider_message_id=COALESCE(?,provider_message_id)
+                , delivery_status=CASE WHEN ?='accepted' THEN COALESCE(delivery_status,'accepted') ELSE delivery_status END
+                , api_accepted_at=CASE WHEN ?='accepted' THEN COALESCE(api_accepted_at,?) ELSE api_accepted_at END
+            WHERE notification_id=? AND attempt_number=?""",
+            (outcome, outcome, reason, now, provider_message_id, outcome, outcome, now, notification_id, attempt_number))
+        return self.get_by_id(connection, notification_id)
 
 
 class AppointmentRepository:
