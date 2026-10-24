@@ -110,7 +110,8 @@ Evidencia: `docs/verification/2026-10-22-shared-doctor-notifications.md`.
 - [x] Reproducir aceptacion inicial seguida del callback `failed` con codigo `131047`.
 - [x] Documentar que el `sent` local actual no acredita recepcion en el telefono.
 - [x] Implementar el adaptador de envio mediante plantilla y mapeo explicito.
-- [ ] Configurar la plantilla real aprobada y verificar su entrega fuera de la ventana de 24 h.
+- [x] Configurar `aviso_cita_medico` en `es_MX` con las nueve variables aprobadas.
+- [ ] Verificar su entrega real, incluida la operacion fuera de la ventana de 24 h.
 - [x] Persistir callbacks de estado para avisos de chat y voz, distinguir aceptacion
       de entrega y conservar codigos seguros de rechazos asincronos.
 - [ ] Recuperar el aviso original con ventana abierta o plantilla utilizable y
@@ -190,6 +191,20 @@ Evidencia: `docs/verification/2026-10-22-doctor-notification-retries.md`.
 - [x] Registrar evidencia y limites de la comprobacion con Meta real.
 
 Evidencia: `docs/verification/2026-10-22-meta-delivery-statuses.md`.
+
+## Configuracion de la plantilla aprobada - 23 de octubre de 2026
+
+- [x] Registrar nombre, idioma, texto aprobado y nueve variables en `approved-template.md`.
+- [x] Configurar `.env.example` y `.env` sin cambiar el destinatario del doctor.
+- [x] Probar con compositor y HTTP simulado los nueve valores y el orden exacto.
+- [x] Sincronizar configuracion, arrancar ambos procesos y verificar el runtime.
+- [x] Transferir solo el token renovado, conservar otras variables y verificar autenticacion HTTP 200.
+- [ ] Acreditar entrega real con token vigente y un callback `delivered` o `read`.
+- [x] Comparar el activo candidato del panel (`2157628355165252`) con la WABA comprobada (`1047483564765260`).
+- [ ] Validar tipo y acceso del activo del panel; `100/33` no distingue por si solo la causa.
+- [ ] Resolver `132001` con WABA, numero emisor y plantilla confirmados por API en la misma cartera.
+
+Evidencia: `docs/verification/2026-10-23-approved-doctor-template.md`.
 
 ## Fuera de este corte
 

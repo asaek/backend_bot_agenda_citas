@@ -17,8 +17,17 @@ envio y esta verificado con 506 pruebas en Raspberry; evidencia en
 El adaptador de plantillas esta implementado para un mapeo explicito de componentes
 de texto y verificado con 519 pruebas en Raspberry; evidencia en
 `docs/verification/2026-10-22-doctor-template-delivery.md`.
-La plantilla real y su mapeo aprobado permanecen
-pendientes; completar nombre e idioma no acredita aprobacion ni el resto del contrato.
+La plantilla `aviso_cita_medico` en `es_MX`, reportada como aprobada por el usuario
+el 23 de octubre, esta configurada con sus nueve parametros posicionales. El
+contrato exacto esta en `approved-template.md`. El token renovado autentica con
+HTTP 200, pero la prueba real devuelve `132001`: la cuenta de pruebas asociada al
+emisor no lista la plantilla. La URL del usuario contiene el activo candidato a
+WABA `2157628355165252`, mientras los targets del token inspeccionado incluian
+`1047483564765260`. Las consultas del candidato devolvieron `100/33`; su tipo y
+acceso permanecen sin confirmar. La entrega sigue bloqueada hasta validar el
+activo en la misma cartera y confirmar su numero emisor, siguiendo
+`docs/whatsapp-meta-accounts.md`; evidencia en
+`docs/verification/2026-10-23-approved-doctor-template.md`.
 
 El corte de recuperacion y reintentos durables esta verificado con 533 pruebas en
 Raspberry; evidencia en `docs/verification/2026-10-22-doctor-notification-retries.md`.
@@ -241,6 +250,12 @@ el ciclo compartido con chat. La verificacion de entrega con la plantilla real
 sigue pendiente.
 
 ### RF-1113 - Envio por plantilla con mapeo explicito
+
+La configuracion adoptada usa el contrato de `approved-template.md`: un componente
+`body` con nueve parametros de texto en orden evento, fecha, horario, motivo,
+estado, nombre, telefono, resumen y prioridad. El encabezado es fijo y no requiere
+un componente dinamico. Los ejemplos proporcionados por el usuario verifican el
+mapeo, pero nunca sustituyen el contenido de un evento real.
 
 `WhatsAppClient.send_template()` envia a la Cloud API el destinatario, `type=template`,
 nombre, codigo de idioma y componentes proporcionados, preservando su orden y

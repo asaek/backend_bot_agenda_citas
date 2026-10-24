@@ -470,7 +470,8 @@ ventana de 24 h iniciada por un mensaje del doctor al numero del bot. Meta puede
 aceptar el POST y luego devolver `failed/131047`. El `sent` local actual significa
 aceptacion inicial, no recepcion. `delivery_status` distingue esa aceptacion de los
 estados confirmados por Meta. El envio por plantilla y los callbacks estan
-implementados, con configuracion real aprobada pendiente en 011. La integracion de voz no elimina esas
+implementados, con `aviso_cita_medico` en `es_MX` y sus nueve parametros de cuerpo
+configurados en 011. La prueba de entrega real sigue pendiente. La integracion de voz no elimina esas
 restricciones de WhatsApp.
 
 Los callbacks entran a `whatsapp_delivery_receipts` en la base de chat antes de
@@ -487,7 +488,10 @@ se congelan por evento; al reclamar la entrega se conserva `template_payload_jso
 con nombre, idioma y componentes. Las bases de chat y voz usan una migracion
 compartida y opcional para esos snapshots. `WhatsAppClient.send_template()` utiliza
 el mismo HTTP de texto y el destinatario de la entrega, sin un servicio adicional.
-El mapeo real permanece vacio; los layouts de pruebas son ficticios.
+El mapeo real esta en `specs/011-doctor-notifications/approved-template.md`. El
+encabezado fijo se renderiza en Meta; solo se proporcionan los nueve parametros
+de cuerpo. El contrato real se prueba con HTTP simulado ademas de los layouts
+ficticios del adaptador generico.
 
 `notification_recovery.py` comparte el ciclo de arranque/polling entre los
 adaptadores de chat y laboratorio. `notification_retry.py` clasifica los fallos y

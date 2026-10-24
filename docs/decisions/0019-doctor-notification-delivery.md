@@ -146,6 +146,15 @@ con su huella de configuracion. Las respuestas de intentos antiguos no reprogram
 el nuevo. Los historicos solo se migran como aceptados cuando ya tienen ID, sin
 fabricar evidencia. Las conexiones a voz y la conciliacion preservan su esquema.
 
+## Configuracion adoptada - aviso_cita_medico (23 de octubre de 2026)
+
+El usuario proporciona el contrato aprobado `aviso_cita_medico`, idioma `es_MX`.
+Se adopta su mapeo exacto de nueve variables posicionales de cuerpo y encabezado
+fijo, sin cambiar el adaptador generico ni agregar parametros de encabezado.
+El contrato completo y ejemplos estan en `specs/011-doctor-notifications/approved-template.md`.
+La aprobacion es reportada por el usuario; las pruebas locales del contrato no
+se presentan como aceptacion o entrega por Meta. El envio real requiere token vigente.
+
 ## Alternativas consideradas originalmente
 
 - Enviar directamente desde `CalendarProvider`: se rechaza porque mezcla agenda y

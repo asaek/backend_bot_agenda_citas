@@ -41,6 +41,12 @@
 
 - Verify the health check and both webhook methods with the local `curl` commands documented in `README.md`.
 
+## Meta WhatsApp Account Diagnosis
+
+- For Meta account/phone IDs, template availability, or Graph errors `100/33` and
+  `132001`, read `docs/whatsapp-meta-accounts.md` before changing configuration.
+  It distinguishes URL hints from API-verified IDs and records the access blocker.
+
 ## Laboratory Access
 
 - For requests to open the test SSH tunnel or prepare `/lab` from the Mac, follow

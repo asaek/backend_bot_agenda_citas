@@ -81,12 +81,13 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   El modo `text` usa texto libre dentro de la ventana de 24 h del doctor; las
   credenciales y el seguimiento durable de estados de entrega de Meta siguen
   siendo requisitos independientes. Aceptacion no equivale a recepcion.
-- Preparar la configuracion de plantilla con nombre e idioma vacios, reteniendo
+- Configurar la plantilla aprobada `aviso_cita_medico` en `es_MX`, reteniendo
   avisos por evento/doctor mientras el transporte no este disponible. La captura
   y la confirmacion al paciente continuan; chat conserva el snapshot para reintento
   y laboratorio usa su ciclo existente. El adaptador de plantillas usa el mapeo
   explicito configurado, sin asumir componentes ni cantidad de variables. La
-  plantilla real aprobada sigue pendiente. Los datos y el payload
+  plantilla real se documenta en `approved-template.md`, con nueve parametros
+  posicionales. Su prueba de entrega real sigue pendiente. Los datos y el payload
   se conservan para reintentos mediante snapshots compartidos por chat y voz.
 - Recuperar avisos registrados en chat y laboratorio al arrancar y cada 60 s,
   conservando contexto, destinatarios y contenido. Persistir espera exponencial,

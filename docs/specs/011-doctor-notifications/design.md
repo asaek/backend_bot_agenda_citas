@@ -276,7 +276,8 @@ dentro de las ultimas 24 horas; el permiso no lo abre una llamada a `/lab`.
 En ese diagnostico, `receive_webhook()` reconocia sin persistir los eventos de
 estado. El corte de callbacks incorpora la bandeja y proyeccion durables descritas
 abajo; la instrumentacion temporal del diagnostico se retiro al terminar la captura.
-La configuracion y prueba de la plantilla real aprobada siguen pendientes.
+La configuracion aprobada se adopta en `approved-template.md`; la prueba de entrega
+real sigue pendiente de credenciales vigentes.
 
 ## Fallos y reintentos
 
@@ -287,7 +288,8 @@ La configuracion y prueba de la plantilla real aprobada siguen pendientes.
 despachar. El cargador normaliza espacios y valida los destinatarios; el error de
 transporte/plantilla se expone sin convertir una captura habilitada en deshabilitada.
 El transporte omitido sigue siendo `text`; el ejemplo y la configuracion local
-seleccionan `template` con nombre e idioma vacios.
+seleccionan `template`. Tras recibir el contrato aprobado se configuran nombre,
+idioma y nueve parametros de cuerpo, documentados en `approved-template.md`.
 
 `DoctorNotificationDeliveryService.blocked_reason` distingue datos incompletos,
 datos invalidos y mapeo de plantilla pendiente. `record_deferred()` crea o
@@ -309,7 +311,7 @@ evento pendiente y el contexto original en el ciclo compartido de 60 s. El corte
 de recuperacion agrega ese ciclo al lifespan de chat.
 
 La validacion local de nombre/idioma es solo sintactica. La validacion contra la
-plantilla real aprobada sigue pendiente. El envio
+plantilla real aprobada se corresponde con `approved-template.md`. El envio
 requiere tambien un mapeo explicito, no solo llenar dos variables.
 
 ### Corte de envio mediante plantilla
@@ -339,9 +341,11 @@ version de Cloud API y autenticacion. Los errores de mapeo o campos ausentes se
 retienen antes de reclamar intentos. Los errores HTTP conocidos quedan fallidos;
 respuestas perdidas o sin ID de Meta quedan inciertas sin reenvio automatico.
 
-La plantilla real conserva nombre, idioma y componentes vacios hasta recibir su
-contrato aprobado. Las pruebas usan diferentes layouts ficticios; ninguno se
-presenta como estructura aceptada por Meta para la cuenta operativa.
+La plantilla real se configura como `aviso_cita_medico`, `es_MX`, con nueve
+parametros posicionales de cuerpo. El encabezado y la linea final son fijos de
+Meta. Se conserva el adaptador generico y los layouts ficticios en sus pruebas;
+una prueba adicional valida el contrato real y sus ejemplos completos con HTTP
+simulado. La aceptacion y entrega reales requieren la comprobacion del proveedor.
 
 ### Corte de recuperacion y espera durable
 

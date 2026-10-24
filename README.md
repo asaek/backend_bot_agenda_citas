@@ -461,9 +461,9 @@ La configuracion de entrega al doctor agrega:
 
 ```dotenv
 DOCTOR_NOTIFICATION_TRANSPORT=template
-DOCTOR_WHATSAPP_TEMPLATE_NAME=
-DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE=
-DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS=
+DOCTOR_WHATSAPP_TEMPLATE_NAME=aviso_cita_medico
+DOCTOR_WHATSAPP_TEMPLATE_LANGUAGE=es_MX
+DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS='[{"type":"body","parameters":[{"type":"text","text":"{event_type}"},{"type":"text","text":"{date}"},{"type":"text","text":"{time}"},{"type":"text","text":"{reason}"},{"type":"text","text":"{status}"},{"type":"text","text":"{patient_name}"},{"type":"text","text":"{patient_phone}"},{"type":"text","text":"{summary}"},{"type":"text","text":"{priority_signals}"}]}]'
 ```
 
 La bandera de avisos habilita su captura, independientemente de la disponibilidad
@@ -475,8 +475,17 @@ motivo estable. Nombre e idioma se recortan y validan por formato; esta validaci
 no acredita aprobacion por Meta. `WhatsAppClient.send_template()` implementa el
 envio mediante la misma Cloud API. Al completar nombre e idioma tambien se requiere
 un mapeo explicito en `DOCTOR_WHATSAPP_TEMPLATE_COMPONENTS`; vacio conserva el aviso
-con `Mapeo de plantilla pendiente.`. Los tres valores de la plantilla real siguen
-pendientes de recibir los datos aprobados.
+con `Mapeo de plantilla pendiente.`. La plantilla `aviso_cita_medico` en `es_MX`
+fue reportada como aprobada por el usuario y se configuro con nueve parametros
+posicionales de cuerpo. Su encabezado fijo se renderiza en Meta. El contrato y
+texto exactos estan en
+[`approved-template.md`](docs/specs/011-doctor-notifications/approved-template.md).
+La prueba de entrega real requiere credenciales vigentes.
+
+La plantilla debe pertenecer a la cuenta de WhatsApp Business del emisor indicado
+por `WHATSAPP_PHONE_NUMBER_ID`; que el token autentique no garantiza que esa
+cuenta tenga la plantilla. La configuracion y comprobaciones de activacion estan
+en [la verificacion de la plantilla aprobada](docs/verification/2026-10-23-approved-doctor-template.md).
 
 El mapeo es un arreglo JSON de componentes de texto (`header`, `body` y botones
 `url`), conservando el orden y los nombres `parameter_name` cuando la plantilla
@@ -577,8 +586,8 @@ los datos son simulados, pero el destinatario y el envio WhatsApp son los config
 La entrega efectiva requiere un token de Meta vigente. En modo `text` el envio es
 texto libre: Meta exige que el doctor le haya escrito al numero del bot dentro de las
 ultimas 24 horas. Fuera de esa ventana se necesita una plantilla aprobada por Meta;
-el adaptador esta implementado, pero la plantilla real y su mapeo aprobado siguen
-pendientes. Un HTTP 200 con ID de mensaje confirma
+el adaptador y el mapeo de `aviso_cita_medico` estan configurados; su entrega real
+sigue pendiente de comprobar. Un HTTP 200 con ID de mensaje confirma
 aceptacion inicial, pero Meta puede rechazar la entrega despues con `131047`.
 El control interno `status=sent` conserva el significado de aceptacion inicial;
 la entrega real se consulta en `delivery_status`, no se deduce de HTTP 200. Ver el
