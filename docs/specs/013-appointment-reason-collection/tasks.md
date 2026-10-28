@@ -109,4 +109,18 @@
 - [x] Cubrir el webhook hasta una sola cita/notificacion, incluidos duplicados de nombre y motivo.
 - [x] Completar revision, suite completa (346 pruebas), reinicio y verificaciones
       HTTP/autenticacion en Raspberry Pi; evidencia en
-      `docs/verification/2026-10-10-booking-name-continuity.md`.
+       `docs/verification/2026-10-10-booking-name-continuity.md`.
+
+## Corte 12 - Datos conjuntos y preguntas previas del agente
+
+- [x] Reproducir los tres ejemplos del 28/10/2026 con pruebas rojas deterministas en Pi.
+- [x] Separar nombre y motivo conjuntos, sin guardar la frase completa como nombre.
+- [x] Conservar el motivo recibido primero, su procedencia y la aclaracion del nombre.
+- [x] Recuperar respuestas contiguas a preguntas enviadas de la captura actual,
+      independientemente del historial acotado y sin inferir datos del asistente.
+- [x] Cubrir nombres sospechosos, motivo ajeno, texto de varias clausulas, expiracion,
+      abandono y ausencia de datos heredados de otra cita.
+- [x] Verificar los tres ejemplos por webhook con una sola cita y aviso ante duplicados.
+- [x] Ejecutar la suite completa en Raspberry Pi: 571 pruebas correctas; evidencia en
+      `docs/verification/2026-10-28-booking-details-capture.md`.
+- [x] Recargar el backend y verificar configuracion, rutas y autenticacion de WhatsApp.

@@ -58,8 +58,11 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Solicitar, validar y evaluar estructuradamente el motivo expresado por el paciente
   antes de crear una cita; conservar el horario y metadata mientras se espera ese
   dato.
-- Solicitar y persistir el nombre completo del paciente en cada cita nueva antes
-  de continuar con el motivo; citar y conservar el texto pendiente ante una parte
+- Recibir y persistir el nombre completo del paciente en cada cita nueva y su motivo,
+  juntos o en respuestas separadas; solicitar solo los datos faltantes. Conservar
+  respuestas a preguntas de captura ya enviadas en la misma solicitud, incluso si
+  las formulo el agente antes de iniciar el flujo backend (ADR 0063).
+  Citar y conservar el texto pendiente ante una parte
   sospechosa, permitiendo su confirmacion o correccion sin recortar apellidos.
 - Rechazar respuestas conversacionales reconocibles como nombres y conservar el
   nombre aceptado para la misma reserva, incluso tras un reinicio.

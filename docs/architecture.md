@@ -708,14 +708,30 @@ siguen descartando el snapshot anterior.
 
 La funcionalidad definida en `specs/013-appointment-reason-collection/` intercepta
 `create_appointment` antes de `ToolExecutor`. `ConversationService` guarda el
-horario en `conversations.context_json`, solicita el nombre en cada cita nueva y lo
+horario en `conversations.context_json`, recibe el nombre en cada cita nueva y lo
 valida con `patient_name_validation.py`. Actualiza `patients.name` solo al aceptarlo,
-aunque ya existiera, muestra el nombre completo guardado y despues pregunta el motivo. El
+aunque ya existiera, y pregunta solo por los datos que falten. El
 valor que el LLM haya propuesto se descarta. El
 mensaje que entrega el nombre queda marcado en el estado pendiente para que un
-reintento no se use como motivo. El siguiente mensaje de motivo se normaliza solo en
+reintento no se use como motivo. El texto de motivo se normaliza solo en
 espacios y se usa como `reason` para ejecutar la cita; referencias vagas como `Lo de
 siempre` se conservan pendientes y solicitan aclaracion.
+
+`booking_text_capture.py` separa el nombre y el motivo literales cuando llegan
+juntos, con etiquetas explicitas o una clausula de sintoma tras el nombre. El
+motivo completo de varias clausulas sigue siendo un solo motivo. El estado
+`PendingAppointmentReason` conserva `reason_text` y `reason_message_id` aun mientras
+se aclara el nombre. Completar los campos invoca una unica ruta de evaluacion y
+ejecucion; no se requiere otro mensaje si ambos datos ya estan disponibles.
+
+Por ADR 0063, el prompt evita preguntas de captura independientes del backend.
+Si el agente ya pregunto por nombre o motivo antes de solicitar la herramienta,
+`_recover_prompted_booking_details()` recupera solo respuestas contiguas del
+paciente a preguntas enviadas, dentro de diez minutos y hasta una interrupcion
+o un turno ajeno a la captura. Usa los registros persistidos, independientemente
+del historial acotado del LLM. Nunca extrae nombres de agradecimientos ni reutiliza
+datos de una cita terminada. Esta recuperacion no determina el horario ni autoriza
+cancelaciones o reprogramaciones.
 
 La politica minima de ADR 0048 acepta una descripcion oftalmologica general,
 sin exigir diagnostico, intensidad ni duracion. `apply_minimum_reason_policy()`

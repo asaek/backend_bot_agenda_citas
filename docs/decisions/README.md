@@ -80,3 +80,5 @@ indique cual decision anterior queda obsoleta.
   — adopcion parcial en `/lab`: saludo aislado y consulta historica implementados; contexto reciente enriquecido pendiente.
 - [0062 - Prefijo explicito en la allowlist de depuracion WhatsApp](./0062-debug-allowlist-explicit-plus.md)
   — aceptada; la configuracion requiere `+` aunque el remitente de Meta llegue sin el prefijo.
+- [0063 - Capturar nombre y motivo sin imponer turnos separados](./0063-capture-booking-details-together.md)
+  — aceptada; conserva respuestas de la misma captura y solicita solo los datos faltantes.

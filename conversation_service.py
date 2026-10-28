@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agent_instructions import COMMON_AGENT_INSTRUCTIONS
 from booking_details import BookingDetails
+from booking_text_capture import CapturedBookingText, capture_booking_text, requested_booking_field
 from appointment_confirmation import (
     ConfirmationDecision,
     PendingAppointmentAction,
@@ -65,6 +66,7 @@ from appointment_reason_validation import (
 )
 from appointment_scheduling import (
     LAST_APPOINTMENT_REASON_EVALUATION_KEY,
+    APPOINTMENT_REASON_TTL,
     PENDING_APPOINTMENT_REASON_KEY,
     PendingAppointmentReason,
 )
@@ -167,8 +169,9 @@ SYSTEM_PROMPT = "\n".join(
         "ni el motivo.",
         "Despues de mostrar los horarios libres, esperar a que el paciente elija uno; "
         "solo entonces solicitar create_appointment. Despues de que el paciente elija "
-        "un horario, el backend siempre preguntara su nombre completo y luego solicitara "
-        "el motivo antes de ejecutarla.",
+        "un horario, solicita create_appointment de inmediato para que el backend capture "
+        "nombre y motivo. No pidas ni agradezcas esos datos por tu cuenta. El backend "
+        "solicita solo los datos faltantes y acepta ambos en un mismo mensaje.",
         "Cuando el backend muestre horarios disponibles, no pidas directamente el nombre "
         "ni el motivo y no vuelvas a consultar disponibilidad; espera la seleccion del "
         "paciente.",
@@ -407,7 +410,9 @@ class ConversationService:
         )
         if pending_reply is not None:
             return pending_reply
-        pending_reply = await self._resolve_pending_appointment_availability(context, selection)
+        pending_reply = await self._resolve_pending_appointment_availability(
+            context, selection, appointment_event_sink,
+        )
         if pending_reply is not None:
             return pending_reply
         cancellation_reply = await self._resolve_cancellation_request(context)
@@ -476,6 +481,7 @@ class ConversationService:
                         context,
                         tool_call,
                         patient_scope,
+                        appointment_event_sink,
                     )
                 ),
             )
@@ -1432,6 +1438,7 @@ class ConversationService:
         self,
         context: ConversationContext,
         selection: SlotSelectionInterpretation | None = None,
+        appointment_event_sink: AppointmentNotificationEventSink | None = None,
     ) -> str | None:
         pending_availability = self._load_pending_appointment_availability(
             context.conversation_id,
@@ -1472,7 +1479,9 @@ class ConversationService:
         )
         if pending_availability.name_message_id is not None:
             pending_reason = pending_reason.with_name_message(pending_availability.name_message_id)
-        reply = self._start_pending_appointment_reason(context, pending_reason)
+        reply = await self._start_pending_appointment_reason(
+            context, pending_reason, appointment_event_sink,
+        )
         self._clear_pending_appointment_availability(context.conversation_id)
         return reply
 
@@ -1481,6 +1490,7 @@ class ConversationService:
         context: ConversationContext,
         tool_call: ToolCall,
         patient_scope: PatientScope,
+        appointment_event_sink: AppointmentNotificationEventSink | None = None,
     ) -> str | None:
         if (
             self._load_paused_workflow(context.conversation_id) is not None
@@ -1509,7 +1519,9 @@ class ConversationService:
             pending_reason = replace(
                 pending_reason, start_at=self._booking_start_at(pending_reason.start_at).isoformat(),
             )
-            return self._start_pending_appointment_reason(context, pending_reason)
+            return await self._start_pending_appointment_reason(
+                context, pending_reason, appointment_event_sink,
+            )
         return await self._request_appointment_confirmation(
             context,
             tool_call,
@@ -1804,16 +1816,42 @@ class ConversationService:
         if name_required is None:
             name_required = self._load_patient_name(context.patient_id) is None
 
+        captured = capture_booking_text(
+            context.incoming_text, expected="name" if name_required else "reason",
+        )
+        if captured.patient_name is not None and not name_required:
+            pending_reason = replace(
+                pending_reason, name_required=True, name_candidate=None,
+                name_clarification_message_id=None,
+            )
+        if captured.reason is not None:
+            pending_reason = pending_reason.with_reason_text(
+                captured.reason, context.incoming_message_id,
+            )
+            self._save_pending_appointment_reason(context.conversation_id, pending_reason)
+        return await self._capture_pending_booking_details(
+            context, pending_reason, captured.patient_name, context.incoming_message_id,
+            appointment_event_sink,
+        )
+
+    async def _capture_pending_booking_details(
+        self, context: ConversationContext, pending_reason: PendingAppointmentReason,
+        name_text: str | None, name_message_id: int,
+        appointment_event_sink: AppointmentNotificationEventSink | None,
+    ) -> str:
+        name_required = pending_reason.name_required
+        if name_required is None:
+            name_required = self._load_patient_name(context.patient_id) is None
         if name_required:
             candidate = pending_reason.name_candidate
-            decision = classify_patient_name_confirmation(context.incoming_text)
+            decision = classify_patient_name_confirmation(name_text or "")
             if candidate is not None and decision is ConfirmationDecision.REJECTED:
                 self._save_pending_appointment_reason(
                     context.conversation_id,
                     pending_reason.without_name_candidate(context.incoming_message_id),
                 )
                 return f"Recibí ‘{candidate}’. Para corregirlo, escribe tu nombre completo de nuevo."
-            validation = validate_patient_name(context.incoming_text)
+            validation = validate_patient_name(name_text or "")
             if candidate is not None and decision is ConfirmationDecision.CONFIRMED:
                 normalized_name = candidate
             elif validation.code is PatientNameValidationCode.INVALID:
@@ -1835,17 +1873,27 @@ class ConversationService:
             else:
                 normalized_name = validation.normalized_text
             named_pending_reason = pending_reason.with_name_message(
-                context.incoming_message_id
+                name_message_id
             )
             self._save_patient_name_and_pending_reason(
                 context,
                 normalized_name,
                 named_pending_reason,
             )
-            return self._name_received_reply(context.patient_id)
+            pending_reason = named_pending_reason
 
+        if pending_reason.reason_text is None:
+            return self._name_received_reply(context.patient_id)
+        return await self._complete_booking_with_reason(
+            context, pending_reason, appointment_event_sink,
+        )
+
+    async def _complete_booking_with_reason(
+        self, context: ConversationContext, pending_reason: PendingAppointmentReason,
+        appointment_event_sink: AppointmentNotificationEventSink | None,
+    ) -> str:
         evaluated_at = utc_now()
-        validation = validate_appointment_reason(context.incoming_text)
+        validation = validate_appointment_reason(pending_reason.reason_text or "")
         if not validation.accepted:
             evaluation = local_appointment_reason_evaluation(
                 validation,
@@ -2118,20 +2166,77 @@ class ConversationService:
             return APPOINTMENT_NAME_CLARIFICATION_REPLY
         return f"Guardé tu nombre completo como ‘{name}’. {APPOINTMENT_REASON_REPLY}"
 
-    def _start_pending_appointment_reason(
+    async def _start_pending_appointment_reason(
         self,
         context: ConversationContext,
         pending_reason: PendingAppointmentReason,
+        appointment_event_sink: AppointmentNotificationEventSink | None,
     ) -> str:
         self._clear_last_appointment_reason_evaluation(context.conversation_id)
+        captured, name_message_id, reason_message_id = self._recover_prompted_booking_details(context)
+        if captured.reason is not None:
+            pending_reason = pending_reason.with_reason_text(captured.reason, reason_message_id)
         self._save_pending_appointment_reason(
             context.conversation_id,
             pending_reason,
         )
+        if captured.patient_name is not None or (
+            pending_reason.name_required is False and pending_reason.reason_text is not None
+        ):
+            return await self._capture_pending_booking_details(
+                context, pending_reason, captured.patient_name, name_message_id,
+                appointment_event_sink,
+            )
         return (
             APPOINTMENT_REASON_REPLY if pending_reason.name_required is False
             else APPOINTMENT_NAME_REPLY
         )
+
+    def _recover_prompted_booking_details(
+        self, context: ConversationContext,
+    ) -> tuple[CapturedBookingText, int, int]:
+        """Recupera solo respuestas contiguas a preguntas de esta captura, no otra cita.
+
+        El historial acotado del LLM no es una fuente de datos. Se usan los mensajes
+        persistidos del paciente, con su pregunta enviada, hasta una interrupcion
+        o el limite de diez minutos. Nunca se extraen datos de un agradecimiento.
+        """
+        history = [
+            message for message in self.get_history(context.conversation_id)
+            if message.id <= context.incoming_message_id
+        ]
+        name = reason = None
+        name_id = reason_id = context.incoming_message_id
+        if not history:
+            return CapturedBookingText(), name_id, reason_id
+        current_time = datetime.fromisoformat(history[-1].created_at)
+        for index in range(len(history) - 1, -1, -2):
+            answer = history[index]
+            if answer.direction != "incoming":
+                break
+            prompt = history[index - 1] if index else None
+            expected = (
+                requested_booking_field(prompt.text)
+                if prompt is not None and prompt.direction == "outgoing"
+                and prompt.status == "sent" else None
+            )
+            if prompt is not None and (
+                current_time - datetime.fromisoformat(prompt.created_at) > APPOINTMENT_REASON_TTL
+            ):
+                break
+            interruption = classify_pending_interruption(
+                answer.text, flow=PendingConversationFlow.BOOKING_DETAILS,
+            )
+            if interruption is not PendingInterruption.NONE and expected is not None:
+                break
+            captured = capture_booking_text(answer.text, expected=expected)
+            if name is None and captured.patient_name is not None:
+                name, name_id = captured.patient_name, answer.id
+            if reason is None and captured.reason is not None:
+                reason, reason_id = captured.reason, answer.id
+            if expected is None:
+                break
+        return CapturedBookingText(name, reason), name_id, reason_id
 
     def _save_pending_appointment_availability(
         self,

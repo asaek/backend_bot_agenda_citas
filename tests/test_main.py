@@ -1577,6 +1577,65 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(appointment.start_at, datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
         self.assertEqual(appointment.reason, "Tengo los ojos rojos")
 
+    def test_booking_capture_examples_confirm_and_notify_once_on_webhook_retries(self) -> None:
+        reason = "Me hice unos estudios y deseo que el medico los revise es sobre problemas de la vista"
+        scenarios = (
+            (
+                (),
+                ("a las 10 am",),
+                ("Asael Ponce Silva y el motivo es por problemas de la vista",),
+                "problemas de la vista",
+            ),
+            (
+                ("Claro. ¿Cuál es el motivo de la consulta?",),
+                ("Quisiera una cita hoy a las 10 am", reason),
+                ("Asael Ponce Silva",),
+                reason,
+            ),
+            (
+                ("¿Cuál es tu nombre completo?", "Gracias, Asael Ponce Silva. ¿Cuál es el motivo de la consulta?"),
+                ("a ;as 10 am esta bien por favor", "Asael Ponce Silva", "Tengo problemas en la vista"),
+                (),
+                "Tengo problemas en la vista",
+            ),
+        )
+        for index, (agent_questions, before_tool, after_tool, expected_reason) in enumerate(scenarios):
+            with self.subTest(example=index + 1):
+                scenario = WebhookTests()
+                scenario.setUp()
+                self.addCleanup(scenario.doCleanups)
+                scenario.set_fixed_calendar_runtime()
+                whatsapp = FakeWhatsAppClient()
+                llm = FakeLLMProvider(replies=(
+                    *agent_questions,
+                    ToolCall(
+                        name="create_appointment",
+                        arguments={"start_at": "2026-09-21T10:00:00", "reason": "Inventado"},
+                        call_id=f"capture-example-{index}",
+                    ),
+                    '{"summary":"Consulta por problemas de la vista.","priority_signals":[]}',
+                ))
+                texts = (*before_tool, *after_tool)
+                payloads = [scenario.text_payload(message_id=f"capture-{index}-{turn}", text=text)
+                            for turn, text in enumerate(texts)]
+                with scenario.configured_runtime(
+                    whatsapp, llm,
+                    {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"},
+                ):
+                    with TestClient(app) as client:
+                        responses = scenario.post_messages(client, *payloads, payloads[-1])
+                        self.assertTrue(all(response.status_code == 200 for response in responses))
+                        self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+                        self.assertEqual(app.state.calendar_provider.appointments[0].reason, expected_reason)
+                patient_bodies = [body for to, body in whatsapp.sent_messages if to == "5491100000000"]
+                doctor_bodies = [body for to, body in whatsapp.sent_messages if to == "5491100000001"]
+                self.assertEqual(len(patient_bodies), len(texts))
+                self.assertIn("Tipo de evento: Cita agendada", patient_bodies[-1])
+                self.assertEqual(len(doctor_bodies), 1)
+                self.assertIn("Nombre: Asael Ponce Silva", doctor_bodies[0])
+                self.assertIn(expected_reason, doctor_bodies[0])
+                self.assertNotIn("Inventado", doctor_bodies[0])
+
     def test_booking_distinguishes_an_occupied_slot_from_a_typo_and_notifies_once(self) -> None:
         self.set_fixed_calendar_runtime(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
         fake_client = FakeWhatsAppClient()

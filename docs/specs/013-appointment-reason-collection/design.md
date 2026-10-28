@@ -17,10 +17,11 @@ LLM solicita create_appointment
 ConversationService intercepta la mutacion
     |
     +-- guarda el horario en conversations.context_json
-    +-- pregunta el nombre en cada cita y valida todas sus partes
+    +-- recupera respuestas de la captura actual y separa nombre/motivo juntos
+    +-- pregunta solo los campos faltantes y valida todas las partes del nombre
     +-- sospecha --> conserva el nombre completo y pide confirmar/corregir
     +-- nombre aceptado --> actualiza patients.name y muestra el nombre guardado
-    +-- pregunta el motivo, sin tocar el calendario
+    +-- conserva un motivo recibido primero; lo evalua al aceptar el nombre
     |
     v
 Siguiente mensaje del paciente
@@ -66,8 +67,29 @@ cualquier otro contexto existente. Tambien conserva `attempt_count` y
 Tambien conserva el candidato completo `name_candidate` y el ultimo mensaje de
 aclaracion `name_clarification_message_id`. Los campos son opcionales para mantener
 compatibilidad con estados existentes y no requieren una migracion de SQLite.
+Por ADR 0063 agrega tambien `reason_text` y `reason_message_id`: texto literal y
+procedencia del motivo, incluso si llego antes de aceptar el nombre. No representan
+una evaluacion exitosa ni autorizan crear una cita por si solos.
+
+`booking_text_capture.py` separa etiquetas de nombre/motivo y clausulas de sintoma
+tras un nombre. No usa el LLM para reescribirlos. Antes de comenzar la captura,
+`_recover_prompted_booking_details()` recorre hacia atras pares contiguos de pregunta
+enviada y respuesta del paciente. Solo admite preguntas de captura, corta a los diez
+minutos o ante una interrupcion/otro tema y no extrae datos de la voz del asistente.
+El ultimo valor literal de cada campo se valida y se incorpora al estado pendiente.
+La lectura de registros persistidos no depende de `max_history_messages`.
+
+La entrada al flujo y los mensajes posteriores comparten
+`_capture_pending_booking_details()` y `_complete_booking_with_reason()`. Cuando ya
+estan ambos campos, se evalua y ejecuta en el mismo turno. El event sink se transmite
+tambien al interceptor de mutaciones para conservar la notificacion al doctor si
+los datos estaban completos antes de la llamada a la herramienta.
 
 ## Resolucion
+
+El orden nombre y luego motivo descrito abajo es el caso donde inicialmente faltan
+ambos datos. Una respuesta conjunta o un motivo recibido antes no requieren repetir
+preguntas: se aplica la misma validacion a los campos ya capturados.
 
 Antes de tomar el siguiente mensaje como nombre o motivo, `ConversationService` consulta
 el router de `specs/016-conversation-intent-routing/`. Una peticion nueva explicita

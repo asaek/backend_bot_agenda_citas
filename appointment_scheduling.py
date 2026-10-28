@@ -29,6 +29,8 @@ class PendingAppointmentReason:
     name_required: bool | None = True
     name_candidate: str | None = None
     name_clarification_message_id: int | None = None
+    reason_text: str | None = None
+    reason_message_id: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -73,6 +75,14 @@ class PendingAppointmentReason:
                 )
             )
             or type(self.attempt_count) is not int
+            or (
+                self.reason_text is not None
+                and not isinstance(self.reason_text, str)
+            )
+            or (
+                self.reason_message_id is not None
+                and (type(self.reason_message_id) is not int or self.reason_message_id <= 0)
+            )
             or self.attempt_count < 0
             or (
                 self.last_evaluation is not None
@@ -184,6 +194,8 @@ class PendingAppointmentReason:
                 name_clarification_message_id=name_clarification_message_id,
                 attempt_count=attempt_count,
                 last_evaluation=last_evaluation,
+                reason_text=value.get("reason_text"),
+                reason_message_id=value.get("reason_message_id"),
             )
         except ValueError:
             return None
@@ -215,7 +227,14 @@ class PendingAppointmentReason:
             context["name_clarification_message_id"] = self.name_clarification_message_id
         if self.last_evaluation is not None:
             context["last_evaluation"] = self.last_evaluation.to_context()
+        if self.reason_text is not None:
+            context["reason_text"] = self.reason_text
+        if self.reason_message_id is not None:
+            context["reason_message_id"] = self.reason_message_id
         return context
+
+    def with_reason_text(self, text: str, message_id: int) -> "PendingAppointmentReason":
+        return replace(self, reason_text=text, reason_message_id=message_id)
 
     def with_name_message(self, message_id: int) -> "PendingAppointmentReason":
         if message_id <= 0:

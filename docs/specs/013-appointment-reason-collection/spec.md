@@ -6,6 +6,8 @@ Verificado. El backend solicita el nombre del paciente en cada cita nueva, aunqu
 este registrado, y solicita el motivo antes de crearla. Valida una calidad minima de
 legibilidad, evalua el texto con una respuesta estructurada y conserva la solicitud
 pendiente entre mensajes.
+Nombre y motivo pueden recibirse juntos o con el motivo primero; solo se solicitan
+los datos faltantes (ADR 0063).
 La evidencia esta en `docs/verification/2026-09-24-appointment-reason.md` y
 `docs/verification/2026-09-25-appointment-reason-validation.md`, además de
 `docs/verification/2026-09-25-structured-reason-evaluation.md` y
@@ -23,6 +25,8 @@ La aceptacion de motivos generales y las aclaraciones diferenciadas estan verifi
 en `docs/verification/2026-10-09-general-appointment-reasons.md`.
 La continuidad del nombre y el rechazo de respuestas conversacionales estan
 verificados en `docs/verification/2026-10-10-booking-name-continuity.md`.
+La captura conjunta y la continuidad de preguntas previas del agente estan verificadas
+en `docs/verification/2026-10-28-booking-details-capture.md`.
 
 ## Objetivo
 
@@ -34,8 +38,8 @@ el LLM cuando el paciente de prueba todavia no ha explicado la razon de su visit
 La funcionalidad cubre:
 
 - Solicitud del motivo antes de ejecutar `create_appointment`.
-- Solicitud y actualizacion del nombre del paciente antes de solicitar el motivo en
-  cada cita nueva.
+- Recepcion y actualizacion del nombre del paciente en cada cita nueva, aceptando
+  nombre y motivo en el mismo mensaje y conservando un motivo recibido primero.
 - Aclaracion de partes sospechosas del nombre, conservando el texto completo y el
   horario hasta recibir confirmacion o un nombre completo corregido.
 - Conservacion del horario solicitado mientras se espera el siguiente mensaje.
@@ -63,7 +67,9 @@ motivo.
 ### RF-1301 - Motivo previo
 
 Una solicitud de `create_appointment` no debe modificar el proveedor de calendario
-hasta que el paciente de prueba haya enviado un motivo en un mensaje posterior.
+hasta que el paciente de prueba haya proporcionado un nombre aceptado y un motivo
+validado para esa solicitud. Pueden estar en el mismo mensaje o haberse recibido antes
+de solicitar la herramienta, como respuestas a preguntas de la captura actual.
 El valor `reason` propuesto por el LLM no cuenta como motivo proporcionado por el
 paciente.
 
@@ -82,14 +88,40 @@ de ejecutar la cita.
 ### RF-1311 - Nombre del paciente
 
 En cada solicitud nueva de cita, incluso si `patients.name` ya contiene un nombre,
-el backend debe solicitar el nombre completo antes del motivo. El nombre normalizado
+el backend debe recibir el nombre completo para esa solicitud. Pregunta el nombre
+primero cuando faltan ambos datos, pero no impone turnos separados. El nombre normalizado
 debe guardarse o actualizarse en el registro del paciente y la solicitud pendiente
 debe conservarse hasta recibir ambos datos. Un nombre no textual, vacio o fuera del
 limite permitido debe pedir una aclaracion y no debe crear la cita.
 La normalizacion solo ajusta espacios; no corrige letras, acentos, mayusculas ni
 elimina partes. La respuesta de aceptacion muestra el nombre completo guardado.
+Cuando hay etiquetas o separadores explicitos, sus textos introductorios no forman
+parte del nombre ni del motivo. La confirmacion final muestra ambos datos aceptados.
 Una vez aceptado para esa reserva, el siguiente mensaje debe procesarse como motivo
 sin solicitar el nombre de nuevo, incluso tras un reinicio con historial acotado.
+
+### RF-1318 - Captura conjunta y continuidad de respuestas
+
+`Asael Ponce Silva y el motivo es por problemas de la vista` entrega nombre
+`Asael Ponce Silva` y motivo `problemas de la vista`. Tambien se admiten prefijos
+como `Me llamo`, una clausula de sintoma tras el nombre y motivo primero con una
+etiqueta explicita de nombre. El motivo de varias clausulas no se divide en un
+nombre nuevo por empezar con `Soy` o contener `y tengo`.
+
+Un motivo recibido en respuesta a una pregunta de captura del agente antes de
+entrar al flujo backend debe conservarse mientras se recibe el nombre. Un nombre
+recibido de la misma forma no debe solicitarse otra vez despues del motivo. Solo
+cuentan mensajes literales del paciente, vinculados a preguntas enviadas y contiguas
+de esa captura, dentro de diez minutos. Un agradecimiento del asistente no acredita
+un nombre. La recuperacion se detiene ante una interrupcion o un turno ajeno y no
+usa datos de citas anteriores ni `reason` propuesto por el LLM.
+
+El motivo conserva su procedencia durante reinicios, pausas y aclaraciones de nombre.
+Un nombre sospechoso no se acepta por acompañarlo de un motivo; ambos se conservan
+hasta confirmar o corregir el nombre. Toda ruta pasa por la evaluacion habitual
+del motivo, incluyendo sus rechazos y fallos tecnicos, antes de ejecutar la cita.
+Los reintentos del webhook generan una sola cita, confirmacion al paciente y aviso
+al doctor, tambien si el ultimo dato llega al interceptar la herramienta.
 
 ### RF-1317 - Respuestas conversacionales durante la captura del nombre
 
@@ -238,10 +270,10 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 
 ## Criterios de aceptacion
 
-1. `Agendame otra cita a las 15:00` responde preguntando el motivo y no crea una
-   cita.
-2. `Revision de cornea` despues de la pregunta crea la cita a las 15:00 con ese
-   motivo.
+1. `Agendame otra cita a las 15:00` responde preguntando el nombre si aun no se ha
+   recibido para esa solicitud y no crea una cita.
+2. Con el nombre aceptado, `Revision de cornea` despues de la pregunta por motivo
+   crea la cita a las 15:00 con ese motivo.
 3. El flujo continua despues de reconstruir `ConversationService`.
 4. El motivo sugerido por el LLM no se persiste si el paciente todavia no lo ha
    enviado.
@@ -261,11 +293,11 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 13. `Lo de siempre` conserva la solicitud pendiente y pide una aclaracion.
 14. Una señal de prioridad y su notificacion no contienen diagnosticos ni cambian la
     respuesta de agendamiento.
-15. Cada nueva cita pregunta primero el nombre, incluso si ya esta registrado; despues
-    de recibirlo pregunta el motivo.
-16. El nombre recibido reemplaza el valor de `patients.name`, el mismo mensaje
-    reintentado no crea una cita y un motivo posterior crea la cita con el horario
-    original.
+15. Cada nueva cita recibe un nombre para esa solicitud, incluso si ya esta registrado;
+    se pregunta primero el nombre cuando faltan ambos datos y solo lo que falte despues.
+16. El nombre recibido reemplaza el valor de `patients.name`; si el mensaje solo
+    entrega un nombre, reintentarlo no crea una cita. Un motivo posterior crea la
+    cita con el horario original.
 17. `Tengo los ojos rojos` registra `eye_redness` y la notificacion incluye la
     descripcion aprobada, sin aceptar texto arbitrario como `cita confirmada` en la
     seccion de señales.
@@ -282,7 +314,7 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
     `Nombre: Asael Ponce Silva`, sin las partes de prueba en ese campo.
 23. Un apellido inusual señalado por la heuristica puede confirmarse explicitamente
     despues de reiniciar el servicio; se guarda integro y no se interpreta `Si` como
-    nombre literal, motivo ni autorizacion para crear una cita.
+    nombre literal ni motivo. Si el motivo aun falta, esa confirmacion no crea una cita.
 24. Acentos, apellidos compuestos, apostrofos, guiones, apellidos cortos y nombres
      escritos en alfabetos no latinos se conservan sin correcciones automaticas.
 25. `Tengo problemas en el ojo izquierdo` crea una unica cita con ese motivo aunque
@@ -301,6 +333,13 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
     `Tengo los ojos rojos` pide el nombre una sola vez y crea una cita en ese horario,
     incluso tras reiniciar; los reintentos del webhook emiten una sola notificacion
     al doctor con `Nombre: Asael Ponce Silva`.
+32. Nombre y motivo juntos se guardan en campos distintos y completan una sola cita,
+    tambien si se reintenta el webhook o el nombre requirio una aclaracion previa.
+33. Un motivo respondido antes de iniciar el flujo backend se conserva al pedir el nombre;
+    un nombre ya respondido a la pregunta del agente no se vuelve a pedir tras el motivo.
+34. No se recuperan nombres inventados por el agente ni respuestas de capturas vencidas,
+    abandonadas o citas terminadas. Un motivo ajeno conserva su rechazo y un texto como
+    `Soy diabético y tengo problemas en la vista` no sustituye el nombre aceptado.
 
 ## Fuera del alcance
 
