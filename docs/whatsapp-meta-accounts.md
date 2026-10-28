@@ -9,6 +9,23 @@ Resume la conversacion aportada por el usuario y la
 Las observaciones fechadas son antecedentes; verificar de nuevo los activos y el
 acceso efectivos cuando cambien el token o la configuracion.
 
+## Estado mas reciente comprobado: 25/10/2026
+
+El token actualizado autentica con HTTP 200 y el catalogo de la WABA comprobada
+`1047483564765260` ahora devuelve `aviso_cita_medico`, `es_MX`, `APPROVED`, junto a
+`hello_world`. Encabezado, cuerpo y nueve variables coinciden con el contrato.
+El emisor configurado pertenece a esa cuenta y es distinto del doctor.
+
+Una prueba controlada al doctor terminado en `3338` fue aceptada y Meta confirmo
+`delivered` el 25/10/2026 a las **19:58:57 UTC**, correlacionando el ID completo
+de la respuesta y el destinatario. Evidencia en
+[la prueba real](verification/2026-10-25-approved-template-delivered.md).
+No se cambiaron los IDs del emisor ni se modifico la agenda.
+
+El activo candidato `2157628355165252` sigue sin estar confirmado por API con
+este token (`100/33`), pero ya no bloquea el envio verificado desde la cuenta
+actual. Los hechos del 23/10 se conservan como historia, no como estado vigente.
+
 ## Distinciones que hay que conservar
 
 | Dato | Que representa | Uso en el proyecto |
@@ -114,10 +131,9 @@ Comprobar configuracion efectiva y autenticacion antes de la prueba controlada.
 controlada obtiene evidencia de Meta correlacionada con ID y destinatario. Un
 rechazo o una aceptacion sin callback de entrega se documentan como tales.
 
-## Punto pendiente para retomar
+## Si se retoma el activo del panel
 
-Confirmar el tipo y acceso del activo `2157628355165252` en la misma cartera del
-panel, mediante asignacion/autorizacion adecuada o identificacion del ID correcto.
-Despues consultar sus numeros y plantillas. Hasta entonces, conservar la
-configuracion del emisor y el diagnostico como pendientes de resolucion; la
-plantilla reportada como aprobada no esta verificada para el emisor actual.
+Para una investigacion o cambio de cuenta posterior, confirmar el tipo y acceso
+del activo `2157628355165252` en la misma cartera del panel. La aprobacion y el
+envio de la plantilla para el emisor actual ya estan verificados; consultar ese
+otro activo solo corresponde si vuelve a ser necesario para el objetivo pedido.

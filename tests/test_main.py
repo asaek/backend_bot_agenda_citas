@@ -1080,7 +1080,7 @@ class WebhookTests(unittest.TestCase):
         )
         self.assertNotIn(patient_text, fake_client.sent_messages[0][1])
 
-    def test_debug_mode_keeps_generic_fallback_for_non_allowlisted_sender(self) -> None:
+    def test_debug_mode_requires_explicit_plus_in_allowlist_number(self) -> None:
         fake_client = FakeWhatsAppClient()
         failing_provider = FakeLLMProvider(error=LLMHTTPError(429))
 
@@ -1089,7 +1089,7 @@ class WebhookTests(unittest.TestCase):
             failing_provider,
             {
                 "DEBUG_MODE": "true",
-                "DEBUG_WHATSAPP_NUMBERS": "5491100000001",
+                "DEBUG_WHATSAPP_NUMBERS": "5491100000000",
             },
         ):
             with TestClient(app) as client:

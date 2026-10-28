@@ -1814,7 +1814,7 @@ class AppointmentConfirmationTests(unittest.TestCase):
             os.environ,
             {
                 "DEBUG_MODE": "true",
-                "DEBUG_WHATSAPP_NUMBERS": self.scope_sender,
+                "DEBUG_WHATSAPP_NUMBERS": f"+{self.scope_sender}",
             },
         ):
             reply = asyncio.run(self.service.build_reply(context))

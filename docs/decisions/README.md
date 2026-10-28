@@ -78,3 +78,5 @@ indique cual decision anterior queda obsoleta.
   — permite la secuencia posterior solo con transcripcion afirmativa actual y pregunta completa.
 - [0061 - Contexto historico y apertura independiente de llamadas de laboratorio](./0061-laboratory-history-and-call-boundaries.md)
   — adopcion parcial en `/lab`: saludo aislado y consulta historica implementados; contexto reciente enriquecido pendiente.
+- [0062 - Prefijo explicito en la allowlist de depuracion WhatsApp](./0062-debug-allowlist-explicit-plus.md)
+  — aceptada; la configuracion requiere `+` aunque el remitente de Meta llegue sin el prefijo.

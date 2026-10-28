@@ -17,24 +17,23 @@ envio y esta verificado con 506 pruebas en Raspberry; evidencia en
 El adaptador de plantillas esta implementado para un mapeo explicito de componentes
 de texto y verificado con 519 pruebas en Raspberry; evidencia en
 `docs/verification/2026-10-22-doctor-template-delivery.md`.
-La plantilla `aviso_cita_medico` en `es_MX`, reportada como aprobada por el usuario
-el 23 de octubre, esta configurada con sus nueve parametros posicionales. El
-contrato exacto esta en `approved-template.md`. El token renovado autentica con
-HTTP 200, pero la prueba real devuelve `132001`: la cuenta de pruebas asociada al
-emisor no lista la plantilla. La URL del usuario contiene el activo candidato a
-WABA `2157628355165252`, mientras los targets del token inspeccionado incluian
-`1047483564765260`. Las consultas del candidato devolvieron `100/33`; su tipo y
-acceso permanecen sin confirmar. La entrega sigue bloqueada hasta validar el
-activo en la misma cartera y confirmar su numero emisor, siguiendo
-`docs/whatsapp-meta-accounts.md`; evidencia en
-`docs/verification/2026-10-23-approved-doctor-template.md`.
+La plantilla `aviso_cita_medico` en `es_MX` esta configurada con nueve parametros
+posicionales. Su estado `APPROVED` y el contrato exacto se confirmaron por API el
+25/10/2026. Una prueba directa al doctor con datos de ejemplo obtuvo el callback
+real `delivered`; contrato en `approved-template.md` y evidencia en
+`docs/verification/2026-10-25-approved-template-delivered.md`. No se modifico la
+agenda ni se marco un aviso historico como entregado. El bloqueo `132001` del
+23/10 es un antecedente resuelto para el emisor actual; `docs/whatsapp-meta-accounts.md`
+conserva las comprobaciones y las incertidumbres sobre otros activos del panel.
 
 El corte de recuperacion y reintentos durables esta verificado con 533 pruebas en
 Raspberry; evidencia en `docs/verification/2026-10-22-doctor-notification-retries.md`.
 El seguimiento de callbacks esta implementado mediante una bandeja durable y
 proyeccion correlacionada en chat/voz, verificado con 553 pruebas en Raspberry;
 evidencia en `docs/verification/2026-10-22-meta-delivery-statuses.md`.
-La entrega con la plantilla real sigue pendiente.
+La entrega de una prueba con la plantilla real esta confirmada por Meta. La
+recuperacion de avisos historicos y cualquier prueba de una nueva operacion de
+agenda son verificaciones distintas de ese diagnostico de transporte.
 
 ## Objetivo
 

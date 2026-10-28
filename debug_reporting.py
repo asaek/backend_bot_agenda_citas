@@ -9,6 +9,7 @@ DEBUG_MODE_ENV = "DEBUG_MODE"
 DEBUG_WHATSAPP_NUMBERS_ENV = "DEBUG_WHATSAPP_NUMBERS"
 
 _SAFE_LABEL = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
+_EXPLICIT_E164_NUMBER = re.compile(r"\+[1-9][0-9]{6,14}\Z")
 
 
 def format_debug_fallback_reply(
@@ -32,11 +33,11 @@ def format_debug_fallback_reply(
         return None
 
     recipient = _normalize_number(recipient_number)
-    allowed_numbers = {
-        _normalize_number(value)
-        for value in values.get(DEBUG_WHATSAPP_NUMBERS_ENV, "").split(",")
-        if _normalize_number(value)
-    }
+    allowed_numbers: set[str] = set()
+    for value in values.get(DEBUG_WHATSAPP_NUMBERS_ENV, "").split(","):
+        normalized = _normalize_configured_number(value)
+        if normalized:
+            allowed_numbers.add(normalized)
     if not recipient or recipient not in allowed_numbers:
         return None
 
@@ -63,3 +64,10 @@ def _normalize_number(value: str) -> str:
     if not isinstance(value, str):
         return ""
     return "".join(character for character in value if "0" <= character <= "9")
+
+
+def _normalize_configured_number(value: str) -> str:
+    configured_number = value.strip()
+    if not _EXPLICIT_E164_NUMBER.fullmatch(configured_number):
+        return ""
+    return _normalize_number(configured_number)

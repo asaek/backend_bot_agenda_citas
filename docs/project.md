@@ -87,7 +87,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   y laboratorio usa su ciclo existente. El adaptador de plantillas usa el mapeo
   explicito configurado, sin asumir componentes ni cantidad de variables. La
   plantilla real se documenta en `approved-template.md`, con nueve parametros
-  posicionales. Su prueba de entrega real sigue pendiente. Los datos y el payload
+  posicionales. Su prueba directa de entrega real esta confirmada por callback
+  `delivered` del 25/10/2026, sin modificar la agenda. Los datos y el payload
   se conservan para reintentos mediante snapshots compartidos por chat y voz.
 - Recuperar avisos registrados en chat y laboratorio al arrancar y cada 60 s,
   conservando contexto, destinatarios y contenido. Persistir espera exponencial,
@@ -134,7 +135,8 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
 - Usar Responses API para OpenAI y Chat Completions para Groq/OpenRouter con un
   contrato compartido de respuestas y llamadas a herramientas.
 - Habilitar un modo debug apagado por defecto que muestre diagnosticos seguros solo a
-  remitentes de WhatsApp explicitamente autorizados.
+  remitentes de WhatsApp explicitamente autorizados con entradas E.164 y prefijo `+`
+  obligatorio en `DEBUG_WHATSAPP_NUMBERS`.
 - Verificar el ciclo integrado sin consumir APIs ni enviar mensajes reales.
 - Mantener el mirror de Raspberry Pi con los archivos y el `.env` completo locales
   al solicitar `local to raspberry`; comprobar copia, permisos, configuracion

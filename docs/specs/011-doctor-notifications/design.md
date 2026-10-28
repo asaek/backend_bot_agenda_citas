@@ -276,8 +276,8 @@ dentro de las ultimas 24 horas; el permiso no lo abre una llamada a `/lab`.
 En ese diagnostico, `receive_webhook()` reconocia sin persistir los eventos de
 estado. El corte de callbacks incorpora la bandeja y proyeccion durables descritas
 abajo; la instrumentacion temporal del diagnostico se retiro al terminar la captura.
-La configuracion aprobada se adopta en `approved-template.md`; la prueba de entrega
-real sigue pendiente de credenciales vigentes.
+La configuracion aprobada se adopta en `approved-template.md`; su prueba directa
+de entrega real esta confirmada con callback `delivered` del 25/10/2026.
 
 ## Fallos y reintentos
 

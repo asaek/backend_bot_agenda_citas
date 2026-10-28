@@ -1,5 +1,10 @@
 # Plantilla aprobada y renovacion del token — 23/10/2026
 
+Antecedente historico: el 25/10/2026 la plantilla ya figura `APPROVED` en la WABA
+del emisor configurado y la prueba obtuvo un callback real `delivered`. La
+[evidencia posterior](2026-10-25-approved-template-delivered.md) sustituye el estado
+de bloqueo para el envio actual, conservando las observaciones originales de este documento.
+
 ## Configuracion adoptada
 
 El usuario reporta aprobada `aviso_cita_medico` en `es_MX` y proporciona su texto

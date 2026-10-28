@@ -27,7 +27,10 @@ Con el modo apagado, el comportamiento conserva la respuesta controlada existent
 
 Los diagnosticos solo se muestran si `DEBUG_MODE` esta activo y el numero entrante,
 normalizado a digitos, coincide con una entrada de `DEBUG_WHATSAPP_NUMBERS`. La lista
-acepta numeros E.164 separados por comas. Una lista vacia no autoriza a nadie.
+acepta numeros E.164 separados por comas y exige que cada entrada configurada incluya
+explicitamente `+` al inicio. Las entradas sin `+` o con formato invalido se ignoran y no
+autorizan al remitente, aunque sus digitos coincidan. Una lista vacia o sin entradas
+validas no autoriza a nadie.
 
 ### RF-1503 - Diagnostico limitado
 
@@ -51,6 +54,8 @@ actuales. El modo debug solo cambia el texto de respuesta enviado al remitente a
 6. Un `ToolCall` no manejado usa el mismo limite de autorizacion.
 7. La persistencia del error y el codigo HTTP no dependen del modo debug.
 8. Los errores publicos de agenda muestran su codigo seguro solo al remitente autorizado.
+9. Una entrada E.164 con `+` explicito autoriza el numero correspondiente; la misma
+   entrada sin `+` no lo autoriza.
 
 ## Fuera de alcance
 

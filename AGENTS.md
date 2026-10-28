@@ -45,7 +45,8 @@
 
 - For Meta account/phone IDs, template availability, or Graph errors `100/33` and
   `132001`, read `docs/whatsapp-meta-accounts.md` before changing configuration.
-  It distinguishes URL hints from API-verified IDs and records the access blocker.
+  It distinguishes URL hints from API-verified IDs and records dated checks and
+  the latest verified state.
 
 ## Laboratory Access
 

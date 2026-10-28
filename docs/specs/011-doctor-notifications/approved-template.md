@@ -2,19 +2,17 @@
 
 ## Estado
 
-Aprobacion reportada por el usuario el 23 de octubre de 2026. Configuracion adoptada
-en `.env.example` y `.env` local. El token renovado autentica correctamente, pero
-la prueba real devuelve `132001`: la cuenta del emisor configurado es
-`Test WhatsApp Business Account` (`1047483564765260`) y su catalogo solo
-incluye `hello_world` en `en_US`. La URL del panel proporcionada por el usuario
-contiene `asset_id=2157628355165252`, candidato a WABA cuyo tipo y acceso aun no
-se confirmaron por API. Ese ID no aparecia en los targets del token inspeccionado
-el 23/10/2026; sus consultas devuelven `100/33`, que por si solo no distingue
-ID incorrecto, falta de acceso u operacion incompatible. Falta validar el activo
-en la misma cartera del panel y despues confirmar su numero emisor. La
-[guia de diagnostico](../../whatsapp-meta-accounts.md) conserva los criterios.
-Evidencia en
-`../../verification/2026-10-23-approved-doctor-template.md`.
+Aprobacion reportada por el usuario el 23 de octubre de 2026 y confirmada por API
+el 25/10/2026: `aviso_cita_medico`, `es_MX`, estado `APPROVED` en la cuenta del
+emisor configurado. El encabezado y cuerpo coinciden con este contrato y usan
+nueve variables posicionales. Configuracion adoptada en `.env.example` y `.env`.
+
+La prueba directa del cliente al doctor fue aceptada y obtuvo un callback real
+`delivered` a las 19:58:57 UTC del 25/10/2026. No creo una cita ni recupero avisos
+historicos. Evidencia en
+[la prueba real](../../verification/2026-10-25-approved-template-delivered.md).
+La [guia de diagnostico](../../whatsapp-meta-accounts.md) conserva la diferencia
+entre el bloqueo historico del 23/10 y el estado verificado actual.
 
 - Nombre exacto: `aviso_cita_medico`.
 - Idioma: Español de Mexico, codigo `es_MX`.

@@ -10,9 +10,11 @@ configuracion como entorno inyectable para poder probar el limite sin acceder a 
 
 - `DEBUG_MODE`: bandera booleana, predeterminada a `false`.
 - `DEBUG_WHATSAPP_NUMBERS`: lista separada por comas de numeros de prueba autorizados,
-  predeterminada vacia.
+  predeterminada vacia. Cada entrada debe ser E.164 y comenzar explicitamente con `+`;
+  entradas invalidas se ignoran.
 
-Ambas condiciones son necesarias. Los numeros se normalizan conservando solo digitos.
+Ambas condiciones son necesarias. El `+` se valida antes de normalizar las entradas
+configuradas a digitos para compararlas con el remitente, que Meta entrega sin `+`.
 
 ## Flujo
 

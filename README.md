@@ -482,10 +482,14 @@ texto exactos estan en
 [`approved-template.md`](docs/specs/011-doctor-notifications/approved-template.md).
 La prueba de entrega real requiere credenciales vigentes.
 
+El 25/10/2026 se confirmo `APPROVED` para el emisor configurado y una prueba al
+doctor obtuvo el callback real `delivered`, sin modificar la agenda. Ver
+[la evidencia de entrega](docs/verification/2026-10-25-approved-template-delivered.md).
+
 La plantilla debe pertenecer a la cuenta de WhatsApp Business del emisor indicado
 por `WHATSAPP_PHONE_NUMBER_ID`; que el token autentique no garantiza que esa
 cuenta tenga la plantilla. La configuracion y comprobaciones de activacion estan
-en [la verificacion de la plantilla aprobada](docs/verification/2026-10-23-approved-doctor-template.md).
+en [la verificacion de la plantilla aprobada](docs/verification/2026-10-25-approved-template-delivered.md).
 
 El mapeo es un arreglo JSON de componentes de texto (`header`, `body` y botones
 `url`), conservando el orden y los nombres `parameter_name` cuando la plantilla
@@ -586,8 +590,8 @@ los datos son simulados, pero el destinatario y el envio WhatsApp son los config
 La entrega efectiva requiere un token de Meta vigente. En modo `text` el envio es
 texto libre: Meta exige que el doctor le haya escrito al numero del bot dentro de las
 ultimas 24 horas. Fuera de esa ventana se necesita una plantilla aprobada por Meta;
-el adaptador y el mapeo de `aviso_cita_medico` estan configurados; su entrega real
-sigue pendiente de comprobar. Un HTTP 200 con ID de mensaje confirma
+el adaptador y el mapeo de `aviso_cita_medico` estan configurados y una prueba real
+obtuvo `delivered` el 25/10/2026. Un HTTP 200 con ID de mensaje confirma
 aceptacion inicial, pero Meta puede rechazar la entrega despues con `131047`.
 El control interno `status=sent` conserva el significado de aceptacion inicial;
 la entrega real se consulta en `delivery_status`, no se deduce de HTTP 200. Ver el
@@ -657,8 +661,11 @@ el log operativo no registra el texto del paciente ni la respuesta completa del 
 
 Para depurar, `DEBUG_MODE=true` puede mostrar el nombre del proveedor, el tipo de error y
 el codigo HTTP o codigo seguro de agenda, pero solo a los numeros listados en
-`DEBUG_WHATSAPP_NUMBERS` (separados por comas). El modo esta apagado por defecto y no
-muestra excepciones crudas, prompts, contenido de mensajes, cuerpos HTTP ni credenciales.
+`DEBUG_WHATSAPP_NUMBERS` (separados por comas). Cada numero configurado debe incluir
+explicitamente el prefijo `+` y cumplir el formato E.164, por ejemplo
+`DEBUG_WHATSAPP_NUMBERS=+521234567890`; omitir `+` no autoriza al remitente. El modo
+esta apagado por defecto y no muestra excepciones crudas, prompts, contenido de mensajes,
+cuerpos HTTP ni credenciales.
 
 Los cortes de eventos, persistencia, composicion, entrega e integracion del webhook
 ya estan implementados.

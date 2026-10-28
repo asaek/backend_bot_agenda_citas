@@ -111,7 +111,8 @@ Evidencia: `docs/verification/2026-10-22-shared-doctor-notifications.md`.
 - [x] Documentar que el `sent` local actual no acredita recepcion en el telefono.
 - [x] Implementar el adaptador de envio mediante plantilla y mapeo explicito.
 - [x] Configurar `aviso_cita_medico` en `es_MX` con las nueve variables aprobadas.
-- [ ] Verificar su entrega real, incluida la operacion fuera de la ventana de 24 h.
+- [x] Verificar su entrega real con callback `delivered` (prueba controlada del 25/10).
+- [ ] Acreditar explicitamente el caso fuera de la ventana de 24 h del destinatario.
 - [x] Persistir callbacks de estado para avisos de chat y voz, distinguir aceptacion
       de entrega y conservar codigos seguros de rechazos asincronos.
 - [ ] Recuperar el aviso original con ventana abierta o plantilla utilizable y
@@ -199,10 +200,15 @@ Evidencia: `docs/verification/2026-10-22-meta-delivery-statuses.md`.
 - [x] Probar con compositor y HTTP simulado los nueve valores y el orden exacto.
 - [x] Sincronizar configuracion, arrancar ambos procesos y verificar el runtime.
 - [x] Transferir solo el token renovado, conservar otras variables y verificar autenticacion HTTP 200.
-- [ ] Acreditar entrega real con token vigente y un callback `delivered` o `read`.
+- [x] Acreditar entrega real con token vigente y un callback `delivered` o `read`.
 - [x] Comparar el activo candidato del panel (`2157628355165252`) con la WABA comprobada (`1047483564765260`).
 - [ ] Validar tipo y acceso del activo del panel; `100/33` no distingue por si solo la causa.
-- [ ] Resolver `132001` con WABA, numero emisor y plantilla confirmados por API en la misma cartera.
+- [x] Resolver `132001` para el emisor actual con WABA, numero y plantilla confirmados por API.
+
+El activo del panel sigue siendo una investigacion separada: no bloquea el envio
+actual verificado. La prueba diagnostica no reejecuta ni concilia avisos historicos.
+
+Evidencia de resolucion: `docs/verification/2026-10-25-approved-template-delivered.md`.
 
 Evidencia: `docs/verification/2026-10-23-approved-doctor-template.md`.
 

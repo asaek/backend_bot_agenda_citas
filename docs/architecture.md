@@ -416,9 +416,11 @@ migracion aditiva. El log registra solo esos campos y omite el texto entrante, e
 del proveedor y las credenciales.
 El modo debug opcional usa `DEBUG_MODE` y `DEBUG_WHATSAPP_NUMBERS`: solo un remitente
 permitido recibe el nombre seguro del proveedor, el tipo de error y el codigo HTTP, o un
-codigo publico de agenda, junto con la respuesta. Sin ambas condiciones, todos reciben la
-respuesta controlada/publica normal. El modo no expone mensajes de excepcion, prompts,
-cuerpos ni encabezados HTTP.
+codigo publico de agenda, junto con la respuesta. La allowlist exige numeros E.164 con
+`+` explicito; el signo se valida en la configuracion y luego se normaliza para comparar
+con el remitente de WhatsApp. Sin ambas condiciones, todos reciben la respuesta
+controlada/publica normal. El modo no expone mensajes de excepcion, prompts, cuerpos ni
+encabezados HTTP.
 `reply_outbox` conserva una respuesta unica por mensaje entrante y sus eventos
 de cita, preparados antes del envio. Los estados de procesamiento y transporte
 se separan de los estados historicos de `messages`. `ReplyDeliveryRepository`
@@ -471,7 +473,9 @@ aceptar el POST y luego devolver `failed/131047`. El `sent` local actual signifi
 aceptacion inicial, no recepcion. `delivery_status` distingue esa aceptacion de los
 estados confirmados por Meta. El envio por plantilla y los callbacks estan
 implementados, con `aviso_cita_medico` en `es_MX` y sus nueve parametros de cuerpo
-configurados en 011. La prueba de entrega real sigue pendiente. La integracion de voz no elimina esas
+configurados en 011. Una prueba directa de esa plantilla obtuvo `delivered` real
+el 25/10/2026; evidencia en `verification/2026-10-25-approved-template-delivered.md`.
+La integracion de voz no elimina esas
 restricciones de WhatsApp.
 
 Los callbacks entran a `whatsapp_delivery_receipts` en la base de chat antes de

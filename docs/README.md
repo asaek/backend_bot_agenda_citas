@@ -42,6 +42,7 @@ esten aprobados.
 - [Recuperacion de pendientes, espera durable y conciliacion de avisos](./verification/2026-10-22-doctor-notification-retries.md)
 - [Callbacks persistentes de Meta y estados reales de entrega de chat/voz](./verification/2026-10-22-meta-delivery-statuses.md)
 - [Configuracion de aviso_cita_medico, token renovado y bloqueo por cuenta de pruebas](./verification/2026-10-23-approved-doctor-template.md)
+- [Plantilla confirmada por API y prueba real entregada al doctor](./verification/2026-10-25-approved-template-delivered.md)
 - [Verificacion de sincronizacion de Google Calendar](./verification/2026-09-24-google-calendar-event-sync.md)
 - [Verificacion del motivo antes de agendar](./verification/2026-09-24-appointment-reason.md)
 - [Verificacion de validacion minima del motivo](./verification/2026-09-25-appointment-reason-validation.md)
