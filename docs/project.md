@@ -62,6 +62,9 @@ MVP, un paciente no podra gestionar citas para familiares u otras personas.
   juntos o en respuestas separadas; solicitar solo los datos faltantes. Conservar
   respuestas a preguntas de captura ya enviadas en la misma solicitud, incluso si
   las formulo el agente antes de iniciar el flujo backend (ADR 0063).
+  Combinar separacion local con extraccion semantica de fragmentos literales para
+  mensajes complejos, campos en distinto orden y saludos/peticiones de cortesia
+  junto con datos; preservar el horario y los datos ante fallos de extraccion (ADR 0064).
   Citar y conservar el texto pendiente ante una parte
   sospechosa, permitiendo su confirmacion o correccion sin recortar apellidos.
 - Rechazar respuestas conversacionales reconocibles como nombres y conservar el

@@ -82,3 +82,5 @@ indique cual decision anterior queda obsoleta.
   — aceptada; la configuracion requiere `+` aunque el remitente de Meta llegue sin el prefijo.
 - [0063 - Capturar nombre y motivo sin imponer turnos separados](./0063-capture-booking-details-together.md)
   — aceptada; conserva respuestas de la misma captura y solicita solo los datos faltantes.
+- [0064 - Captura hibrida de datos de reserva por texto](./0064-hybrid-booking-text-capture.md)
+  — aceptada; respaldo semantico con evidencia literal para mensajes complejos y saludos con datos.

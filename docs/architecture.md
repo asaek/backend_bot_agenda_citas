@@ -724,6 +724,24 @@ motivo completo de varias clausulas sigue siendo un solo motivo. El estado
 se aclara el nombre. Completar los campos invoca una unica ruta de evaluacion y
 ejecucion; no se requiere otro mensaje si ambos datos ya estan disponibles.
 
+Por ADR 0064, `BookingTextInterpreter` agrega respaldo semantico cuando la captura
+local detecta nombre y oraciones mezclados o una presentacion no resuelta. Los
+separadores locales incluyen `motivo de la cita`, `de la consulta` y `de la visita`.
+Una llamada de texto sin herramientas al LLM existente devuelve `intent`,
+`patient_name`, `reason` y `confidence`; se validan esquema, fragmentos literales,
+ausencia de superposicion y confianza minima `0.85`. No se aceptan datos inventados
+ni cortes que omitan una negacion inmediata. Los nombres extraidos siguen pasando
+por el validador y el motivo por su evaluador habitual. No hay almacenamiento ni
+configuracion nuevos.
+
+`_interpret_pending_booking_details()` obtiene un solo resultado para la captura
+vigente y lo comparte con el router y la persistencia. Los saludos y preguntas de
+cortesia con datos identificados pueden continuar; las preguntas informativas
+siguen pausando y las cancelaciones/cambios explicitos prevalecen. En respuestas
+complejas, un fallo tecnico o una confianza insuficiente conserva el estado y
+responde sin atribuirlo a un nombre mal escrito. La recuperacion de preguntas
+previas usa el mismo interprete asincrono, deteniendose al reunir ambos campos.
+
 Por ADR 0063, el prompt evita preguntas de captura independientes del backend.
 Si el agente ya pregunto por nombre o motivo antes de solicitar la herramienta,
 `_recover_prompted_booking_details()` recupera solo respuestas contiguas del

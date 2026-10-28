@@ -7,7 +7,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agent_instructions import COMMON_AGENT_INSTRUCTIONS
 from booking_details import BookingDetails
-from booking_text_capture import CapturedBookingText, capture_booking_text, requested_booking_field
+from booking_text_capture import (
+    BookingTextInterpretation,
+    BookingTextInterpreter,
+    CapturedBookingText,
+    capture_booking_text,
+    requested_booking_field,
+)
 from appointment_confirmation import (
     ConfirmationDecision,
     PendingAppointmentAction,
@@ -392,7 +398,8 @@ class ConversationService:
             if active.flow is not PendingConversationFlow.NONE:
                 return await self._resumed_workflow_prompt(context, active)
             return "No hay una gestión pendiente para retomar. ¿Qué deseas hacer?"
-        interruption_reply = self._resolve_pending_interruption(context, selection)
+        booking_text = await self._interpret_pending_booking_details(context)
+        interruption_reply = self._resolve_pending_interruption(context, selection, booking_text)
         if interruption_reply is not None:
             return interruption_reply
         if self._load_paused_workflow(context.conversation_id) is not None:
@@ -407,6 +414,7 @@ class ConversationService:
         pending_reply = await self._resolve_pending_appointment_reason(
             context,
             appointment_event_sink,
+            booking_text,
         )
         if pending_reply is not None:
             return pending_reply
@@ -460,6 +468,42 @@ class ConversationService:
             )
         return selection
 
+    async def _interpret_pending_booking_details(
+        self, context: ConversationContext,
+    ) -> BookingTextInterpretation | None:
+        pending = self._load_pending_appointment_reason(context.conversation_id)
+        if pending is None or pending.is_expired_at(self._current_local_time()):
+            return None
+        if context.incoming_message_id in {pending.source_message_id, pending.name_message_id} or (
+            pending.name_clarification_message_id is not None
+            and context.incoming_message_id <= pending.name_clarification_message_id
+        ):
+            return None
+        interruption = classify_pending_interruption(
+            context.incoming_text, flow=PendingConversationFlow.BOOKING_DETAILS,
+        )
+        if interruption in {
+            PendingInterruption.ABANDON, PendingInterruption.SWITCH,
+            PendingInterruption.AMBIGUOUS_CANCEL,
+        }:
+            return None
+        name_required = pending.name_required
+        if name_required is None:
+            name_required = self._load_patient_name(context.patient_id) is None
+        return await self._interpret_booking_text(
+            context, context.incoming_text, expected="name" if name_required else "reason",
+        )
+
+    async def _interpret_booking_text(
+        self, context: ConversationContext, text: str, *, expected: str,
+    ) -> BookingTextInterpretation:
+        result = await BookingTextInterpreter(self.llm_provider).interpret(text, expected=expected)
+        if result.failure_type is not None:
+            self.record_llm_failure(
+                context, error_type=result.failure_type, http_status_code=result.http_status_code,
+            )
+        return result
+
     async def _generate_agent_reply(
         self,
         context: ConversationContext,
@@ -504,6 +548,7 @@ class ConversationService:
         self,
         context: ConversationContext,
         selection: SlotSelectionInterpretation | None = None,
+        booking_text: BookingTextInterpretation | None = None,
     ) -> str | None:
         workflow = self._load_pending_conversation_workflow(
             context.conversation_id,
@@ -541,6 +586,13 @@ class ConversationService:
             flow=workflow.flow,
             expected_reply=expected_reply,
         )
+        if interruption is PendingInterruption.PAUSE and booking_text is not None and (
+            booking_text.clarification is not None
+            or (booking_text.contains_details and (
+                booking_text.semantic or "?" not in context.incoming_text
+            ))
+        ):
+            return None
         if interruption is PendingInterruption.NONE:
             return None
         if interruption is PendingInterruption.ABANDON:
@@ -1779,6 +1831,7 @@ class ConversationService:
         self,
         context: ConversationContext,
         appointment_event_sink: AppointmentNotificationEventSink | None,
+        booking_text: BookingTextInterpretation | None = None,
     ) -> str | None:
         pending_reason = self._load_pending_appointment_reason(
             context.conversation_id,
@@ -1816,8 +1869,12 @@ class ConversationService:
         if name_required is None:
             name_required = self._load_patient_name(context.patient_id) is None
 
-        captured = capture_booking_text(
-            context.incoming_text, expected="name" if name_required else "reason",
+        if booking_text is not None and booking_text.clarification is not None:
+            return booking_text.clarification
+        captured = (
+            booking_text.captured if booking_text is not None else capture_booking_text(
+                context.incoming_text, expected="name" if name_required else "reason",
+            )
         )
         if captured.patient_name is not None and not name_required:
             pending_reason = replace(
@@ -2173,13 +2230,17 @@ class ConversationService:
         appointment_event_sink: AppointmentNotificationEventSink | None,
     ) -> str:
         self._clear_last_appointment_reason_evaluation(context.conversation_id)
-        captured, name_message_id, reason_message_id = self._recover_prompted_booking_details(context)
+        captured, name_message_id, reason_message_id, clarification = (
+            await self._recover_prompted_booking_details(context)
+        )
         if captured.reason is not None:
             pending_reason = pending_reason.with_reason_text(captured.reason, reason_message_id)
         self._save_pending_appointment_reason(
             context.conversation_id,
             pending_reason,
         )
+        if clarification is not None:
+            return clarification
         if captured.patient_name is not None or (
             pending_reason.name_required is False and pending_reason.reason_text is not None
         ):
@@ -2192,9 +2253,9 @@ class ConversationService:
             else APPOINTMENT_NAME_REPLY
         )
 
-    def _recover_prompted_booking_details(
+    async def _recover_prompted_booking_details(
         self, context: ConversationContext,
-    ) -> tuple[CapturedBookingText, int, int]:
+    ) -> tuple[CapturedBookingText, int, int, str | None]:
         """Recupera solo respuestas contiguas a preguntas de esta captura, no otra cita.
 
         El historial acotado del LLM no es una fuente de datos. Se usan los mensajes
@@ -2208,7 +2269,7 @@ class ConversationService:
         name = reason = None
         name_id = reason_id = context.incoming_message_id
         if not history:
-            return CapturedBookingText(), name_id, reason_id
+            return CapturedBookingText(), name_id, reason_id, None
         current_time = datetime.fromisoformat(history[-1].created_at)
         for index in range(len(history) - 1, -1, -2):
             answer = history[index]
@@ -2227,16 +2288,27 @@ class ConversationService:
             interruption = classify_pending_interruption(
                 answer.text, flow=PendingConversationFlow.BOOKING_DETAILS,
             )
-            if interruption is not PendingInterruption.NONE and expected is not None:
-                break
-            captured = capture_booking_text(answer.text, expected=expected)
+            if expected is not None:
+                if interruption in {
+                    PendingInterruption.ABANDON, PendingInterruption.SWITCH,
+                    PendingInterruption.AMBIGUOUS_CANCEL,
+                }:
+                    break
+                interpretation = await self._interpret_booking_text(context, answer.text, expected=expected)
+                if interpretation.clarification is not None:
+                    return CapturedBookingText(name, reason), name_id, reason_id, interpretation.clarification
+                if interruption is not PendingInterruption.NONE and not interpretation.contains_details:
+                    break
+                captured = interpretation.captured
+            else:
+                captured = capture_booking_text(answer.text)
             if name is None and captured.patient_name is not None:
                 name, name_id = captured.patient_name, answer.id
             if reason is None and captured.reason is not None:
                 reason, reason_id = captured.reason, answer.id
-            if expected is None:
+            if expected is None or (name is not None and reason is not None):
                 break
-        return CapturedBookingText(name, reason), name_id, reason_id
+        return CapturedBookingText(name, reason), name_id, reason_id, None
 
     def _save_pending_appointment_availability(
         self,

@@ -79,6 +79,28 @@ minutos o ante una interrupcion/otro tema y no extrae datos de la voz del asiste
 El ultimo valor literal de cada campo se valida y se incorpora al estado pendiente.
 La lectura de registros persistidos no depende de `max_history_messages`.
 
+ADR 0064 agrega `BookingTextInterpreter`: los campos claros se separan localmente,
+incluido `motivo de la cita`; las presentaciones y oraciones mixtas no resueltas
+usan una llamada de texto sin herramientas al proveedor existente. El contrato
+JSON es `{intent, patient_name, reason, confidence}`. Cada campo debe aparecer
+literalmente como un fragmento continuo en el mensaje normalizado, sin superponerse
+con el otro. La confianza minima es `0.85`; el limite de texto semantico es 4000
+caracteres. El prompt pide todos los apellidos y la explicacion completa del motivo.
+La validacion rechaza tambien un corte que deje `no` o `sin` justo antes del motivo.
+
+`_interpret_pending_booking_details()` se ejecuta antes de decidir las interrupciones,
+salvo duplicados, expiracion o un abandono/cambio/cancelacion explicito. Su resultado
+se reutiliza en el router y en `_resolve_pending_appointment_reason()`. Un saludo
+con datos o una pregunta de cortesia identificada semanticamente no se considera
+una pausa; `intent=other` no entrega campos y mantiene el enrutamiento normal.
+La recuperacion de respuestas previas invoca el mismo interprete asincrono y deja
+de leer al reunir nombre y motivo. No se reconstruyen datos de mensajes del asistente.
+
+Un fallo de llamada/esquema/evidencia se registra en `llm_failures` con tipo y codigo
+HTTP seguro, y devuelve una respuesta tecnica. La baja confianza pide distinguir
+los campos. Ambas rutas conservan la reserva y sus datos previos; un candidato
+extraido sigue requiriendo confirmacion y el motivo su evaluacion habitual.
+
 La entrada al flujo y los mensajes posteriores comparten
 `_capture_pending_booking_details()` y `_complete_booking_with_reason()`. Cuando ya
 estan ambos campos, se evalua y ejecuta en el mismo turno. El event sink se transmite
@@ -95,6 +117,7 @@ Antes de tomar el siguiente mensaje como nombre o motivo, `ConversationService` 
 el router de `specs/016-conversation-intent-routing/`. Una peticion nueva explicita
 limpia la solicitud de creacion pendiente y se atiende sin ejecutar `create_appointment`;
 una pregunta ambigua se aclara en vez de convertirla en nombre o motivo.
+Las preguntas de cortesia con datos se resuelven conforme a RF-1319 antes de pausar.
 
 En cada cita nueva, aunque el paciente ya tenga un nombre registrado,
 `ConversationService` toma el siguiente mensaje, normaliza espacios, lo valida como

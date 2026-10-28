@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, time, timezone
+import json
 import os
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from appointment_reason_evaluation import StructuredAppointmentReasonEvaluator
 from conversation_service import ConversationService, IncomingTextMessage
 from fake_calendar_provider import FakeCalendarProvider
 from fakes import FakeLLMProvider
-from llm_provider import ToolCall
+from llm_provider import LLMHTTPError, ToolCall
 from persistence import SQLiteDatabase
 from tool_executor import ToolExecutor
 from tool_validation import BusinessHours, TimeWindow
@@ -78,6 +79,166 @@ class BookingDetailsCaptureTests(unittest.TestCase):
         reply = self.send("Asael Ponce Silva y el motivo es por problemas de la vista")
 
         self.assert_booking(reply, name="Asael Ponce Silva", reason="problemas de la vista", hour=10)
+
+    def test_regression_reason_of_the_appointment_is_captured_with_name(self):
+        self.configure(self.create_request(14))
+        self.assertIn("nombre completo", self.send("a las 2 pm"))
+
+        reply = self.send("Asael Ponce Silva, el motivo de la cita es que tengo los ojos rojos")
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason="que tengo los ojos rojos", hour=14)
+
+    def test_regression_name_prefix_and_reason_of_the_appointment(self):
+        self.configure(self.create_request(14))
+        self.send("a las 2 pm")
+
+        reply = self.send("Mi nombre es Asael Ponce Silva, el motivo de la cita es que tengo los ojos rojos")
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason="que tengo los ojos rojos", hour=14)
+
+    def test_regression_complex_message_uses_literal_structured_extraction(self):
+        reason = "Tengo los ojos rojos desde ayer y quisiera que el doctor revise mis estudios."
+        self.configure(self.create_request(14),
+            '{"intent":"provide_details","patient_name":"Asael Ponce Silva",'
+            '"reason":"' + reason + '","confidence":0.99}')
+        self.send("a las 2 pm")
+
+        reply = self.send("Para registrarme, puede poner Asael Ponce Silva. " + reason)
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason=reason, hour=14)
+
+    def test_regression_greeting_does_not_hide_combined_booking_details(self):
+        self.configure(self.create_request(14),
+            '{"intent":"provide_details","patient_name":"Asael Ponce Silva",'
+            '"reason":"tengo los ojos rojos desde ayer","confidence":0.99}')
+        self.send("a las 2 pm")
+
+        reply = self.send("Hola, me puedes registrar como Asael Ponce Silva porque tengo los ojos rojos desde ayer")
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason="tengo los ojos rojos desde ayer", hour=14)
+
+    def test_complex_explanation_without_known_reason_label_is_extracted(self):
+        reason = "es que ayer al salir del trabajo noté que se me ponen rojos los ojos y me cuesta leer"
+        self.configure(self.create_request(14), json.dumps({
+            "intent": "provide_details", "patient_name": "Asael Ponce Silva",
+            "reason": reason, "confidence": 0.98,
+        }))
+        self.send("a las 2 pm")
+
+        reply = self.send("Asael Ponce Silva, " + reason)
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason=reason, hour=14)
+
+    def test_complex_reply_to_agent_question_uses_same_extractor_on_late_tool_call(self):
+        self.configure("¿Cuál es tu nombre completo?", self.create_request(14), json.dumps({
+            "intent": "provide_details", "patient_name": "Asael Ponce Silva",
+            "reason": "Tengo los ojos rojos desde ayer.", "confidence": 0.99,
+        }))
+        self.send("a las 2 pm")
+
+        reply = self.send("Para registrarme, puede poner Asael Ponce Silva. Tengo los ojos rojos desde ayer.")
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason="Tengo los ojos rojos desde ayer.", hour=14)
+
+    def test_invalid_or_uncertain_extraction_keeps_state_and_allows_same_message(self):
+        self.configure(self.create_request(14))
+        self.send("a las 2 pm")
+        text = "Para registrarme, puede poner Asael Ponce Silva. No tengo dolor pero tengo los ojos rojos."
+        valid = {"intent": "provide_details", "patient_name": "Asael Ponce Silva",
+                 "reason": "No tengo dolor pero tengo los ojos rojos.", "confidence": 0.99}
+        self.llm.replies = ()
+        invalid = (
+            "No es JSON",
+            json.dumps(dict(valid, patient_name="Asael Pérez Silva")),
+            json.dumps(dict(valid, reason="Irritación ocular")),
+            json.dumps(dict(valid, reason="tengo dolor pero tengo los ojos rojos.")),
+            json.dumps(dict(valid, confidence=0.20)),
+            json.dumps(dict(valid, confidence=True)),
+            json.dumps(dict(valid, reason="Asael Ponce Silva")),
+        )
+        for response in invalid:
+            with self.subTest(response=response):
+                self.llm.reply = response
+                reply = self.send(text)
+                self.assertNotIn("Guardé", reply)
+                self.assertEqual(self.provider.appointments, ())
+                self.assertEqual(self.events, [])
+                self.assertIsNone(self.service._load_patient_name(self.context.patient_id))
+                pending = self.service._load_pending_appointment_reason(self.context.conversation_id)
+                self.assertEqual(pending.start_at, "2026-10-28T14:00:00+00:00")
+                self.assertIsNone(pending.reason_text)
+                self.restart()
+        self.llm.reply = json.dumps(valid)
+
+        reply = self.send(text)
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason=valid["reason"], hour=14)
+
+    def test_complex_cancellation_keeps_priority_over_included_details(self):
+        self.configure(self.create_request(14))
+        self.send("a las 2 pm")
+
+        reply = self.send("Me llamo Asael Ponce Silva, pero mejor cancela esta solicitud")
+
+        self.assertIn("cancelé la solicitud", reply)
+        self.assertEqual(self.provider.appointments, ())
+        self.assertEqual(self.events, [])
+        self.assertEqual(self.llm.call_count, 1)
+
+    def test_polite_question_with_details_does_not_pause_capture(self):
+        self.configure(self.create_request(14), json.dumps({
+            "intent": "provide_details", "patient_name": "Asael Ponce Silva",
+            "reason": "tengo los ojos rojos desde ayer", "confidence": 0.99,
+        }))
+        self.send("a las 2 pm")
+
+        reply = self.send("Hola, ¿me puedes registrar como Asael Ponce Silva? tengo los ojos rojos desde ayer")
+
+        self.assert_booking(reply, name="Asael Ponce Silva", reason="tengo los ojos rojos desde ayer", hour=14)
+
+    def test_extracted_unusual_name_still_requires_confirmation(self):
+        self.configure(self.create_request(14), json.dumps({
+            "intent": "provide_details", "patient_name": "Jan Chrząszcz",
+            "reason": "Tengo los ojos rojos.", "confidence": 0.99,
+        }))
+        self.send("a las 2 pm")
+
+        reply = self.send("Para registrarme, puede poner Jan Chrząszcz. Tengo los ojos rojos.")
+
+        self.assertIn("Jan Chrząszcz", reply)
+        self.assertEqual(self.provider.appointments, ())
+        self.restart()
+        reply = self.send("Sí, es correcto")
+        self.assert_booking(reply, name="Jan Chrząszcz", reason="Tengo los ojos rojos.", hour=14)
+
+    def test_extraction_provider_failure_is_technical_and_preserves_pending_slot(self):
+        self.configure(self.create_request(14))
+        self.send("a las 2 pm")
+        self.llm.error = LLMHTTPError(429)
+
+        reply = self.send("Para registrarme, puede poner Asael Ponce Silva. Tengo los ojos rojos.")
+
+        self.assertIn("problema técnico", reply)
+        self.assertNotIn("Necesito tu nombre", reply)
+        self.assertEqual(self.provider.appointments, ())
+        self.assertIsNone(self.service._load_patient_name(self.context.patient_id))
+        self.assertIsNotNone(self.service._load_pending_appointment_reason(self.context.conversation_id))
+        with self.database.transaction() as connection:
+            failure = connection.execute("SELECT error_type, http_status_code FROM llm_failures").fetchone()
+        self.assertEqual(tuple(failure), ("LLMHTTPError", 429))
+
+    def test_real_side_question_is_still_paused_instead_of_booking(self):
+        self.configure(self.create_request(14),
+            '{"intent":"other","patient_name":null,"reason":null,"confidence":0.99}',
+            "Podemos revisar esa información antes de continuar con la cita.")
+        self.send("a las 2 pm")
+
+        reply = self.send("Hola, me puedes registrar como Asael Ponce Silva, pero antes ¿cuánto cuesta la consulta?")
+
+        self.assertNotIn("Tipo de evento: Cita agendada", reply)
+        self.assertEqual(self.provider.appointments, ())
+        self.assertIsNone(self.service._load_patient_name(self.context.patient_id))
+        self.assertIsNotNone(self.service._load_paused_workflow(self.context.conversation_id))
 
     def test_reason_given_before_backend_requests_name_survives_restart(self):
         reason = "Me hice unos estudios y deseo que el medico los revise es sobre problemas de la vista"

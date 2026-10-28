@@ -27,6 +27,8 @@ La continuidad del nombre y el rechazo de respuestas conversacionales estan
 verificados en `docs/verification/2026-10-10-booking-name-continuity.md`.
 La captura conjunta y la continuidad de preguntas previas del agente estan verificadas
 en `docs/verification/2026-10-28-booking-details-capture.md`.
+La ampliacion a `motivo de la cita` y mensajes complejos se documenta en
+`docs/verification/2026-10-28-complex-booking-details.md`.
 
 ## Objetivo
 
@@ -122,6 +124,35 @@ hasta confirmar o corregir el nombre. Toda ruta pasa por la evaluacion habitual
 del motivo, incluyendo sus rechazos y fallos tecnicos, antes de ejecutar la cita.
 Los reintentos del webhook generan una sola cita, confirmacion al paciente y aviso
 al doctor, tambien si el ultimo dato llega al interceptar la herramienta.
+
+### RF-1319 - Mensajes complejos y saludos con datos
+
+`Asael Ponce Silva, el motivo de la cita es que tengo los ojos rojos` y su variante
+con `Mi nombre es` deben entregar ambos campos y completar la reserva sin volver
+a solicitar el nombre. Las variantes `de la consulta`, `de la cita`, `de mi cita`
+y `de la visita` se separan localmente.
+
+Para una captura pendiente, una presentacion o explicacion compleja no resuelta
+por la ruta local puede usar extraccion semantica del mensaje actual. Solo se
+aceptan `patient_name` y `reason` literales, continuos y no superpuestos, con
+`intent=provide_details` y confianza minima `0.85`. El motivo conserva la
+explicacion completa, incluidos sintomas, negaciones, duracion y estudios; no se
+reemplaza por una sintesis del LLM. La escritura del nombre no se corrige.
+Los campos extraidos atraviesan las validaciones existentes antes de crear la cita.
+
+Un saludo o una peticion de cortesia como `Hola, ¿me puedes registrar como ...?`
+con datos identificados no debe pausar la captura por si solo. Una pregunta real
+de costo/ubicacion sigue pausando. Abandonos, cancelaciones y cambios de gestion
+explicitos prevalecen sobre cualquier nombre/motivo incluido en el mensaje.
+La interpretacion validada se reutiliza al decidir la interrupcion y capturar
+los datos; la recuperacion de preguntas anteriores usa el mismo interprete.
+
+El respaldo semantico admite mensajes de hasta 4000 caracteres. Una confianza
+insuficiente o ausencia de proveedor pide aclaracion sin reemplazar datos previos.
+Un fallo de llamada, esquema o evidencia se informa como tecnico, se registra sin
+copiar el contenido del mensaje y permite reenviar el mismo texto. El horario
+y los campos aceptados previamente se conservan. Una extraccion de nombre inusual
+no omite su confirmacion explicita y una respuesta duplicada no duplica la cita.
 
 ### RF-1317 - Respuestas conversacionales durante la captura del nombre
 
@@ -340,6 +371,14 @@ Una notificacion solo puede emitirse despues de una creacion exitosa.
 34. No se recuperan nombres inventados por el agente ni respuestas de capturas vencidas,
     abandonadas o citas terminadas. Un motivo ajeno conserva su rechazo y un texto como
     `Soy diabético y tengo problemas en la vista` no sustituye el nombre aceptado.
+35. La secuencia `QUisiera agendar una cita para hoy`, `a las 2 pm est abien` y
+    `Asael Ponce Silva, el motivo de la cita es que tengo los ojos rojos` termina con
+    una cita a las 2:00 PM y una sola notificacion al doctor, incluso ante un webhook duplicado.
+36. Una explicacion larga sin etiqueta y una peticion con saludo/cortesia pueden
+    entregar ambos campos mediante evidencia literal, sin resumir el motivo ni perder apellidos.
+37. Baja confianza, JSON malformado, campos ajenos al mensaje, superposicion u omision
+    de negacion inmediata conservan la solicitud y no crean una cita. Un reenvio valido
+    completa la misma reserva sin repetir el horario.
 
 ## Fuera del alcance
 

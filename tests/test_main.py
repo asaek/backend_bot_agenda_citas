@@ -1636,6 +1636,43 @@ class WebhookTests(unittest.TestCase):
                 self.assertIn(expected_reason, doctor_bodies[0])
                 self.assertNotIn("Inventado", doctor_bodies[0])
 
+    def test_reason_of_the_appointment_after_typo_slot_confirms_without_repeating_name(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 28, 10, 4, tzinfo=timezone.utc))
+        whatsapp = FakeWhatsAppClient()
+        llm = FakeLLMProvider(replies=(
+            '{"intent":"select","slot_id":"slot-8","evidence":"a las 2 pm"}',
+            '{"summary":"El paciente refiere ojos rojos.","priority_signals":[]}',
+        ))
+        combined = self.text_payload(
+            message_id="wamid.reason-cita-combined",
+            text="Asael Ponce Silva, el motivo de la cita es que tengo los ojos rojos",
+        )
+        with self.configured_runtime(
+            whatsapp, llm,
+            {"DOCTOR_NOTIFICATIONS_ENABLED": "true", "DOCTOR_WHATSAPP_NUMBERS": "5491100000001"},
+        ):
+            with TestClient(app) as client:
+                responses = self.post_messages(client,
+                    self.text_payload(message_id="wamid.reason-cita-day", text="QUisiera agendar una cita para hoy"),
+                    self.text_payload(message_id="wamid.reason-cita-slot", text="a las 2 pm est abien"),
+                    combined, combined,
+                )
+                self.assertTrue(all(response.status_code == 200 for response in responses))
+                self.assertEqual(len(app.state.calendar_provider.appointments), 1)
+                appointment = app.state.calendar_provider.appointments[0]
+                self.assertEqual(appointment.start_at.hour, 14)
+                self.assertEqual(appointment.reason, "que tengo los ojos rojos")
+        patient_bodies = [body for to, body in whatsapp.sent_messages if to == "5491100000000"]
+        doctor_bodies = [body for to, body in whatsapp.sent_messages if to == "5491100000001"]
+        self.assertEqual(len(patient_bodies), 3)
+        self.assertIn("Horarios disponibles", patient_bodies[0])
+        self.assertIn("nombre completo", patient_bodies[1])
+        self.assertIn("Tipo de evento: Cita agendada", patient_bodies[2])
+        self.assertNotIn("Necesito tu nombre", patient_bodies[2])
+        self.assertEqual(len(doctor_bodies), 1)
+        self.assertIn("Nombre: Asael Ponce Silva", doctor_bodies[0])
+        self.assertIn("que tengo los ojos rojos", doctor_bodies[0])
+
     def test_booking_distinguishes_an_occupied_slot_from_a_typo_and_notifies_once(self) -> None:
         self.set_fixed_calendar_runtime(datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
         fake_client = FakeWhatsAppClient()

@@ -124,3 +124,18 @@
 - [x] Ejecutar la suite completa en Raspberry Pi: 571 pruebas correctas; evidencia en
       `docs/verification/2026-10-28-booking-details-capture.md`.
 - [x] Recargar el backend y verificar configuracion, rutas y autenticacion de WhatsApp.
+
+## Corte 13 - Captura hibrida para mensajes complejos
+
+- [x] Reproducir el rechazo de `motivo de la cita` y de mensajes complejos con cuatro pruebas rojas.
+- [x] Admitir las variantes cita/consulta/visita sin depender de un turno separado por campo.
+- [x] Añadir extraccion semantica acotada con evidencia literal, confianza y esquema validados.
+- [x] Compartir el resultado entre captura, router y recuperacion de respuestas previas.
+- [x] Mantener saludos/cortesia con datos en la captura y priorizar abandonos/cambios reales.
+- [x] Cubrir evidencia inventada, motivo resumido, negacion omitida, baja confianza,
+      JSON invalido, error HTTP, nombres sospechosos y recuperacion tras reinicio/reenvio.
+- [x] Verificar la conversacion completa por webhook, incluido `est abien`, con una sola cita/aviso.
+- [x] Probar cinco variantes con el LLM real y agenda aislada, conservando nombre, motivo y 2 PM.
+- [x] Ejecutar la suite completa: 584 pruebas correctas; evidencia en
+      `docs/verification/2026-10-28-complex-booking-details.md`.
+- [x] Sincronizar configuracion, recargar el backend y verificar rutas/autenticacion en Pi.
