@@ -228,6 +228,16 @@ El vocabulario propuesto esta en [CONTEXT.md](../../../CONTEXT.md).
   reprogramada o cancelada tras el exito de la herramienta. Un fallo de voz o de
   entrega posterior no deshace la cita ni vuelve a ejecutarla. Los eventos para
   notificar al doctor corresponden solo a operaciones exitosas y no se duplican.
+- **CA-27 — Disponibilidad de hoy por voz.** Al pedir una cita para un dia sin
+  hora, el asistente consulta antes de pedir nombre, motivo u hora exacta. Una
+  consulta de hoy que empiece en una hora pasada del mismo dia usa el recorte
+  temporal de `ToolExecutor` (005, criterio 27). Las cuatro variantes capturadas
+  desde medianoche hasta 23:30, 23:59:59 o medianoche siguiente deben devolver
+  slots futuros en lugar de `invalid_arguments`, con zona explicita u omitida.
+  No preparan ni autorizan una cita. Siguen vigentes la deduplicacion por call ID,
+  el alcance de laboratorio y el limite de siete dias aplicado al rango original.
+  La regresion con las solicitudes capturadas y Google de solo lectura esta en
+  [`2026-10-28-voice-today-availability.md`](../../verification/2026-10-28-voice-today-availability.md).
 
 ### Contexto historico de `/lab` (contrato aprobado; adopcion parcial)
 

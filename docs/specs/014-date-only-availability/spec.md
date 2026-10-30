@@ -15,6 +15,8 @@ La seleccion natural del horario y su continuidad estan verificadas en
 `docs/verification/2026-10-10-booking-name-continuity.md`.
 La seleccion con puntuacion y la distincion de no disponibilidad estan verificadas
 en `docs/verification/2026-10-10-booking-slot-selection.md`.
+La consulta de hoy, los reintentos y los mensajes consecutivos estan verificados
+en `docs/verification/2026-10-28-availability-recovery.md`.
 
 ## Objetivo
 
@@ -99,6 +101,25 @@ backend debe guardar una solicitud pendiente durante 10 minutos y preguntar que 
 desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse mediante
 `check_availability` sin volver a depender del LLM para conservar la intencion.
 
+### RF-1407 - Consulta del dia actual por ambas rutas
+
+Las peticiones corteses (`quisiera`, `deseo`, `me gustaria una cita`) y el
+separador accidental `par ahoy` deben reconocer el dia sin necesitar al LLM.
+Si el modelo solicita `check_availability` desde medianoche hasta la siguiente
+medianoche, el backend debe validar sus argumentos y aplicar el mismo flujo de
+consulta, lista y seleccion persistida. Para hoy solo ofrece espacios futuros,
+a partir de la siguiente media hora en la zona de agenda. Un dia pasado sigue
+rechazado; argumentos desconocidos no pueden saltarse la validacion.
+
+### RF-1408 - Reintentar una consulta fallida
+
+Si falla la consulta de un dia, el backend conserva la fecha objetivo durante
+10 minutos. Una peticion explicita como `Vuelve a intentarlo` vuelve a consultar
+ese dia sin exigir que se repita la fecha, incluso despues de reiniciar el
+servicio o de varios fallos consecutivos. No cambia la fecha al dia actual.
+Sin fecha recordada, con una fecha pasada o con estado vencido, solicita una
+fecha vigente. Abandono, cambio de gestion y pausa conservan sus reglas existentes.
+
 ## Criterios de aceptacion
 
 1. `Agendame una cita para manana` devuelve los horarios libres del dia.
@@ -127,7 +148,17 @@ desea reservar. Una respuesta relativa como `hoy` o `mañana` debe consultarse m
     para una segunda cita a las 10, conservando la primera a las 9.
 14. Elegir las 9 AM ocupadas, una hora fuera de la lista o un periodo AM/PM ambiguo
     recibe su aclaracion especifica. Elegir las 10 AM despues completa la reserva
-    original, incluso si la lista estaba pausada y se reinicio el servicio.
+     original, incluso si la lista estaba pausada y se reinicio el servicio.
+15. El 28/10/2026 a las 10:46, `Hola`, `QUisiera una cita par ahoy` y
+    `a las 11 am esta bien`, recibidos con turnos anteriores aun pendientes,
+    responden en orden: saludo, horarios futuros del dia y pregunta de nombre.
+    No se crea una cita por recibir esos tres mensajes.
+16. Una consulta del LLM para el dia completo actual ofrece desde las 11 AM,
+    conserva slots seleccionables tras reiniciar y no requiere que el modelo
+    redacte la lista. La conversion de zona horaria conserva el dia de agenda.
+17. Tras fallar una consulta de hoy o mañana, `Vuelve a intentarlo` vuelve a
+    consultar la fecha guardada. Un segundo fallo sigue permitiendo recuperarla;
+    un estado sin fecha o vencido no consulta un dia supuesto.
 
 ## Fuera del alcance
 

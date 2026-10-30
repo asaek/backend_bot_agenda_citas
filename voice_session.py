@@ -186,6 +186,9 @@ class VoiceSession:
             "Habla español de Mexico, con voz natural; no leas Markdown ni identificadores internos.",
             f"Fecha y hora del backend: {now}. Zona: {self.business_hours.timezone_name}.",
             "Usa check_availability para horarios y list_appointments para citas. Nunca inventes resultados.",
+            "Si pide una cita para un dia sin indicar hora, consulta primero los horarios de ese dia. "
+            "No pidas nombre, motivo ni una hora exacta para consultar disponibilidad. "
+            "Para hoy el backend devuelve solo horarios futuros.",
             "Ofrece hasta tres horarios por respuesta y pregunta si el paciente quiere otras opciones.",
             "Antes de agendar, pide nombre completo y despues el motivo expresado por el paciente.",
             "create_appointment, cancel_appointment y reschedule_appointment solo preparan propuestas.",

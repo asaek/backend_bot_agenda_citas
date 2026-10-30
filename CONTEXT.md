@@ -5,6 +5,12 @@ oftalmologo especialista en cornea.
 
 ## Lenguaje
 
+**Canal**:
+Forma de interaccion con el asistente: el **canal de voz** permite conversar
+hablando y el **canal de texto** mediante mensajes escritos. Son dos canales
+del mismo asistente.
+_Evitar_: Bot de voz y bot de texto como asistentes distintos
+
 **Paciente de prueba**:
 Identidad simulada utilizada durante el MVP tecnico. Cada paciente de prueba
 esta asociado a un unico numero de WhatsApp controlado por el desarrollador.

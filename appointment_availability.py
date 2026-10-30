@@ -220,13 +220,19 @@ class PendingAppointmentAvailability:
 
 @dataclass(frozen=True, slots=True)
 class PendingAppointmentDate:
-    """Estado temporal que espera la fecha de una nueva solicitud de cita."""
+    """Espera un dia o conserva la fecha de una consulta fallida para reintentar."""
 
     created_at: str
     expires_at: str
     name_message_id: int | None = None
+    target_date: str | None = None
 
     def __post_init__(self) -> None:
+        if self.target_date is not None:
+            try:
+                date.fromisoformat(self.target_date)
+            except (TypeError, ValueError) as error:
+                raise ValueError("La fecha pendiente no es valida") from error
         if self.name_message_id is not None and (
             type(self.name_message_id) is not int or self.name_message_id <= 0
         ):
@@ -237,6 +243,7 @@ class PendingAppointmentDate:
     @classmethod
     def start(
         cls, now: datetime, *, name_message_id: int | None = None,
+        target_date: str | None = None,
     ) -> "PendingAppointmentDate":
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now debe incluir una zona horaria")
@@ -244,6 +251,7 @@ class PendingAppointmentDate:
             created_at=now.isoformat(),
             expires_at=(now + APPOINTMENT_DATE_TTL).isoformat(),
             name_message_id=name_message_id,
+            target_date=target_date,
         )
 
     @classmethod
@@ -258,6 +266,7 @@ class PendingAppointmentDate:
             return cls(
                 created_at=created_at, expires_at=expires_at,
                 name_message_id=value.get("name_message_id"),
+                target_date=value.get("target_date"),
             )
         except ValueError:
             return None
@@ -274,6 +283,8 @@ class PendingAppointmentDate:
         }
         if self.name_message_id is not None:
             context["name_message_id"] = self.name_message_id
+        if self.target_date is not None:
+            context["target_date"] = self.target_date
         return context
 
 
@@ -288,7 +299,7 @@ _WEEKDAYS = {
 }
 _AVAILABILITY_INTENT_PATTERNS = (
     r"\b(?:agend\w*|reserv\w*|program\w*)\b",
-    r"\b(?:quiero|necesito|busco|solicito)\s+(?:una\s+)?cita\b",
+    r"\b(?:quiero|quisiera|necesito|deseo|me\s+gustaria|busco|solicito)\s+(?:una\s+)?cita\b",
     r"\bsacar\s+(?:una\s+)?cita\b",
     r"\bhorarios?\b",
     r"\bdisponibilidad\b",
@@ -352,6 +363,17 @@ def date_only_availability_follow_up_request(
     if requested_date is None:
         return None
     return _availability_request_for_date(requested_date, local_now, timezone)
+
+
+def is_availability_retry(text: str) -> bool:
+    """Reconoce un reintento explicito sin inferir otra fecha ni otra gestion."""
+    return re.fullmatch(
+        r"(?:por favor\s+)?(?:vuelve a intentar(?:lo)?|"
+        r"intenta(?:lo)? (?:de nuevo|otra vez)|reintenta(?:lo)?|"
+        r"(?:prueba|hazlo) (?:de nuevo|otra vez)|otra vez)"
+        r"(?:\s+por favor)?",
+        " ".join(_normalize(text).split()).strip(" .,!¿?"),
+    ) is not None
 
 
 def _availability_request_for_date(
@@ -499,6 +521,7 @@ def _normalize(value: str) -> str:
         if unicodedata.category(character) != "Mn"
     )
     without_marks = re.sub(r"\bma[;,:]ana\b", "manana", without_marks)
+    without_marks = re.sub(r"\bpar\s+a(hoy|manana)\b", r"para \1", without_marks)
     return re.sub(r"[^a-z0-9:,.\s]", " ", without_marks)
 
 

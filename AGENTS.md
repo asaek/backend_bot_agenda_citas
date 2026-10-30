@@ -6,6 +6,11 @@
 - Application endpoints live in `main.py`.
 - Keep the implementation incremental; do not add databases, AI frameworks, queues, or external services until a task requires them.
 
+## Conversation Channels
+
+- Refer to voice and text as **channels**: **canal de voz** and **canal de texto**, as defined in `CONTEXT.md`.
+- Every conversation-logic change must be implemented and verified in **both channels in the same change**. Follow the completion criteria in `docs/conventions.md` under **Logica conversacional en ambos canales** before reporting the work complete.
+
 ## SDD Documentation
 
 - Every change to technology, project scope, or an existing or new feature must update the SDD in the same change before the work is considered complete.

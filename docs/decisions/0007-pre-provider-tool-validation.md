@@ -21,6 +21,21 @@ Los errores se exponen mediante `ToolValidationError` con un
 `ToolErrorCode`. El futuro `ToolExecutor` ejecutara el proveedor solo despues de
 que esta validacion termine correctamente.
 
+### Ajuste del 28/10/2026 - Disponibilidad restante de hoy
+
+Antes de validar `check_availability`, el ejecutor recorta un rango cuyo inicio
+pertenece al dia actual de la agenda y cumple `start_at <= now < end_at`.
+El inicio efectivo pasa a la siguiente media hora futura en la zona laboral;
+el final solicitado se conserva. Si no queda una media hora de inicio dentro
+del rango, devuelve una coleccion vacia sin consultar el proveedor.
+
+La normalizacion ocurre despues de validar el contrato, en la frontera compartida
+por texto y voz. No modifica el request original auditado ni aplica a crear o
+reprogramar citas. Rangos terminados, dias anteriores y mutaciones con fechas
+pasadas siguen rechazados. Los rangos futuros conservan su inicio. Se eligio
+esta frontera tras reproducir cuatro consultas de voz con distintas horas de
+fin que no pasaban por la correccion de dia completo de `ConversationService`.
+
 ## Consecuencias
 
 - Las reglas de negocio se prueban sin red ni credenciales.

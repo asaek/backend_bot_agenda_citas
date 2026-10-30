@@ -41,6 +41,15 @@ ejecuta mediante `TestClient` sin consumir APIs.
 Durante el desarrollo local, ngrok proporcionara la URL publica que Meta
 necesita para comunicarse con FastAPI.
 
+## Evolucion de la logica conversacional entre canales
+
+Los **canales de voz y texto** son formas de interactuar con el mismo asistente,
+segun [CONTEXT.md](../CONTEXT.md). Los cambios conversacionales en componentes
+compartidos y en rutas especificas de cada canal siguen los criterios de
+[Logica conversacional en ambos canales](./conventions.md#logica-conversacional-en-ambos-canales).
+Esta regla de evolucion se aplica a cambios nuevos; no declara completada la
+continuidad operativa entre canales que sigue pendiente en el corte 021.
+
 ## Espejo de ejecucion en Raspberry Pi
 
 `specs/017-local-to-raspberry/` define el despliegue operativo del MVP. La skill
@@ -183,6 +192,17 @@ antes de su verificacion. El numero real y Calling habilitado
 solo bloquean el corte conectado a Meta. Una prueba de laboratorio o un webhook
 saludable no acreditan audio de WhatsApp. El detalle y las salidas por corte estan
 en [tasks.md](./specs/021-whatsapp-inbound-calling/tasks.md).
+
+## Disponibilidad restante de hoy compartida por chat y voz
+
+`ToolExecutor` normaliza lecturas de disponibilidad cuyo inicio es del dia actual
+en la zona laboral y cuyo rango contiene el instante presente. Despues de parsear
+el contrato, recorta el inicio a la siguiente media hora futura y conserva el
+final; sin otro inicio dentro del rango devuelve cero slots sin consultar Google.
+El request auditado conserva los argumentos originales. Dias anteriores, rangos
+terminados y mutaciones pasadas siguen rechazados. `VoiceTools` mantiene su limite
+de siete dias antes de este recorte. La correccion cubre las variantes de fin de
+dia de Realtime que no pasaban por el flujo de dia completo del chat (ADR 0007).
 
 ## Continuidad del paciente ficticio de laboratorio (ADR 0057)
 
@@ -682,6 +702,16 @@ La aclaracion de reserva y reprogramacion comparte la comparacion de slots:
 una hora valida con cero coincidencias informa no disponibilidad, varias
 coincidencias piden AM/PM y una hora invalida recibe la aclaracion de formato.
 Estas respuestas conservan la lista activa o pausada sin efectos de agenda.
+
+Las consultas `check_availability` de un dia completo propuestas por el LLM
+se validan con `parse_tool_request()` y pasan por el mismo flujo de disponibilidad
+que el detector local. `availability_request_for_date()` recorta hoy a la siguiente
+media hora futura; no relaja la validacion temporal del `ToolExecutor`. La lista
+devuelta y los slots persistidos salen del mismo resultado. Una lectura de otra
+gestion pausada conserva su ruta existente. `PendingAppointmentDate.target_date`
+recuerda la fecha de una consulta fallida durante 10 minutos; un reintento explicito
+la consulta otra vez con el reloj actual, sin reconstruirla del historial del LLM.
+Los snapshots anteriores sin ese campo siguen siendo validos (ADR 0024 y 0029).
 Los saludos y preguntas informativas mueven el snapshot tipado de
 `conversation_workflow.py` a `paused_conversation_workflow` dentro del mismo contexto
 SQLite. La transaccion conserva solo una gestion activa o pausada y el agente recibe

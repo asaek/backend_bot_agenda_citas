@@ -53,6 +53,7 @@ from appointment_availability import (
     parse_time_selection,
     has_explicit_time_period,
     normalize_time_selection_punctuation,
+    is_availability_retry,
 )
 from appointment_reason_evaluation import (
     AppointmentReasonCategory,
@@ -86,6 +87,7 @@ from calendar_domain import (
     Appointment,
     AppointmentNotFound,
     CalendarProviderUnavailable,
+    DomainValidationError,
     PatientScope,
     ToolError,
     ToolName,
@@ -119,10 +121,12 @@ from repositories import (
 )
 from tool_contracts import (
     CancelAppointmentOutput,
+    CheckAvailabilityInput,
     CheckAvailabilityOutput,
     CreateAppointmentOutput,
     ListAppointmentsOutput,
     RescheduleAppointmentOutput,
+    parse_tool_request,
 )
 from tool_executor import ToolExecutor
 from tool_results import public_error_from_exception
@@ -521,7 +525,7 @@ class ConversationService:
                 incoming_message_id=context.incoming_message_id,
                 on_appointment_event=appointment_event_sink,
                 on_mutation_requested=lambda tool_call, patient_scope: (
-                    self._handle_mutation_request(
+                    self._handle_agent_tool_request(
                         context,
                         tool_call,
                         patient_scope,
@@ -804,6 +808,11 @@ class ConversationService:
         if workflow.action is not None:
             return await self._renew_paused_confirmation(context, workflow)
         if workflow.pending_date is not None:
+            if workflow.pending_date.target_date is not None:
+                return await self._refresh_booking_availability(
+                    context, date.fromisoformat(workflow.pending_date.target_date),
+                    name_message_id=workflow.pending_date.name_message_id,
+                )
             self._replace_workflow_context(
                 context.conversation_id,
                 active=PendingConversationWorkflow(
@@ -972,6 +981,11 @@ class ConversationService:
                 is not None
             )
         if workflow.pending_date is not None:
+            if (
+                workflow.pending_date.target_date is not None
+                and is_availability_retry(context.incoming_text)
+            ):
+                return True
             return (
                 date_only_availability_follow_up_request(
                     context.incoming_text,
@@ -1385,6 +1399,37 @@ class ConversationService:
 
         return await self._execute_date_only_availability(context, request)
 
+    async def _resolve_agent_day_availability(
+        self, context: ConversationContext, tool_call: ToolCall,
+    ) -> str | None:
+        """Las consultas de un dia del LLM usan el mismo flujo y reloj del backend."""
+        if self.tool_executor is None or tool_call.name != ToolName.CHECK_AVAILABILITY.value:
+            return None
+        if self._load_paused_workflow(context.conversation_id) is not None:
+            return None
+        try:
+            tool_input = parse_tool_request(
+                ToolRequest(
+                    tool_name=ToolName.CHECK_AVAILABILITY,
+                    arguments=tool_call.arguments, patient_scope=context.patient_scope,
+                ),
+                default_timezone=self.timezone_name,
+            )
+        except DomainValidationError:
+            return None
+        if not isinstance(tool_input, CheckAvailabilityInput):
+            return None
+        start = tool_input.start_at.astimezone(self._timezone)
+        end = tool_input.end_at.astimezone(self._timezone)
+        if start.time() != time.min or end != start + timedelta(days=1):
+            return None
+        request = availability_request_for_date(
+            start.date(), now=self._current_local_time(), timezone=self._timezone,
+        )
+        if request is None:
+            return "Ya no quedan horarios para ese día. " + APPOINTMENT_DATE_REPLY
+        return await self._execute_date_only_availability(context, request)
+
     async def _resolve_pending_appointment_date(
         self,
         context: ConversationContext,
@@ -1405,6 +1450,15 @@ class ConversationService:
             now=now,
             timezone=self._timezone,
         )
+        if (
+            request is None and pending_date.target_date is not None
+            and is_availability_retry(context.incoming_text)
+        ):
+            target = date.fromisoformat(pending_date.target_date)
+            if target < now.date():
+                self._clear_pending_appointment_date(context.conversation_id)
+                return "El día que querías consultar ya pasó. " + APPOINTMENT_DATE_REPLY
+            request = availability_request_for_date(target, now=now, timezone=self._timezone)
         if request is None:
             return APPOINTMENT_DATE_REPLY
         return await self._execute_date_only_availability(context, request)
@@ -1440,9 +1494,12 @@ class ConversationService:
         now = self._current_local_time()
         previous_date = self._load_pending_appointment_date(context.conversation_id)
         name_message_id = previous_date.name_message_id if previous_date is not None else None
+        pending_date = PendingAppointmentDate.start(
+            now, name_message_id=name_message_id,
+            target_date=request.start_at.astimezone(self._timezone).date().isoformat(),
+        )
         self._save_pending_appointment_date(
-            context.conversation_id,
-            PendingAppointmentDate.start(now, name_message_id=name_message_id),
+            context.conversation_id, pending_date,
         )
 
         result = await self.tool_executor.execute(
@@ -1472,14 +1529,8 @@ class ConversationService:
                 )
             elif name_message_id is not None:
                 self._save_pending_appointment_date(
-                    context.conversation_id,
-                    PendingAppointmentDate.start(now, name_message_id=name_message_id),
+                    context.conversation_id, pending_date,
                 )
-        else:
-            self._save_pending_appointment_date(
-                context.conversation_id,
-                PendingAppointmentDate.start(self._current_local_time(), name_message_id=name_message_id),
-            )
         return format_availability_reply(
             result,
             request,
@@ -1536,6 +1587,20 @@ class ConversationService:
         )
         self._clear_pending_appointment_availability(context.conversation_id)
         return reply
+
+    async def _handle_agent_tool_request(
+        self,
+        context: ConversationContext,
+        tool_call: ToolCall,
+        patient_scope: PatientScope,
+        appointment_event_sink: AppointmentNotificationEventSink | None = None,
+    ) -> str | None:
+        availability_reply = await self._resolve_agent_day_availability(context, tool_call)
+        if availability_reply is not None:
+            return availability_reply
+        return await self._handle_mutation_request(
+            context, tool_call, patient_scope, appointment_event_sink,
+        )
 
     async def _handle_mutation_request(
         self,

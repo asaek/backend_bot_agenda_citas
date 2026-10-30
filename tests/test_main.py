@@ -751,6 +751,58 @@ class WebhookTests(unittest.TestCase):
             ("user", "Hola"), ("assistant", "Primera respuesta"), ("user", "¿Qué servicios ofrecen?"),
         ])
 
+    def test_rapid_greeting_booking_and_slot_selection_keep_the_availability(self) -> None:
+        self.set_fixed_calendar_runtime(datetime(2026, 10, 28, 10, 46, tzinfo=timezone.utc))
+
+        async def exercise():
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class BlockingGreeting(FakeWhatsAppClient):
+                async def send_text(self, to, body):
+                    if body == "¡Hola! ¿En qué puedo ayudarte?":
+                        started.set()
+                        await release.wait()
+                    return await super().send_text(to, body)
+
+            fake_client = BlockingGreeting()
+            llm = FakeLLMProvider(reply="¡Hola! ¿En qué puedo ayudarte?")
+            with self.configured_runtime(fake_client, llm):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://test",
+                ) as client:
+                    greeting = asyncio.create_task(client.post(
+                        "/webhook/whatsapp", json=self.text_payload(),
+                    ))
+                    await asyncio.wait_for(started.wait(), 2)
+                    booking = asyncio.create_task(client.post(
+                        "/webhook/whatsapp", json=self.text_payload(
+                            message_id="wamid.rapid-booking", text="QUisiera una cita par ahoy",
+                        ),
+                    ))
+                    await asyncio.sleep(0)
+                    selection = asyncio.create_task(client.post(
+                        "/webhook/whatsapp", json=self.text_payload(
+                            message_id="wamid.rapid-selection", text="a las 11 am esta bien",
+                        ),
+                    ))
+                    await asyncio.sleep(0)
+                    self.assertEqual(llm.call_count, 1)
+                    release.set()
+                    responses = await asyncio.wait_for(
+                        asyncio.gather(greeting, booking, selection), 3,
+                    )
+            self.assertEqual([response.status_code for response in responses], [200, 200, 200])
+            self.assertEqual(llm.call_count, 1)
+            bodies = [body for _, body in fake_client.sent_messages]
+            self.assertEqual(len(bodies), 3)
+            self.assertIn("Horarios disponibles para el 28/10/2026", bodies[1])
+            self.assertIn("- 11:00 AM", bodies[1])
+            self.assertIn("¿cuál es tu nombre completo?", bodies[2])
+            self.assertEqual(app.state.calendar_provider.appointments, ())
+
+        asyncio.run(exercise())
+
     def test_legacy_failed_reply_is_reused_without_an_outbox_record(self) -> None:
         service = ConversationService(SQLiteDatabase(self.database_path))
         context = service.receive_message(IncomingTextMessage(

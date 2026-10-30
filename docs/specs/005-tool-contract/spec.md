@@ -114,6 +114,21 @@ argumentos, reglas de negocio y proveedor se convierten mediante la frontera de
 errores publicos. El request no puede elegir paciente, conversacion ni calendario;
 el calendario lo resuelve la configuracion del proveedor.
 
+### Disponibilidad restante del dia actual
+
+Para `check_availability`, tras parsear y validar argumentos, un rango con inicio
+en el dia actual de la zona laboral y `start_at <= now < end_at` se recorta a la
+siguiente media hora futura. Se conserva el final solicitado, aunque sea 23:30,
+23:59:59 o la medianoche siguiente. Si el inicio efectivo alcanza o supera el
+final, se devuelve exito con cero slots sin consultar el proveedor.
+
+La regla es compartida por chat y voz y no altera el request auditado. Un rango
+completamente pasado o iniciado en un dia anterior sigue siendo invalido. Las
+solicitudes futuras no se desplazan y crear/reprogramar mantienen el rechazo
+estricto de inicios pasados. El rango normalizado sigue sujeto a horario laboral
+y disponibilidad del proveedor. Los limites de rango del llamador se comprueban
+antes del recorte; en voz permanecen los siete dias maximos.
+
 ## Reglas de dominio
 
 1. Las citas y los espacios disponibles duran exactamente 30 minutos.
@@ -168,7 +183,13 @@ el calendario lo resuelve la configuracion del proveedor.
 25. El ejecutor conserva el `PatientScope` del request y no permite seleccionar
     paciente, conversacion ni calendario desde los argumentos.
 26. `list_appointments` devuelve solo citas del paciente actual y aplica el rango
-    opcional por superposicion, incluso cuando el rango pertenece al historial.
+     opcional por superposicion, incluso cuando el rango pertenece al historial.
+27. El 28/10/2026 a las 11:36 de America/Mexico_City, una consulta desde medianoche
+    hasta las 23:30, 23:59:59 o medianoche siguiente ofrece solo slots desde las
+    12 PM. Funciona con zona explicita, UTC y zona omitida. Conserva el final
+    solicitado y no modifica la entrada original.
+28. Un rango de hoy sin otro inicio futuro de media hora devuelve cero slots;
+    rangos pasados y reservas pasadas siguen rechazados antes del proveedor.
 
 ## Cierre del incremento
 

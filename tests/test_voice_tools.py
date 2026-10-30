@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -191,6 +192,37 @@ class VoiceToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         result = await self.tools.execute("range", "check_availability", {"start_at": self.now.isoformat(), "end_at": (self.now + timedelta(days=100)).isoformat()}, 1)
         self.assertFalse(result["ok"])
+
+    async def test_captured_today_availability_queries_return_future_slots(self):
+        zone = ZoneInfo("America/Mexico_City")
+        now = datetime(2026, 10, 28, 11, 36, tzinfo=zone)
+        self.tools.executor = ToolExecutor(
+            provider=self.provider,
+            business_hours=BusinessHours(
+                "America/Mexico_City",
+                {day: (TimeWindow(time(9), time(17)),) for day in range(5)},
+            ),
+            default_timezone="America/Mexico_City", now=now,
+        )
+        captured_ranges = (
+            ("2026-10-28T00:00:00-06:00", "2026-10-28T23:30:00-06:00"),
+            ("2026-10-28T00:00:00-06:00", "2026-10-28T23:59:59-06:00"),
+            ("2026-10-28T00:00:00-06:00", "2026-10-29T00:00:00-06:00"),
+            ("2026-10-28T00:00:00", "2026-10-28T23:59:59"),
+        )
+        for index, (start, end) in enumerate(captured_ranges):
+            with self.subTest(end=end):
+                result = await self.tools.execute(
+                    f"captured-today-{index}", "check_availability",
+                    {"start_at": start, "end_at": end}, index + 1,
+                )
+                self.assertTrue(result["ok"], result)
+                slots = result["data"]["slots"]
+                self.assertTrue(slots)
+                self.assertEqual(slots[0]["start_at"], "2026-10-28T12:00:00-06:00")
+                self.assertTrue(all(datetime.fromisoformat(slot["start_at"]) > now for slot in slots))
+                self.assertIsNone(self.tools.pending)
+        self.assertEqual(self.provider.appointments, ())
 
     async def test_reject_change_of_topic_stale_turn_and_close_invalidate_authorization(self):
         proposal = await self.propose()

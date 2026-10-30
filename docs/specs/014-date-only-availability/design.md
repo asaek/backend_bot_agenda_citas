@@ -96,3 +96,25 @@ El `SYSTEM_PROMPT` y el esquema de `check_availability` mantienen la misma regla
 las fechas que no entren en el detector determinista. Estas instrucciones son una
 defensa adicional; no sustituyen la validacion backend para las listas generadas por el
 detector.
+
+## Recuperacion de consultas del dia (28/10/2026)
+
+`_handle_agent_tool_request()` conduce una consulta de dia completo al mismo
+`_execute_date_only_availability()` usado por el detector local. Primero usa
+`parse_tool_request()` para rechazar argumentos desconocidos o fechas invalidas;
+compara ambas medianoches en la zona de agenda y construye el rango mediante
+`availability_request_for_date()`. El ejecutor sigue validando fechas y horario
+laboral. Consultas parciales, multidiarias y lecturas con otra gestion pausada
+permanecen en el ciclo normal del agente.
+
+El estado `PendingAppointmentDate` agrega `target_date` opcional, compatible con
+los snapshots anteriores. Se guarda antes de consultar y se conserva si falla;
+al obtener slots se reemplaza por `PendingAppointmentAvailability`. El router
+reconoce un reintento explicito como respuesta esperada solo si hay fecha guardada.
+El reintento usa el reloj actual para volver a construir el rango, manteniendo el
+dia objetivo y el TTL de 10 minutos. No interpreta el historial como estado.
+
+La normalizacion local reconoce peticiones corteses y el separador de `par ahoy`,
+sin cambiar la deteccion de una hora exacta. El bloqueo existente `patient_turn`
+ordena los mensajes de un mismo paciente durante generacion y entrega; una prueba
+HTTP mantiene el saludo bloqueado mientras recibe solicitud y seleccion.

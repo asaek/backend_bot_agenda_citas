@@ -21,6 +21,13 @@ verificada.
 La primera version sera un MVP tecnico para aprendizaje y experimentacion. No
 sera utilizada todavia por pacientes ni por un consultorio real.
 
+## Canales del asistente
+
+El vocabulario del proyecto distingue **canal de voz** y **canal de texto**,
+definidos en [CONTEXT.md](../CONTEXT.md). La cobertura obligatoria de ambos para
+los cambios de logica conversacional y sus criterios de completitud se rigen por
+[Logica conversacional en ambos canales](./conventions.md#logica-conversacional-en-ambos-canales).
+
 ## Usuarios del MVP tecnico
 
 El desarrollador administrara las pruebas y utilizara varias cuentas de
@@ -466,6 +473,20 @@ para continuar sin anunciar prematuramente el motivo como siguiente paso.
 ofrecidas. Si la hora no coincide con la lista, el backend explica que esta ocupada
 o no disponible y conserva la solicitud; una coincidencia AM/PM ambigua pide aclaracion.
 Una solicitud con hora exacta continua hacia la recoleccion del motivo.
+
+Las consultas del LLM para un dia completo usan el mismo flujo backend que las
+peticiones locales. Para hoy se empieza en la siguiente media hora futura, sin
+enviar medianoche pasada al ejecutor. Se reconocen `quisiera una cita` y el
+separador accidental `par ahoy`. Una consulta fallida conserva su fecha durante
+10 minutos para atender `Vuelve a intentarlo`, tambien tras reiniciar. Los mensajes
+consecutivos del mismo paciente siguen procesandose y entregandose en orden.
+
+La consulta restante de hoy tambien se normaliza en el ejecutor compartido con
+voz: acepta rangos del dia actual que contienen el instante presente, conserva
+el final solicitado y ofrece desde la siguiente media hora futura. Las consultas
+de voz que terminan a las 23:30 o 23:59:59 ya no dependen de coincidir con el
+detector de dia completo del chat. La captura de nombre y motivo comienza despues
+de consultar las opciones cuando el paciente todavia no ha elegido una hora.
 
 ### Corte verificado: diagnostico seguro durante depuracion
 

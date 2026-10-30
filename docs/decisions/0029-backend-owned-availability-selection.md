@@ -23,6 +23,12 @@ la fecha, los slots ofrecidos y una expiracion de 10 minutos en
 zona horaria de la agenda. Una hora valida creara directamente el estado pendiente de
 `create_appointment` y usara las preguntas fijas de nombre y motivo sin invocar al LLM.
 
+Desde la correccion del 28/10/2026, esta misma persistencia y presentacion se
+aplica a consultas de un dia completo propuestas por el LLM, una vez validado
+su contrato y normalizado el rango por el backend (ADR 0024). El modelo puede
+interpretar una fecha no reconocida localmente; no decide los slots ofrecidos
+ni redacta una lista distinta de la que queda guardada.
+
 Una hora no ofrecida, un mensaje sin hora o un estado vencido no ejecutara la agenda.
 El backend conservara la interceptacion de `create_appointment` para solicitudes con
 hora exacta o tool calls que lleguen desde el agente, y las instrucciones del LLM seran

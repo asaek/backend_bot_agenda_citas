@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime, time, timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from calendar_domain import (
     Appointment,
@@ -196,6 +198,76 @@ class ToolExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(created.ok)
         self.assertEqual(len(primary_provider.appointments), 1)
         self.assertEqual(availability_provider.appointments, ())
+
+    async def test_today_query_is_clipped_in_business_timezone_and_keeps_its_end(self) -> None:
+        provider = FakeCalendarProvider()
+        zone = ZoneInfo("America/Mexico_City")
+        now = datetime(2026, 10, 28, 11, 36, tzinfo=zone)
+        executor = ToolExecutor(
+            provider=provider,
+            business_hours=BusinessHours("America/Mexico_City", {2: (TimeWindow(time(9), time(17)),)}),
+            default_timezone="America/Mexico_City", now=now,
+        )
+        request = self.request(ToolName.CHECK_AVAILABILITY, {
+            "start_at": "2026-10-28T06:00:00Z", "end_at": "2026-10-28T19:00:00Z",
+        })
+        with patch.object(provider, "check_availability", wraps=provider.check_availability) as check:
+            result = await executor.execute(request)
+
+        self.assertTrue(result.ok, result)
+        check.assert_awaited_once_with(
+            start_at=datetime(2026, 10, 28, 12, tzinfo=zone),
+            end_at=datetime(2026, 10, 28, 13, tzinfo=zone),
+        )
+        self.assertEqual(len(result.data.slots), 2)
+        self.assertEqual(request.arguments["start_at"], "2026-10-28T06:00:00Z")
+
+    async def test_current_half_hour_is_not_offered_at_the_exact_boundary(self) -> None:
+        provider = FakeCalendarProvider()
+        executor = self.executor(provider)
+        executor._now = self.start
+        result = await executor.execute(self.request(ToolName.CHECK_AVAILABILITY, {
+            "start_at": "2026-09-21T00:00:00Z", "end_at": "2026-09-21T11:00:00Z",
+        }))
+
+        self.assertTrue(result.ok, result)
+        self.assertEqual([slot.start_at for slot in result.data.slots], [self.start + timedelta(minutes=30)])
+
+    async def test_today_range_without_a_future_half_hour_returns_no_slots_without_provider(self) -> None:
+        provider = FakeCalendarProvider()
+        executor = self.executor(provider)
+        for now, end_at in (
+            (self.start.replace(minute=46), "2026-09-21T10:59:59Z"),
+            (self.start.replace(hour=23, minute=45), "2026-09-22T00:00:00Z"),
+        ):
+            with self.subTest(now=now):
+                executor._now = now
+                with patch.object(provider, "check_availability", wraps=provider.check_availability) as check:
+                    result = await executor.execute(self.request(ToolName.CHECK_AVAILABILITY, {
+                        "start_at": "2026-09-21T00:00:00Z", "end_at": end_at,
+                    }))
+                self.assertTrue(result.ok, result)
+                self.assertEqual(result.data.slots, ())
+                check.assert_not_awaited()
+
+    async def test_past_availability_ranges_and_past_bookings_are_still_rejected(self) -> None:
+        provider = FakeCalendarProvider()
+        executor = self.executor(provider)
+        executor._now = self.start
+        requests = (
+            self.request(ToolName.CHECK_AVAILABILITY, {"start_at": "2026-09-20T00:00:00Z", "end_at": "2026-09-21T00:00:00Z"}),
+            self.request(ToolName.CHECK_AVAILABILITY, {"start_at": "2026-09-21T08:00:00Z", "end_at": "2026-09-21T09:00:00Z"}),
+            self.request(ToolName.CHECK_AVAILABILITY, {"start_at": "2026-09-20T00:00:00Z", "end_at": "2026-09-22T00:00:00Z"}),
+            self.request(ToolName.CREATE_APPOINTMENT, {"start_at": "2026-09-21T09:00:00Z", "reason": "Revision general"}),
+        )
+        with patch.object(provider, "check_availability", wraps=provider.check_availability) as check:
+            for request in requests:
+                with self.subTest(request=request):
+                    result = await executor.execute(request)
+                    self.assertFalse(result.ok)
+                    self.assertEqual(result.error.code, ToolErrorCode.INVALID_ARGUMENTS)
+            check.assert_not_awaited()
+        self.assertEqual(provider.appointments, ())
 
     async def test_executes_all_read_and_write_operations_with_patient_scope(self) -> None:
         provider = FakeCalendarProvider()

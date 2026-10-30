@@ -315,6 +315,17 @@ operativas de C4. Evidencia: `2026-10-22-shared-doctor-notifications.md`.
 
 Salida: CA-10 a CA-14 verificados con identidad operativa y regresion de chat/voz.
 
+## Correccion de laboratorio - Disponibilidad de hoy por voz (28/10/2026)
+
+- [x] Leer la auditoria de la llamada y fijar las cuatro variantes rechazadas.
+- [x] Reproducirlas con `VoiceTools`, SQLite temporal y reloj fijo antes del cambio.
+- [x] Compartir el recorte temporal de consultas en `ToolExecutor` y reforzar la
+      consulta previa a los datos de reserva en las instrucciones de voz.
+- [x] Verificar la regresion, los limites y la consulta Google de solo lectura.
+- [x] Reiniciar el laboratorio sin sesiones activas y comprobar acceso Mac/Pi.
+
+Evidencia: `docs/verification/2026-10-28-voice-today-availability.md`.
+
 ## C5 - Conexion real con Meta (requiere numero)
 
 - [ ] Obtener y registrar linea del consultorio, verificar elegibilidad y habilitar

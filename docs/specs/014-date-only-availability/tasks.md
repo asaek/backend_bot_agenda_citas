@@ -69,3 +69,16 @@ Evidencia: `docs/verification/2026-10-14-start-only-availability-lists.md`.
       incluso al reintentar el motivo de la segunda reserva.
 - [x] Completar revision, suite de 353 pruebas y despliegue verificado en Raspberry Pi;
       evidencia en `docs/verification/2026-10-10-booking-slot-selection.md`.
+
+## Correccion - Consulta de hoy y mensajes consecutivos (28/10/2026)
+
+- [x] Revisar tiempos del incidente y reproducir el rechazo de medianoche pasada.
+- [x] Fijar una regresion determinista que falle con la respuesta del incidente.
+- [x] Unificar las consultas de dia completo del LLM con el flujo backend existente.
+- [x] Reconocer `quisiera una cita` y el separador accidental de `par ahoy`.
+- [x] Guardar la fecha fallida y consultar de nuevo ante `Vuelve a intentarlo`.
+- [x] Verificar reinicios, fallos repetidos, vencimiento y rechazo de argumentos invalidos.
+- [x] Verificar por HTTP saludo, solicitud y seleccion enviados consecutivamente.
+- [x] Ejecutar la suite en la Pi y desplegar con verificaciones de runtime.
+
+Evidencia: `docs/verification/2026-10-28-availability-recovery.md`.

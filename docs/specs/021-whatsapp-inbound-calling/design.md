@@ -2,6 +2,14 @@
 
 ## Estado
 
+La correccion CA-27 del 28/10/2026 conduce las lecturas de disponibilidad de hoy
+por el recorte compartido de `ToolExecutor`, despues de validar argumentos y el
+limite de siete dias de `VoiceTools`. El request original y el resultado efectivo
+siguen auditados en `voice_tool_calls`. Se conservan zonas, final de rango,
+deduplicacion y autorizacion de mutaciones. Las instrucciones de `VoiceSession`,
+compartidas tambien con texto de laboratorio, piden consultar los horarios del
+dia antes de capturar datos de reserva cuando aun no se ha elegido una hora.
+
 El alcance de laboratorio A-E fue aprobado e implementado el 18 de octubre de
 2026. El 19 de octubre se implemento tambien voz nativa OpenAI Realtime y
 herramientas de laboratorio (ADR 0056). Calling y continuidad operativa siguen propuestos.

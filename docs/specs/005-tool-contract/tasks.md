@@ -90,3 +90,14 @@ pertenece a incrementos posteriores.
 
 - [ ] Implementar el adaptador de Google Calendar.
 - [ ] Verificar horario laboral, festivos, ausencias y bloqueos.
+
+## Correccion del 28/10/2026 - Consultas de hoy desde voz
+
+- [x] Reproducir las cuatro solicitudes reales de disponibilidad rechazadas.
+- [x] Recortar rangos del dia actual en el ejecutor compartido, despues de parsear.
+- [x] Conservar el final, el request auditado y las validaciones de mutaciones.
+- [x] Devolver cero slots si no queda otro inicio futuro dentro del rango.
+- [x] Verificar zonas, limites de media hora, dias pasados y la regresion de voz.
+- [x] Ejecutar suite y consulta Google de solo lectura en la Raspberry Pi.
+
+Evidencia: `docs/verification/2026-10-28-voice-today-availability.md`.

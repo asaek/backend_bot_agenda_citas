@@ -131,6 +131,15 @@ elige de su configuracion y un proveedor real hara lo mismo. Cualquier
 `Exception` se reduce con `tool_result_from_exception()`, por lo que el llamador
 recibe un `ToolResult` tanto en exito como en fallo.
 
+`_future_availability_input()` prepara exclusivamente las lecturas de
+`CheckAvailabilityInput` del dia actual que contienen el instante presente.
+Usa la fecha local de `BusinessHours.timezone`, calcula el siguiente inicio
+`:00`/`:30` estrictamente futuro y devuelve una copia inmutable con el nuevo
+inicio. Conserva `end_at` y el request original para auditoria. Si ya no queda
+un inicio dentro del rango, devuelve una salida vacia antes de llamar al proveedor.
+Los demas rangos e inputs continúan a la validacion existente. La politica de
+autorizacion de voz y sus limites se aplica antes de entrar al ejecutor.
+
 ## CalendarProvider
 
 El protocolo asincrono declara:

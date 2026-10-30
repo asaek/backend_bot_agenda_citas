@@ -1,7 +1,8 @@
 """Frontera interna para ejecutar solicitudes de herramientas de agenda."""
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 from calendar_domain import (
     Appointment,
@@ -62,6 +63,10 @@ class ToolExecutor:
                 request,
                 default_timezone=self.default_timezone,
             )
+            if isinstance(tool_input, CheckAvailabilityInput):
+                tool_input = self._future_availability_input(tool_input)
+                if tool_input is None:
+                    return ToolResult.success(CheckAvailabilityOutput(slots=()))
             self._validate(tool_input, ())
             if self._requires_snapshot(tool_input):
                 existing_appointments = await self._load_snapshot(tool_input)
@@ -70,6 +75,27 @@ class ToolExecutor:
             return ToolResult.success(output)
         except Exception as error:
             return tool_result_from_exception(error)
+
+    def _future_availability_input(
+        self, tool_input: CheckAvailabilityInput,
+    ) -> CheckAvailabilityInput | None:
+        """Recorta consultas de hoy al futuro; no cambia citas ni dias pasados."""
+        now = self._current_time()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise DomainValidationError("now debe incluir una zona horaria")
+        timezone = self.business_hours.timezone
+        local_now = now.astimezone(timezone)
+        if (
+            tool_input.start_at.astimezone(timezone).date() != local_now.date()
+            or not tool_input.start_at <= now < tool_input.end_at
+        ):
+            return tool_input
+        start_at = local_now.replace(second=0, microsecond=0) + timedelta(
+            minutes=30 - local_now.minute % 30,
+        )
+        if start_at >= tool_input.end_at:
+            return None
+        return replace(tool_input, start_at=start_at)
 
     async def find_appointment(
         self,
